@@ -19,6 +19,7 @@ urlpatterns = [
         admintools_views.waitlist,
         name="admintools_waitlist",
     ),
+    path("broadcast/", admintools_views.broadcast, name="admintools_broadcast"),
     path(
         "waitlist/<int:enrollment_id>/offer/",
         admintools_views.waitlist_offer,

@@ -1,4 +1,6 @@
+from django import forms
 from django.contrib import messages
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
@@ -7,6 +9,8 @@ from apps.catalog.models import ActivityClass
 from apps.enrollments import services as enrollment_services
 from apps.enrollments.models import Enrollment
 from apps.enrollments.services import EnrollmentError
+from apps.notifications.models import Broadcast
+from apps.notifications.services import queue_broadcast
 
 
 @admin_required
@@ -97,6 +101,52 @@ def waitlist(request, class_id):
             "seats_free": cls.places_free,
         },
     )
+
+
+class AdminBroadcastForm(forms.Form):
+    scope = forms.ChoiceField(
+        choices=Broadcast.Scope.choices,
+        initial=Broadcast.Scope.ALL_CLASSES,
+        widget=forms.RadioSelect,
+        label="Audience",
+    )
+    classes = forms.ModelMultipleChoiceField(
+        queryset=ActivityClass.objects.filter(term__is_active=True).order_by("title"),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+        label="Classes (when audience is 'Selected classes')",
+    )
+    subject = forms.CharField(max_length=200)
+    body = forms.CharField(widget=forms.Textarea, label="Message")
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("scope") == Broadcast.Scope.SELECTED_CLASSES and not cleaned.get(
+            "classes"
+        ):
+            self.add_error("classes", "Pick at least one class.")
+        return cleaned
+
+
+@admin_required
+def broadcast(request):
+    form = AdminBroadcastForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            b = Broadcast.objects.create(
+                sender=request.user,
+                scope=form.cleaned_data["scope"],
+                subject=form.cleaned_data["subject"],
+                body=form.cleaned_data["body"],
+            )
+            if b.scope == Broadcast.Scope.SELECTED_CLASSES:
+                b.classes.set(form.cleaned_data["classes"])
+            count = queue_broadcast(b)
+        messages.success(
+            request, f"Announcement queued for {count} famil{'y' if count == 1 else 'ies'}."
+        )
+        return redirect("admintools_requests")
+    return render(request, "dashboards/admintools/broadcast.html", {"form": form})
 
 
 @admin_required

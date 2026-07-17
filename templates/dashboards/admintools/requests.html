@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Enrollment requests{% endblock %}
 {% block content %}
-<h1>Enrollment requests</h1>
+<div class="panel-title">
+  <h1>Enrollment requests</h1>
+  <div class="actions">
+    <a class="btn btn-small" href="{% url 'admintools_broadcast' %}">Send announcement</a>
+    <a class="btn btn-secondary btn-small" href="{% url 'admin:index' %}">Django admin</a>
+  </div>
+</div>
 
 {% if pending %}
 <table class="list">

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Send announcement{% endblock %}
+{% block content %}
+<h1>Send an announcement</h1>
+<div class="panel">
+  <p class="muted small">Delivered by email (and WhatsApp where parents opted in) to every guardian
+     of children with an active registration in the chosen classes — including waiting lists.</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Send announcement</button>
+    <a class="btn btn-secondary" href="{% url 'admintools_requests' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}
