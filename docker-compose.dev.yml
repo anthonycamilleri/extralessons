@@ -1,0 +1,31 @@
+# Development override: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`
+# Runs Django's autoreloading dev server with the source bind-mounted,
+# console email + stub WhatsApp, and no Caddy. App: http://localhost:8000
+services:
+  web:
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DEBUGPY: ${DEBUGPY:-0}
+    volumes:
+      - .:/app
+      - media:/app/media
+    ports:
+      - "8000:8000"
+      - "5678:5678"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             if [ \"$$DEBUGPY\" = \"1\" ]; then
+               python -m debugpy --listen 0.0.0.0:5678 manage.py runserver 0.0.0.0:8000;
+             else
+               python manage.py runserver 0.0.0.0:8000;
+             fi"
+
+  notifier:
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+    volumes:
+      - .:/app
+
+  caddy:
+    deploy:
+      replicas: 0

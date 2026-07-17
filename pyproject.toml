@@ -1,0 +1,25 @@
+[project]
+name = "extralessons"
+version = "0.1.0"
+description = "Booking system for school extra-curricular activities"
+requires-python = ">=3.11"
+dependencies = [
+    "django~=5.2",
+    "psycopg[binary]~=3.2",
+    "gunicorn~=23.0",
+    "whitenoise~=6.8",
+    "Pillow~=11.0",
+    "django-environ~=0.12",
+    "requests~=2.32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest-django~=4.9",
+    "factory-boy~=3.3",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py"]
+addopts = "--tb=short"
