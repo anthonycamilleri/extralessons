@@ -117,8 +117,5 @@ NOTIFIER_BATCH_SIZE = env.int("NOTIFIER_BATCH_SIZE", default=20)
 NOTIFIER_MAX_ATTEMPTS = env.int("NOTIFIER_MAX_ATTEMPTS", default=5)
 NOTIFIER_IDLE_SLEEP_SECONDS = env.int("NOTIFIER_IDLE_SLEEP_SECONDS", default=5)
 
-# Fallback when no SiteConfig row exists yet; normally managed in the admin.
-OFFER_TTL_HOURS_DEFAULT = env.int("OFFER_TTL_HOURS", default=48)
-
 # Absolute base URL used in notification links (no trailing slash).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")

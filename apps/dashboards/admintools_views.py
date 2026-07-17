@@ -1,7 +1,8 @@
 from django import forms
 from django.contrib import messages
-from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.formats import date_format
 from django.views.decorators.http import require_POST
 
 from apps.accounts.permissions import admin_required
@@ -9,8 +10,8 @@ from apps.catalog.models import ActivityClass
 from apps.enrollments import services as enrollment_services
 from apps.enrollments.models import Enrollment
 from apps.enrollments.services import EnrollmentError
+from apps.notifications import services as notification_services
 from apps.notifications.models import Broadcast
-from apps.notifications.services import queue_broadcast
 
 
 @admin_required
@@ -22,12 +23,21 @@ def requests_queue(request):
         .prefetch_related("child__guardians")
         .order_by("created_at")
     )
-    classes = (
+    classes = list(
         ActivityClass.objects.filter(term__is_active=True)
         .with_counts()
         .select_related("provider", "term")
         .order_by("title")
     )
+    # Availability per pending row from the already-annotated classes list —
+    # avoids a COUNT query per pending request in the template.
+    places_free = {cls.pk: cls.places_free for cls in classes}
+    pending = list(pending)
+    for enrollment in pending:
+        enrollment.places_free = places_free.get(
+            enrollment.activity_class_id,
+            enrollment.activity_class.places_free_now(),
+        )
     return render(
         request,
         "dashboards/admintools/requests.html",
@@ -81,10 +91,9 @@ def waitlist(request, class_id):
         pk=class_id,
     )
     waitlisted = (
-        cls.enrollments.filter(status=Enrollment.Status.WAITLISTED)
+        cls.enrollments.waitlist_fifo()
         .select_related("child")
         .prefetch_related("child__guardians")
-        .order_by("waitlisted_at", "id")
     )
     offered = (
         cls.enrollments.filter(status=Enrollment.Status.OFFERED)
@@ -132,18 +141,16 @@ class AdminBroadcastForm(forms.Form):
 def broadcast(request):
     form = AdminBroadcastForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        with transaction.atomic():
-            b = Broadcast.objects.create(
-                sender=request.user,
-                scope=form.cleaned_data["scope"],
-                subject=form.cleaned_data["subject"],
-                body=form.cleaned_data["body"],
-            )
-            if b.scope == Broadcast.Scope.SELECTED_CLASSES:
-                b.classes.set(form.cleaned_data["classes"])
-            count = queue_broadcast(b)
+        _, count = notification_services.create_broadcast(
+            sender=request.user,
+            scope=form.cleaned_data["scope"],
+            subject=form.cleaned_data["subject"],
+            body=form.cleaned_data["body"],
+            classes=form.cleaned_data["classes"],
+        )
         messages.success(
-            request, f"Announcement queued for {count} famil{'y' if count == 1 else 'ies'}."
+            request,
+            f"Announcement queued for {notification_services.family_count_phrase(count)}.",
         )
         return redirect("admintools_requests")
     return render(request, "dashboards/admintools/broadcast.html", {"form": form})
@@ -160,9 +167,12 @@ def waitlist_offer(request, enrollment_id):
     except EnrollmentError as exc:
         messages.error(request, str(exc))
     else:
+        deadline = date_format(
+            timezone.localtime(enrollment.offer_expires_at), "l j F, H:i"
+        )
         messages.success(
             request,
             f"Seat offered to {enrollment.child.full_name}'s family — they have "
-            f"until {enrollment.offer_expires_at:%A %d %B %H:%M} to confirm.",
+            f"until {deadline} to confirm.",
         )
     return redirect("admintools_waitlist", class_id=enrollment.activity_class_id)

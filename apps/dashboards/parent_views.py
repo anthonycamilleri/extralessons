@@ -15,7 +15,7 @@ from apps.notifications import services as notification_services
 
 
 def _own_children(user):
-    return Child.objects.filter(guardians=user).prefetch_related("guardians")
+    return Child.objects.for_guardian(user).prefetch_related("guardians")
 
 
 @parent_required
@@ -99,53 +99,58 @@ def enroll(request, class_id):
     return redirect("parent_home")
 
 
+def _enrollment_action(request, enrollment_id, action, success_message, level=messages.success):
+    """Shared shape of every parent enrollment action: scope-check the
+    enrollment, run one service call, flash the outcome, return home."""
+    enrollment = get_object_or_404(_own_enrollments(request.user), pk=enrollment_id)
+    try:
+        action(enrollment)
+    except EnrollmentError as exc:
+        messages.error(request, str(exc))
+    else:
+        level(request, success_message(enrollment))
+    return redirect("parent_home")
+
+
 @parent_required
 @require_POST
 def enrollment_cancel(request, enrollment_id):
-    enrollment = get_object_or_404(_own_enrollments(request.user), pk=enrollment_id)
-    try:
-        enrollment_services.cancel(
-            enrollment, Enrollment.CancelReason.PARENT, actor=request.user
-        )
-    except EnrollmentError as exc:
-        messages.error(request, str(exc))
-        return redirect("parent_home")
-    messages.success(
+    return _enrollment_action(
         request,
-        f"{enrollment.child.first_name}'s registration for "
-        f"{enrollment.activity_class.title} has been cancelled.",
+        enrollment_id,
+        lambda e: enrollment_services.cancel(
+            e, Enrollment.CancelReason.PARENT, actor=request.user
+        ),
+        lambda e: (
+            f"{e.child.first_name}'s registration for "
+            f"{e.activity_class.title} has been cancelled."
+        ),
     )
-    return redirect("parent_home")
 
 
 @parent_required
 @require_POST
 def offer_confirm(request, enrollment_id):
-    enrollment = get_object_or_404(_own_enrollments(request.user), pk=enrollment_id)
-    try:
-        enrollment_services.confirm_offer(enrollment)
-    except EnrollmentError as exc:
-        messages.error(request, str(exc))
-        return redirect("parent_home")
-    messages.success(
+    return _enrollment_action(
         request,
-        f"Confirmed — {enrollment.child.first_name} is enrolled in "
-        f"{enrollment.activity_class.title}!",
+        enrollment_id,
+        enrollment_services.confirm_offer,
+        lambda e: (
+            f"Confirmed — {e.child.first_name} is enrolled in {e.activity_class.title}!"
+        ),
     )
-    return redirect("parent_home")
 
 
 @parent_required
 @require_POST
 def offer_decline(request, enrollment_id):
-    enrollment = get_object_or_404(_own_enrollments(request.user), pk=enrollment_id)
-    try:
-        enrollment_services.decline_offer(enrollment)
-    except EnrollmentError as exc:
-        messages.error(request, str(exc))
-        return redirect("parent_home")
-    messages.info(request, "Offer declined — the seat will go to another family.")
-    return redirect("parent_home")
+    return _enrollment_action(
+        request,
+        enrollment_id,
+        enrollment_services.decline_offer,
+        lambda e: "Offer declined — the seat will go to another family.",
+        level=messages.info,
+    )
 
 
 @parent_required

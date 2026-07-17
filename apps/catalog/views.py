@@ -23,7 +23,7 @@ def class_detail(request, term_id, slug):
     )
     children = []
     if request.user.is_authenticated and request.user.role == User.Role.PARENT:
-        children = Child.objects.filter(guardians=request.user)
+        children = Child.objects.for_guardian(request.user)
     return render(
         request,
         "catalog/class_detail.html",

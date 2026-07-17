@@ -19,6 +19,15 @@ dev = [
     "factory-boy~=3.3",
 ]
 
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+# This pyproject is used for dependency management only — the Django project
+# is run from the source tree, never imported as an installed package.
+[tool.setuptools]
+packages = []
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"
 python_files = ["test_*.py"]

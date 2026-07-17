@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: extralessons
+Version: 0.1.0
+Summary: Booking system for school extra-curricular activities
+Requires-Python: >=3.11
+Requires-Dist: django~=5.2
+Requires-Dist: psycopg[binary]~=3.2
+Requires-Dist: gunicorn~=23.0
+Requires-Dist: whitenoise~=6.8
+Requires-Dist: Pillow~=11.0
+Requires-Dist: django-environ~=0.12
+Requires-Dist: requests~=2.32
+Provides-Extra: dev
+Requires-Dist: pytest-django~=4.9; extra == "dev"
+Requires-Dist: factory-boy~=3.3; extra == "dev"

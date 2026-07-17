@@ -1,0 +1,11 @@
+# Never bake secrets, VCS history, or local state into the image.
+.env
+.git
+.venv
+media/
+staticfiles/
+__pycache__/
+*.pyc
+.pytest_cache/
+.vscode/
+db.sqlite3

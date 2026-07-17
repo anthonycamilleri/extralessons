@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+extralessons.egg-info/PKG-INFO
+extralessons.egg-info/SOURCES.txt
+extralessons.egg-info/dependency_links.txt
+extralessons.egg-info/requires.txt
+extralessons.egg-info/top_level.txt
+tests/test_admin_tools.py
+tests/test_capacity_race.py
+tests/test_enrollment_services.py
+tests/test_happy_path.py
+tests/test_images_and_attendance_history.py
+tests/test_notifications.py
+tests/test_provider_dashboard.py
+tests/test_views.py

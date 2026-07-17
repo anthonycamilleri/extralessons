@@ -23,8 +23,8 @@
     <td>{{ e.activity_class.title }}
       <div class="muted small">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div></td>
     <td>
-      {% if e.activity_class.places_remaining > 0 %}
-        <span class="badge badge-ok">{{ e.activity_class.places_remaining }} free</span>
+      {% if e.places_free > 0 %}
+        <span class="badge badge-ok">{{ e.places_free }} free</span>
       {% else %}
         <span class="badge badge-warn">Full → waiting list</span>
       {% endif %}
