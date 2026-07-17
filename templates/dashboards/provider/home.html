@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}My classes{% endblock %}
+{% block content %}
+<div class="panel-title">
+  <h1>My classes</h1>
+  <a class="btn btn-small" href="{% url 'provider_broadcast' %}">Message families</a>
+</div>
+
+{% if classes %}
+<table class="list">
+  <tr><th>Class</th><th>Term</th><th>Schedule</th><th>Enrolled</th><th>Waiting</th><th>Status</th></tr>
+  {% for cls in classes %}
+  <tr>
+    <td><a href="{% url 'provider_class' cls.pk %}">{{ cls.title }}</a></td>
+    <td>{{ cls.term.name }}</td>
+    <td>{{ cls.schedule_display }}</td>
+    <td>{{ cls.enrolled_count }} / {{ cls.capacity }}</td>
+    <td>{{ cls.waitlist_count }}</td>
+    <td>
+      {% if cls.status == "PUBLISHED" %}<span class="badge badge-ok">Published</span>
+      {% elif cls.status == "CANCELLED" %}<span class="badge badge-bad">Cancelled</span>
+      {% else %}<span class="badge">{{ cls.get_status_display }}</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="panel"><p>No classes are assigned to you yet — the school office manages the class list.</p></div>
+{% endif %}
+{% endblock %}

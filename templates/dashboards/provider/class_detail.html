@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ cls.title }}{% endblock %}
+{% block content %}
+<h1>{{ cls.title }} <span class="muted">— {{ cls.term.name }}</span></h1>
+<p>
+  <span class="badge">{{ cls.schedule_display }}</span>
+  <span class="badge badge-ok">{{ roster|length }} enrolled / {{ cls.capacity }}</span>
+  {% if waitlisted %}<span class="badge badge-warn">{{ waitlisted|length }} waiting</span>{% endif %}
+  {% if next_session %}
+    <a class="btn btn-small" href="{% url 'provider_attendance' cls.pk next_session.pk %}">
+      Take attendance — {{ next_session.date|date:"D j M" }}
+    </a>
+  {% endif %}
+</p>
+
+<h2>Enrolled children</h2>
+{% if roster %}
+<table class="list">
+  <tr><th>Child</th><th>Date of birth</th><th>Notes for you</th><th>Guardians</th></tr>
+  {% for e in roster %}
+  <tr>
+    <td>{{ e.child.full_name }}</td>
+    <td>{{ e.child.date_of_birth|date:"j M Y" }}</td>
+    <td class="small">{{ e.child.notes|default:"—" }}</td>
+    <td class="small">
+      {% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="panel"><p>No children enrolled yet.</p></div>
+{% endif %}
+
+{% if waitlisted %}
+<h2>Waiting list</h2>
+<table class="list">
+  <tr><th>#</th><th>Child</th><th>Waiting since</th></tr>
+  {% for e in waitlisted %}
+  <tr>
+    <td>{{ forloop.counter }}</td>
+    <td>{{ e.child.full_name }}</td>
+    <td class="small muted">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Sessions</h2>
+<table class="list">
+  <tr><th>Date</th><th>Status</th><th></th></tr>
+  {% for session in sessions %}
+  <tr {% if session.date < today %}class="muted"{% endif %}>
+    <td>{{ session.date|date:"l j F Y" }}</td>
+    <td>
+      {% if session.cancelled %}<span class="badge badge-bad">Cancelled</span>
+      {% elif session.date < today %}<span class="badge">Past</span>
+      {% else %}<span class="badge badge-ok">Planned</span>{% endif %}
+      {% if session.notes %}<span class="small muted">{{ session.notes }}</span>{% endif %}
+    </td>
+    <td>
+      {% if not session.cancelled %}
+        <a href="{% url 'provider_attendance' cls.pk session.pk %}">Attendance</a>
+      {% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="3" class="muted">Sessions appear once the school publishes the class.</td></tr>
+  {% endfor %}
+</table>
+
+<p><a href="{% url 'provider_home' %}">← Back to my classes</a></p>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Message families{% endblock %}
+{% block content %}
+<h1>Message the families of your classes</h1>
+<div class="panel">
+  <p class="muted small">Sent by email (and WhatsApp where parents opted in) to every guardian
+     of children enrolled or waitlisted in the selected classes.</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Send message</button>
+    <a class="btn btn-secondary" href="{% url 'provider_home' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}
