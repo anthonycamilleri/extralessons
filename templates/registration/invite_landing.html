@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Invitation{% endblock %}
+{% block content %}
+<div class="auth-box panel">
+  <h1>Co-parent invitation</h1>
+  <p>{{ invite.invited_by.get_full_name|default:invite.invited_by.email }} invited you to
+     manage <strong>{{ invite.child.full_name }}</strong>'s activities.</p>
+  <p>Log in, or create an account, to accept:</p>
+  <div class="actions">
+    <a class="btn" href="{% url 'login' %}?next={{ next_url|urlencode }}">Log in</a>
+    {% if site_config.signup_open %}
+      <a class="btn btn-secondary" href="{% url 'signup' %}?next={{ next_url|urlencode }}">Create an account</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<div class="auth-box panel">
+  <h1>Log in</h1>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="btn">Log in</button>
+  </form>
+  <p class="small muted">
+    <a href="{% url 'password_reset' %}">Forgotten your password?</a>
+    {% if site_config.signup_open %} · New here? <a href="{% url 'signup' %}">Create an account</a>{% endif %}
+  </p>
+</div>
+{% endblock %}

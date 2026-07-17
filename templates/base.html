@@ -1,0 +1,53 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Activities{% endblock %} · {{ site_config.school_name }}</title>
+  <link rel="stylesheet" href="{% static 'css/main.css' %}">
+  <script src="{% static 'js/htmx.min.js' %}" defer></script>
+</head>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<header class="site-header">
+  <nav class="container">
+    <a class="brand" href="{% url 'catalogue' %}">{{ site_config.school_name }} <span>activities</span></a>
+    <div class="nav-links">
+      <a href="{% url 'catalogue' %}">Catalogue</a>
+      {% if user.is_authenticated %}
+        {% if user.role == "PARENT" %}
+          <a href="{% url 'parent_home' %}">My family</a>
+        {% elif user.role == "PROVIDER" %}
+          <a href="{% url 'provider_home' %}">My classes</a>
+        {% elif user.role == "ADMIN" %}
+          <a href="{% url 'admintools_requests' %}">Requests</a>
+          <a href="{% url 'admin:index' %}">Admin</a>
+        {% endif %}
+        <form method="post" action="{% url 'logout' %}" class="inline-form">
+          {% csrf_token %}
+          <button type="submit" class="linklike">Log out</button>
+        </form>
+      {% else %}
+        <a href="{% url 'login' %}">Log in</a>
+        {% if site_config.signup_open %}<a class="btn btn-small" href="{% url 'signup' %}">Sign up</a>{% endif %}
+      {% endif %}
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+  {% if messages %}
+    {% for message in messages %}
+      <div class="flash flash-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    {{ site_config.school_name }}
+    {% if site_config.contact_email %} · <a href="mailto:{{ site_config.contact_email }}">{{ site_config.contact_email }}</a>{% endif %}
+  </div>
+</footer>
+</body>
+</html>

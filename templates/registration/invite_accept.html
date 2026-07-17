@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Accept invitation{% endblock %}
+{% block content %}
+<div class="auth-box panel">
+  <h1>Accept invitation</h1>
+  <p>Become a guardian of <strong>{{ invite.child.full_name }}</strong>? You will be able to
+     manage their enrollments and receive notifications about their classes.</p>
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn">Yes, accept</button>
+    <a class="btn btn-secondary" href="{% url 'parent_home' %}">Not now</a>
+  </form>
+</div>
+{% endblock %}

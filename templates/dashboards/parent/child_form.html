@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{% if child %}Edit {{ child.first_name }}{% else %}Add a child{% endif %}{% endblock %}
+{% block content %}
+<h1>{% if child %}Edit {{ child.full_name }}{% else %}Add a child{% endif %}</h1>
+<div class="panel">
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Save</button>
+    <a class="btn btn-secondary" href="{% url 'parent_home' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}My family{% endblock %}
+{% block content %}
+<div class="panel-title">
+  <h1>My family</h1>
+  <div class="actions">
+    <a class="btn btn-secondary btn-small" href="{% url 'parent_profile' %}">My profile &amp; notifications</a>
+    <a class="btn btn-small" href="{% url 'child_add' %}">Add a child</a>
+  </div>
+</div>
+
+{% if offers %}
+<div class="panel" style="border-color:#e8d5a8;">
+  <h2 style="margin-top:0;">⏳ Seats waiting for your confirmation</h2>
+  {% for offer in offers %}
+    <p>
+      A seat in <strong>{{ offer.activity_class.title }}</strong> is being held for
+      <strong>{{ offer.child.full_name }}</strong>
+      until {{ offer.offer_expires_at|date:"l j F, H:i" }}.
+    </p>
+    <div class="actions">
+      <form method="post" action="{% url 'offer_confirm' offer.pk %}">{% csrf_token %}
+        <button type="submit" class="btn">Confirm seat</button>
+      </form>
+      <form method="post" action="{% url 'offer_decline' offer.pk %}">{% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Decline</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not children %}
+  <div class="panel">
+    <p>Add your children to your family to start enrolling them in activities.</p>
+    <a class="btn" href="{% url 'child_add' %}">Add your first child</a>
+  </div>
+{% endif %}
+
+{% for child in children %}
+<div class="panel">
+  <div class="panel-title">
+    <h2 style="margin:0;">{{ child.full_name }} <span class="muted small">({{ child.date_of_birth|date:"j M Y" }})</span></h2>
+    <div class="actions small">
+      <a href="{% url 'child_edit' child.pk %}">Edit details</a>
+      <a href="{% url 'child_invite_guardian' child.pk %}">Invite co-parent</a>
+    </div>
+  </div>
+  <table class="list">
+    <tr><th>Class</th><th>Schedule</th><th>Status</th><th></th></tr>
+    {% for e in enrollments %}
+      {% if e.child_id == child.pk %}
+      <tr>
+        <td>
+          <a href="{{ e.activity_class.get_absolute_url }}">{{ e.activity_class.title }}</a>
+          <div class="muted small">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div>
+        </td>
+        <td>{{ e.activity_class.schedule_display }}</td>
+        <td>
+          {% if e.status == "ENROLLED" %}<span class="badge badge-ok">Enrolled</span>
+          {% elif e.status == "REQUESTED" %}<span class="badge badge-info">Awaiting confirmation</span>
+          {% elif e.status == "OFFERED" %}<span class="badge badge-warn">Seat offered — respond above!</span>
+          {% elif e.status == "WAITLISTED" %}<span class="badge badge-warn">Waiting list · position {{ e.waitlist_position }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="{% url 'enrollment_cancel' e.pk %}"
+                onsubmit="return confirm('Cancel {{ e.child.first_name }}\'s place in {{ e.activity_class.title|escapejs }}?');">
+            {% csrf_token %}
+            <button type="submit" class="linklike small">Cancel</button>
+          </form>
+        </td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+
+<p><a class="btn btn-secondary" href="{% url 'catalogue' %}">Browse the activities catalogue →</a></p>
+{% endblock %}

@@ -92,8 +92,17 @@ class Notification(models.Model):
         SKIPPED = "SKIPPED", "Skipped"
 
     recipient = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+        null=True,
+        blank=True,
+        help_text="Empty for messages to addresses without an account (e.g. invites).",
     )
+    # Address snapshots taken at queue time, so later profile edits don't
+    # change where a pending message goes.
+    recipient_email = models.EmailField(blank=True)
+    recipient_phone = models.CharField(max_length=20, blank=True)
     channel = models.CharField(max_length=10, choices=Channel.choices)
     event = models.CharField(max_length=30, choices=Event.choices)
     enrollment = models.ForeignKey(

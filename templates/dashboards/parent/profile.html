@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}My profile{% endblock %}
+{% block content %}
+<h1>My profile &amp; notifications</h1>
+<div class="panel">
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Save</button>
+    <a class="btn btn-secondary" href="{% url 'parent_home' %}">Back</a>
+  </form>
+</div>
+<p class="muted small">Account email: {{ user.email }}.
+   Contact the school office to change your login email.</p>
+{% endblock %}

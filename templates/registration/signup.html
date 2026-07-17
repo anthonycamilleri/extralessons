@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Sign up{% endblock %}
+{% block content %}
+<div class="auth-box panel">
+  <h1>Create a parent account</h1>
+  <p class="muted small">One account per parent — you can invite a co-parent later,
+    and manage all your children from a single account.</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Create account</button>
+  </form>
+  <p class="small muted">Already registered? <a href="{% url 'login' %}">Log in</a></p>
+</div>
+{% endblock %}
