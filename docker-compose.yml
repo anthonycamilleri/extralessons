@@ -17,7 +17,9 @@ services:
   web:
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:-app}@db:5432/extralessons
     volumes:
@@ -32,7 +34,9 @@ services:
   notifier:
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:-app}@db:5432/extralessons
     depends_on:
