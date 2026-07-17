@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.accounts.forms import ChildForm, GuardianInviteForm, ProfileForm
@@ -8,7 +9,7 @@ from apps.accounts.models import Child, Guardian
 from apps.accounts.permissions import parent_required
 from apps.catalog.models import ActivityClass
 from apps.enrollments import services as enrollment_services
-from apps.enrollments.models import Enrollment
+from apps.enrollments.models import Attendance, Enrollment
 from apps.enrollments.services import EnrollmentError
 from apps.notifications import services as notification_services
 
@@ -139,6 +140,47 @@ def offer_decline(request, enrollment_id):
         return redirect("parent_home")
     messages.info(request, "Offer declined — the seat will go to another family.")
     return redirect("parent_home")
+
+
+@parent_required
+def enrollment_attendance(request, enrollment_id):
+    """Attendance history for one of the family's enrollments."""
+    enrollment = get_object_or_404(
+        _own_enrollments(request.user).select_related(
+            "activity_class__provider", "activity_class__term"
+        ),
+        pk=enrollment_id,
+    )
+    today = timezone.localdate()
+    sessions = enrollment.activity_class.sessions.filter(cancelled=False)
+    marks = {
+        a.session_id: a.present
+        for a in Attendance.objects.filter(
+            child=enrollment.child, session__in=sessions
+        )
+    }
+    rows = []
+    present_count = taken_count = 0
+    for session in sessions:
+        if session.pk in marks:
+            state = "present" if marks[session.pk] else "absent"
+            taken_count += 1
+            present_count += int(marks[session.pk])
+        elif session.date > today:
+            state = "upcoming"
+        else:
+            state = "not_taken"
+        rows.append({"session": session, "state": state})
+    return render(
+        request,
+        "dashboards/parent/attendance.html",
+        {
+            "enrollment": enrollment,
+            "rows": rows,
+            "present_count": present_count,
+            "taken_count": taken_count,
+        },
+    )
 
 
 @parent_required

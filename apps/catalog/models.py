@@ -129,6 +129,15 @@ class ActivityClass(models.Model):
     def __str__(self):
         return f"{self.title} ({self.term})"
 
+    def save(self, *args, **kwargs):
+        # Optimize freshly uploaded images (an unsaved FieldFile is not
+        # committed yet); already-stored files are left untouched.
+        if self.image and not self.image._committed:
+            from .images import optimize_image
+
+            self.image = optimize_image(self.image)
+        super().save(*args, **kwargs)
+
     def get_absolute_url(self):
         return reverse("class_detail", kwargs={"term_id": self.term_id, "slug": self.slug})
 

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Attendance — {{ enrollment.child.first_name }}{% endblock %}
+{% block content %}
+<h1>{{ enrollment.child.full_name }} <span class="muted">— {{ enrollment.activity_class.title }}</span></h1>
+<p>
+  <span class="badge">{{ enrollment.activity_class.schedule_display }}</span>
+  <span class="badge">{{ enrollment.activity_class.term.name }}</span>
+  {% if taken_count %}
+    <span class="badge badge-info">Attended {{ present_count }} of {{ taken_count }} session{{ taken_count|pluralize }}</span>
+  {% endif %}
+</p>
+
+<table class="list">
+  <tr><th>Date</th><th>Attendance</th></tr>
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.session.date|date:"l j F Y" }}</td>
+    <td>
+      {% if row.state == "present" %}<span class="badge badge-ok">Present</span>
+      {% elif row.state == "absent" %}<span class="badge badge-bad">Absent</span>
+      {% elif row.state == "upcoming" %}<span class="badge">Upcoming</span>
+      {% else %}<span class="badge badge-warn">Not recorded</span>{% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="2" class="muted">No sessions have been scheduled yet.</td></tr>
+  {% endfor %}
+</table>
+
+<p><a href="{% url 'parent_home' %}">← Back to my family</a></p>
+{% endblock %}

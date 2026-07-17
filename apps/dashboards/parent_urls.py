@@ -19,6 +19,11 @@ urlpatterns = [
         name="enrollment_cancel",
     ),
     path(
+        "enrollments/<int:enrollment_id>/attendance/",
+        parent_views.enrollment_attendance,
+        name="enrollment_attendance",
+    ),
+    path(
         "offers/<int:enrollment_id>/confirm/",
         parent_views.offer_confirm,
         name="offer_confirm",
