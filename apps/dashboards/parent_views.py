@@ -20,19 +20,25 @@ def _own_children(user):
 
 @parent_required
 def home(request):
-    children = _own_children(request.user)
+    children = list(_own_children(request.user))
     enrollments = (
         Enrollment.objects.filter(
             child__in=children, status__in=Enrollment.ACTIVE_STATUSES
         )
         .select_related("child", "activity_class__provider", "activity_class__term")
-        .order_by("child__first_name", "created_at")
+        .order_by("created_at")
     )
+    by_child = {child.pk: [] for child in children}
+    for enrollment in enrollments:
+        by_child[enrollment.child_id].append(enrollment)
+    families = [
+        {"child": child, "enrollments": by_child[child.pk]} for child in children
+    ]
     offers = [e for e in enrollments if e.status == Enrollment.Status.OFFERED]
     return render(
         request,
         "dashboards/parent/home.html",
-        {"children": children, "enrollments": enrollments, "offers": offers},
+        {"families": families, "offers": offers},
     )
 
 

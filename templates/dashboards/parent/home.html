@@ -30,26 +30,26 @@
 </div>
 {% endif %}
 
-{% if not children %}
+{% if not families %}
   <div class="panel">
     <p>Add your children to your family to start enrolling them in activities.</p>
     <a class="btn" href="{% url 'child_add' %}">Add your first child</a>
   </div>
 {% endif %}
 
-{% for child in children %}
+{% for family in families %}
 <div class="panel">
   <div class="panel-title">
-    <h2 style="margin:0;">{{ child.full_name }} <span class="muted small">({{ child.date_of_birth|date:"j M Y" }})</span></h2>
+    <h2 style="margin:0;">{{ family.child.full_name }} <span class="muted small">({{ family.child.date_of_birth|date:"j M Y" }})</span></h2>
     <div class="actions small">
-      <a href="{% url 'child_edit' child.pk %}">Edit details</a>
-      <a href="{% url 'child_invite_guardian' child.pk %}">Invite co-parent</a>
+      <a href="{% url 'child_edit' family.child.pk %}">Edit details</a>
+      <a href="{% url 'child_invite_guardian' family.child.pk %}">Invite co-parent</a>
     </div>
   </div>
-  <table class="list">
+  {% if family.enrollments %}
+  <div class="table-wrap"><table class="list">
     <tr><th>Class</th><th>Schedule</th><th>Status</th><th></th></tr>
-    {% for e in enrollments %}
-      {% if e.child_id == child.pk %}
+    {% for e in family.enrollments %}
       <tr>
         <td>
           <a href="{{ e.activity_class.get_absolute_url }}">{{ e.activity_class.title }}</a>
@@ -76,9 +76,11 @@
           </div>
         </td>
       </tr>
-      {% endif %}
     {% endfor %}
-  </table>
+  </table></div>
+  {% else %}
+  <p class="muted small">No activities yet — <a href="{% url 'catalogue' %}">browse the catalogue</a> to enroll {{ family.child.first_name }}.</p>
+  {% endif %}
 </div>
 {% endfor %}
 

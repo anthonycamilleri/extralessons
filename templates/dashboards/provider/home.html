@@ -7,7 +7,7 @@
 </div>
 
 {% if classes %}
-<table class="list">
+<div class="table-wrap"><table class="list">
   <tr><th>Class</th><th>Term</th><th>Schedule</th><th>Enrolled</th><th>Waiting</th><th>Status</th></tr>
   {% for cls in classes %}
   <tr>
@@ -23,7 +23,7 @@
     </td>
   </tr>
   {% endfor %}
-</table>
+</table></div>
 {% else %}
 <div class="panel"><p>No classes are assigned to you yet — the school office manages the class list.</p></div>
 {% endif %}

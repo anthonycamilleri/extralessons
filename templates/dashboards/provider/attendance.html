@@ -7,7 +7,7 @@
 {% if rows %}
 <form method="post">
   {% csrf_token %}
-  <table class="list">
+  <div class="table-wrap"><table class="list">
     <tr><th>Present</th><th>Child</th><th>Notes</th></tr>
     {% for row in rows %}
     <tr>
@@ -21,7 +21,7 @@
       <td class="small muted">{{ row.enrollment.child.notes|default:"" }}</td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
   <p class="small muted">Untick children who are absent, then save.</p>
   <button type="submit" class="btn">Save attendance</button>
   <a class="btn btn-secondary" href="{% url 'provider_class' cls.pk %}">Back</a>

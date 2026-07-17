@@ -13,7 +13,7 @@
 
 {% if offered %}
 <h2>Outstanding offers</h2>
-<table class="list">
+<div class="table-wrap"><table class="list">
   <tr><th>Child</th><th>Offered</th><th>Expires</th></tr>
   {% for e in offered %}
   <tr>
@@ -22,12 +22,12 @@
     <td>{{ e.offer_expires_at|date:"l j M, H:i" }}</td>
   </tr>
   {% endfor %}
-</table>
+</table></div>
 {% endif %}
 
 <h2>Waiting list (first-come first-served order shown as guidance)</h2>
 {% if waitlisted %}
-<table class="list">
+<div class="table-wrap"><table class="list">
   <tr><th>#</th><th>Child</th><th>Guardians</th><th>Waiting since</th><th></th></tr>
   {% for e in waitlisted %}
   <tr>
@@ -47,7 +47,7 @@
     </td>
   </tr>
   {% endfor %}
-</table>
+</table></div>
 {% else %}
 <div class="panel"><p>The waiting list is empty.</p></div>
 {% endif %}

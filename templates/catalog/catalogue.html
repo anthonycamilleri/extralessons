@@ -14,7 +14,7 @@
     {% if cls.image %}
       <img class="card-img" src="{{ cls.image.url }}" alt="{{ cls.title }}">
     {% else %}
-      <div class="card-img"></div>
+      <div class="card-img placeholder" data-initial="{{ cls.title|first|upper }}"></div>
     {% endif %}
     <div class="card-body">
       <h3><a href="{{ cls.get_absolute_url }}">{{ cls.title }}</a></h3>

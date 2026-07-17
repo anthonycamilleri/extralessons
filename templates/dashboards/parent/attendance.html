@@ -10,7 +10,7 @@
   {% endif %}
 </p>
 
-<table class="list">
+<div class="table-wrap"><table class="list">
   <tr><th>Date</th><th>Attendance</th></tr>
   {% for row in rows %}
   <tr>
@@ -25,7 +25,7 @@
   {% empty %}
   <tr><td colspan="2" class="muted">No sessions have been scheduled yet.</td></tr>
   {% endfor %}
-</table>
+</table></div>
 
 <p><a href="{% url 'parent_home' %}">← Back to my family</a></p>
 {% endblock %}

@@ -15,7 +15,7 @@
 
 <h2>Enrolled children</h2>
 {% if roster %}
-<table class="list">
+<div class="table-wrap"><table class="list">
   <tr><th>Child</th><th>Date of birth</th><th>Notes for you</th><th>Guardians</th></tr>
   {% for e in roster %}
   <tr>
@@ -27,14 +27,14 @@
     </td>
   </tr>
   {% endfor %}
-</table>
+</table></div>
 {% else %}
 <div class="panel"><p>No children enrolled yet.</p></div>
 {% endif %}
 
 {% if waitlisted %}
 <h2>Waiting list</h2>
-<table class="list">
+<div class="table-wrap"><table class="list">
   <tr><th>#</th><th>Child</th><th>Waiting since</th></tr>
   {% for e in waitlisted %}
   <tr>
@@ -43,11 +43,11 @@
     <td class="small muted">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
   </tr>
   {% endfor %}
-</table>
+</table></div>
 {% endif %}
 
 <h2>Sessions</h2>
-<table class="list">
+<div class="table-wrap"><table class="list">
   <tr><th>Date</th><th>Status</th><th></th></tr>
   {% for session in sessions %}
   <tr {% if session.date < today %}class="muted"{% endif %}>
@@ -67,7 +67,7 @@
   {% empty %}
   <tr><td colspan="3" class="muted">Sessions appear once the school publishes the class.</td></tr>
   {% endfor %}
-</table>
+</table></div>
 
 <p><a href="{% url 'provider_home' %}">← Back to my classes</a></p>
 {% endblock %}
