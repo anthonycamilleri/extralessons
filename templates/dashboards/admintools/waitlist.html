@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Waiting list — {{ cls.title }}{% endblock %}
+{% block content %}
+<h1>{{ cls.title }} <span class="muted">— waiting list</span></h1>
+<p>
+  <span class="badge">{{ cls.enrolled_count }} / {{ cls.capacity }} seats taken (incl. outstanding offers)</span>
+  {% if seats_free > 0 %}
+    <span class="badge badge-ok">{{ seats_free }} seat{{ seats_free|pluralize }} free to offer</span>
+  {% else %}
+    <span class="badge badge-warn">No free seats</span>
+  {% endif %}
+</p>
+
+{% if offered %}
+<h2>Outstanding offers</h2>
+<table class="list">
+  <tr><th>Child</th><th>Offered</th><th>Expires</th></tr>
+  {% for e in offered %}
+  <tr>
+    <td>{{ e.child.full_name }}</td>
+    <td class="small muted">{{ e.offered_at|date:"j M, H:i" }}</td>
+    <td>{{ e.offer_expires_at|date:"l j M, H:i" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Waiting list (first-come first-served order shown as guidance)</h2>
+{% if waitlisted %}
+<table class="list">
+  <tr><th>#</th><th>Child</th><th>Guardians</th><th>Waiting since</th><th></th></tr>
+  {% for e in waitlisted %}
+  <tr>
+    <td>{{ forloop.counter }}</td>
+    <td>{{ e.child.full_name }}
+      <div class="muted small">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
+    <td class="small">
+      {% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+    </td>
+    <td class="small muted">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
+    <td>
+      <form method="post" action="{% url 'admintools_waitlist_offer' e.pk %}">{% csrf_token %}
+        <button type="submit" class="btn btn-small" {% if seats_free < 1 %}disabled{% endif %}>
+          Offer seat
+        </button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="panel"><p>The waiting list is empty.</p></div>
+{% endif %}
+
+<p><a href="{% url 'admintools_requests' %}">← Back to requests</a></p>
+{% endblock %}

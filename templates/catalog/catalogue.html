@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Catalogue{% endblock %}
+{% block content %}
+<h1>Extra-curricular activities</h1>
+{% if site_config.catalogue_intro %}<p class="muted">{{ site_config.catalogue_intro }}</p>{% endif %}
+
+{% if not classes %}
+  <div class="panel"><p>No classes are open for registration right now — check back soon!</p></div>
+{% endif %}
+
+<div class="card-grid">
+  {% for cls in classes %}
+  <div class="card">
+    {% if cls.image %}
+      <img class="card-img" src="{{ cls.image.url }}" alt="{{ cls.title }}">
+    {% else %}
+      <div class="card-img"></div>
+    {% endif %}
+    <div class="card-body">
+      <h3><a href="{{ cls.get_absolute_url }}">{{ cls.title }}</a></h3>
+      <div class="meta">{{ cls.provider.name }} · ages {{ cls.age_min }}–{{ cls.age_max }}</div>
+      <div class="meta">{{ cls.schedule_display }}{% if cls.location %} · {{ cls.location }}{% endif %}</div>
+      <p class="small">{{ cls.description|truncatewords:22 }}</p>
+      <div class="spacer"></div>
+      <div>
+        {% if cls.places_free > 0 %}
+          <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
+        {% else %}
+          <span class="badge badge-warn">Full — waiting list{% if cls.waitlist_count %} ({{ cls.waitlist_count }}){% endif %}</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

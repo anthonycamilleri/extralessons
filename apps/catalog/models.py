@@ -2,7 +2,8 @@ import datetime
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q, Value
+from django.db.models.functions import Greatest
 from django.urls import reverse
 
 
@@ -60,6 +61,8 @@ class ActivityClassQuerySet(models.QuerySet):
             requested_count=Count(
                 "enrollments", filter=Q(enrollments__status=Enrollment.Status.REQUESTED)
             ),
+        ).annotate(
+            places_free=Greatest(F("capacity") - F("enrolled_count"), Value(0))
         )
 
     def published(self):

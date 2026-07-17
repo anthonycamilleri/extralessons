@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ cls.title }}{% endblock %}
+{% block content %}
+<h1>{{ cls.title }}</h1>
+<div class="detail-grid">
+  <div>
+    {% if cls.image %}<img class="class-hero" src="{{ cls.image.url }}" alt="{{ cls.title }}">{% endif %}
+    <p>{{ cls.description|linebreaks }}</p>
+    {% if cls.extra_details %}
+      <h2>Good to know</h2>
+      <p class="muted">{{ cls.extra_details|linebreaks }}</p>
+    {% endif %}
+  </div>
+  <div>
+    <div class="panel">
+      <dl class="kv">
+        <dt>Provider</dt><dd>{{ cls.provider.name }}</dd>
+        <dt>When</dt><dd>{{ cls.schedule_display }}</dd>
+        <dt>Term</dt><dd>{{ cls.term.name }} ({{ cls.term.start_date|date:"j M" }} – {{ cls.term.end_date|date:"j M Y" }})</dd>
+        {% if cls.location %}<dt>Where</dt><dd>{{ cls.location }}</dd>{% endif %}
+        <dt>Ages</dt><dd>{{ cls.age_min }}–{{ cls.age_max }}</dd>
+        <dt>Availability</dt>
+        <dd>
+          {% if cls.places_free > 0 %}
+            <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
+          {% else %}
+            <span class="badge badge-warn">Full — join the waiting list</span>
+          {% endif %}
+        </dd>
+      </dl>
+    </div>
+
+    <div class="panel">
+      {% if user.is_authenticated and user.role == "PARENT" %}
+        {% if children %}
+          <form method="post" action="{% url 'enroll' cls.pk %}">
+            {% csrf_token %}
+            <p>
+              <label for="child">Register</label>
+              <select name="child" id="child" required>
+                {% for child in children %}<option value="{{ child.pk }}">{{ child.full_name }}</option>{% endfor %}
+              </select>
+            </p>
+            <button type="submit" class="btn">
+              {% if cls.places_free > 0 %}Request a place{% else %}Join the waiting list{% endif %}
+            </button>
+            <p class="small muted">Places are confirmed by the school office — you'll be notified.</p>
+          </form>
+        {% else %}
+          <p><a href="{% url 'child_add' %}">Add your children</a> to your family first, then register them here.</p>
+        {% endif %}
+      {% elif user.is_authenticated %}
+        <p class="muted small">Only parent accounts can register children.</p>
+      {% else %}
+        <p><a class="btn" href="{% url 'login' %}?next={{ request.path }}">Log in to register</a></p>
+        {% if site_config.signup_open %}
+          <p class="small muted">No account yet? <a href="{% url 'signup' %}">Sign up</a></p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

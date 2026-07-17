@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Enrollment requests{% endblock %}
+{% block content %}
+<h1>Enrollment requests</h1>
+
+{% if pending %}
+<table class="list">
+  <tr><th>Requested</th><th>Child</th><th>Guardians</th><th>Class</th><th>Availability</th><th></th></tr>
+  {% for e in pending %}
+  <tr>
+    <td class="small muted">{{ e.created_at|date:"j M, H:i" }}</td>
+    <td>{{ e.child.full_name }}
+      <div class="muted small">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
+    <td class="small">
+      {% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+    </td>
+    <td>{{ e.activity_class.title }}
+      <div class="muted small">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div></td>
+    <td>
+      {% if e.activity_class.places_remaining > 0 %}
+        <span class="badge badge-ok">{{ e.activity_class.places_remaining }} free</span>
+      {% else %}
+        <span class="badge badge-warn">Full → waiting list</span>
+      {% endif %}
+    </td>
+    <td>
+      <div class="actions">
+        <form method="post" action="{% url 'admintools_request_approve' e.pk %}">{% csrf_token %}
+          <button type="submit" class="btn btn-small">Approve</button>
+        </form>
+        <form method="post" action="{% url 'admintools_request_reject' e.pk %}"
+              onsubmit="return confirm('Reject this request? The family will be notified.');">{% csrf_token %}
+          <button type="submit" class="btn btn-small btn-danger">Reject</button>
+        </form>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="panel"><p>No pending requests. 🎉</p></div>
+{% endif %}
+
+<h2>Classes this term</h2>
+<table class="list">
+  <tr><th>Class</th><th>Enrolled / capacity</th><th>Waiting list</th><th>Pending</th><th></th></tr>
+  {% for cls in classes %}
+  <tr>
+    <td>{{ cls.title }} <div class="muted small">{{ cls.provider.name }} · {{ cls.get_status_display }}</div></td>
+    <td>{{ cls.enrolled_count }} / {{ cls.capacity }}</td>
+    <td>{{ cls.waitlist_count }}</td>
+    <td>{{ cls.requested_count }}</td>
+    <td><a href="{% url 'admintools_waitlist' cls.pk %}">Waiting list</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
