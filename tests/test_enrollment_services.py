@@ -181,7 +181,7 @@ class TestOfferFlow:
         assert declined.cancel_reason == Enrollment.CancelReason.OFFER_DECLINED
         assert notified(Event.ADMIN_OFFER_LAPSED).exists()
         cls.refresh_from_db()
-        assert cls.places_remaining() == 1
+        assert cls.places_free_now() == 1
 
     def test_expire_offers_sweep(self):
         admin = AdminFactory()

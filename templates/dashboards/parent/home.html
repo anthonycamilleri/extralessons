@@ -69,7 +69,7 @@
               <a class="small" href="{% url 'enrollment_attendance' e.pk %}">Attendance</a>
             {% endif %}
             <form method="post" action="{% url 'enrollment_cancel' e.pk %}"
-                  onsubmit="return confirm('Cancel {{ e.child.first_name }}\'s place in {{ e.activity_class.title|escapejs }}?');">
+                  onsubmit="return confirm('Cancel {{ e.child.first_name|escapejs }}\'s place in {{ e.activity_class.title|escapejs }}?');">
               {% csrf_token %}
               <button type="submit" class="linklike small">Cancel</button>
             </form>

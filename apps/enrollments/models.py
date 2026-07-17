@@ -3,6 +3,14 @@ from django.db import models
 from django.db.models import Q
 
 
+class EnrollmentQuerySet(models.QuerySet):
+    def waitlist_fifo(self):
+        """Waitlisted rows in first-come order (single definition of FIFO)."""
+        return self.filter(status=Enrollment.Status.WAITLISTED).order_by(
+            "waitlisted_at", "id"
+        )
+
+
 class Enrollment(models.Model):
     """A child's relationship with a class, across its whole lifecycle.
 
@@ -64,6 +72,8 @@ class Enrollment(models.Model):
     )
     promoted_from_waitlist = models.BooleanField(default=False)
 
+    objects = EnrollmentQuerySet.as_manager()
+
     class Meta:
         ordering = ["created_at"]
         constraints = [
@@ -80,19 +90,13 @@ class Enrollment(models.Model):
     def __str__(self):
         return f"{self.child} → {self.activity_class} [{self.status}]"
 
-    @property
-    def is_active(self):
-        return self.status in self.ACTIVE_STATUSES
-
     def waitlist_position(self):
         """1-based FIFO position among waitlisted enrollments (guidance only)."""
         if self.status != self.Status.WAITLISTED:
             return None
         return (
-            Enrollment.objects.filter(
-                activity_class=self.activity_class,
-                status=self.Status.WAITLISTED,
-            )
+            Enrollment.objects.filter(activity_class=self.activity_class)
+            .waitlist_fifo()
             .filter(
                 Q(waitlisted_at__lt=self.waitlisted_at)
                 | Q(waitlisted_at=self.waitlisted_at, id__lt=self.id)

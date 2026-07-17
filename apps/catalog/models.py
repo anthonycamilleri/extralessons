@@ -3,7 +3,7 @@ import datetime
 from django.conf import settings
 from django.db import models
 from django.db.models import Count, F, Q, Value
-from django.db.models.functions import Greatest
+from django.db.models.functions import Greatest, Now
 from django.urls import reverse
 
 
@@ -50,10 +50,16 @@ class ActivityClassQuerySet(models.QuerySet):
     def with_counts(self):
         from apps.enrollments.models import Enrollment
 
+        # Same seat semantics as services._seats_taken: enrolled children plus
+        # unexpired offers hold a seat; expired offers don't.
         return self.annotate(
             enrolled_count=Count(
                 "enrollments",
-                filter=Q(enrollments__status__in=Enrollment.SEAT_HOLDING_STATUSES),
+                filter=Q(enrollments__status=Enrollment.Status.ENROLLED)
+                | Q(
+                    enrollments__status=Enrollment.Status.OFFERED,
+                    enrollments__offer_expires_at__gte=Now(),
+                ),
             ),
             waitlist_count=Count(
                 "enrollments", filter=Q(enrollments__status=Enrollment.Status.WAITLISTED)
@@ -131,12 +137,32 @@ class ActivityClass(models.Model):
 
     def save(self, *args, **kwargs):
         # Optimize freshly uploaded images (an unsaved FieldFile is not
-        # committed yet); already-stored files are left untouched.
+        # committed yet); already-stored files are left untouched. If the
+        # caller passed update_fields, make sure the rewritten image is
+        # included so the optimized file isn't silently dropped.
         if self.image and not self.image._committed:
             from .images import optimize_image
 
             self.image = optimize_image(self.image)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"image"}
+
+        # Detect capacity raises at the model layer so every edit path
+        # (admin, shell, future views) alerts admins about offerable seats.
+        old_capacity = None
+        if self.pk and (
+            kwargs.get("update_fields") is None or "capacity" in kwargs["update_fields"]
+        ):
+            old_capacity = (
+                ActivityClass.objects.filter(pk=self.pk)
+                .values_list("capacity", flat=True)
+                .first()
+            )
         super().save(*args, **kwargs)
+        if old_capacity is not None and self.capacity > old_capacity:
+            from apps.enrollments.services import capacity_increased
+
+            capacity_increased(self)
 
     def get_absolute_url(self):
         return reverse("class_detail", kwargs={"term_id": self.term_id, "slug": self.slug})
@@ -148,14 +174,11 @@ class ActivityClass(models.Model):
             f"{self.start_time:%H:%M}–{self.end_time:%H:%M}"
         )
 
-    def seat_holders(self):
-        """Enrollments currently holding a seat (enrolled or offered)."""
-        from apps.enrollments.models import Enrollment
+    def places_free_now(self):
+        """Free seats for a single instance (querysets: use with_counts())."""
+        from apps.enrollments.services import _seats_taken
 
-        return self.enrollments.filter(status__in=Enrollment.SEAT_HOLDING_STATUSES)
-
-    def places_remaining(self):
-        return max(0, self.capacity - self.seat_holders().count())
+        return max(0, self.capacity - _seats_taken(self))
 
 
 class ClassSession(models.Model):
@@ -177,10 +200,15 @@ class ClassSession(models.Model):
 
 
 def generate_sessions(activity_class):
-    """Create ClassSession rows for every matching weekday within the term.
+    """Reconcile ClassSession rows with the class schedule.
 
-    Idempotent: existing rows are kept, missing ones are created.
+    Idempotent: existing matching rows are kept, missing ones are created.
+    If the weekday changed since sessions were generated, future sessions on
+    the wrong weekday are removed — unless attendance was already taken for
+    them (those are kept as history and left for the admin to judge).
     """
+    from django.utils import timezone
+
     term = activity_class.term
     current = term.start_date
     # advance to the first occurrence of the class weekday
@@ -193,4 +221,9 @@ def generate_sessions(activity_class):
         )
         created += int(was_created)
         current += datetime.timedelta(days=7)
+
+    today = timezone.localdate()
+    for session in activity_class.sessions.filter(date__gte=today):
+        if session.date.weekday() != activity_class.weekday and not session.attendance.exists():
+            session.delete()
     return created

@@ -12,6 +12,7 @@ run_notifier worker afterwards.
 import datetime
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.accounts.models import SiteConfig
@@ -31,7 +32,40 @@ def _locked_class(activity_class_id):
 
 
 def _seats_taken(cls):
-    return cls.enrollments.filter(status__in=Enrollment.SEAT_HOLDING_STATUSES).count()
+    """Seats currently held: enrolled children plus unexpired offers.
+
+    Expired offers stop holding a seat immediately, so seat availability never
+    depends on the notifier worker's expiry sweep being alive.
+    """
+    return cls.enrollments.filter(
+        Q(status=Enrollment.Status.ENROLLED)
+        | Q(status=Enrollment.Status.OFFERED, offer_expires_at__gte=timezone.now())
+    ).count()
+
+
+def _require_open(cls):
+    """Admission transitions are only valid into a published, active class."""
+    if cls.status != ActivityClass.Status.PUBLISHED or not cls.term.is_active:
+        raise EnrollmentError(
+            "This class is no longer open (cancelled, archived or past its term)."
+        )
+
+
+def _expire_stale_offers_locked(cls):
+    """Cancel this class's expired offers. Caller holds the class lock."""
+    now = timezone.now()
+    stale = cls.enrollments.select_for_update().filter(
+        status=Enrollment.Status.OFFERED, offer_expires_at__lt=now
+    )
+    for enrollment in stale:
+        enrollment.status = Enrollment.Status.CANCELLED
+        enrollment.cancelled_at = now
+        enrollment.cancel_reason = Enrollment.CancelReason.OFFER_EXPIRED
+        enrollment.save()
+        notifications.queue_event(Event.OFFER_EXPIRED, enrollment)
+        notifications.queue_admin_event(
+            Event.ADMIN_OFFER_LAPSED, enrollment, lapse_reason="not answered in time"
+        )
 
 
 def _age_at(date_of_birth, on_date):
@@ -78,6 +112,8 @@ def approve_request(enrollment, admin_user):
     """Admin approves a request: enrolled if a seat is free, else waitlisted."""
     with transaction.atomic():
         cls = _locked_class(enrollment.activity_class_id)
+        _require_open(cls)
+        _expire_stale_offers_locked(cls)
         enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
         if enrollment.status != Enrollment.Status.REQUESTED:
             raise EnrollmentError("This request has already been handled.")
@@ -115,6 +151,8 @@ def offer_seat(enrollment, admin_user):
     """Admin offers a freed seat to a chosen waitlisted family."""
     with transaction.atomic():
         cls = _locked_class(enrollment.activity_class_id)
+        _require_open(cls)
+        _expire_stale_offers_locked(cls)
         enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
         if enrollment.status != Enrollment.Status.WAITLISTED:
             raise EnrollmentError("Only waitlisted registrations can receive an offer.")
@@ -137,7 +175,8 @@ def offer_seat(enrollment, admin_user):
 def confirm_offer(enrollment):
     """Parent confirms an offered seat. The seat is already reserved."""
     with transaction.atomic():
-        _locked_class(enrollment.activity_class_id)
+        cls = _locked_class(enrollment.activity_class_id)
+        _require_open(cls)
         enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
         if enrollment.status != Enrollment.Status.OFFERED:
             raise EnrollmentError("This offer is no longer open.")
@@ -168,28 +207,27 @@ def decline_offer(enrollment):
 
 
 def expire_offers(now=None):
-    """Cancel offers past their deadline. Called periodically by the worker."""
+    """Cancel offers past their deadline. Called periodically by the worker.
+
+    Takes the class lock (like every other transition) so it can never race a
+    concurrent offer/approval working from a stale seat count.
+    """
     now = now or timezone.now()
-    expired_ids = list(
+    class_ids = (
         Enrollment.objects.filter(
             status=Enrollment.Status.OFFERED, offer_expires_at__lt=now
-        ).values_list("pk", flat=True)
+        )
+        .values_list("activity_class_id", flat=True)
+        .distinct()
     )
     processed = 0
-    for pk in expired_ids:
+    for class_id in class_ids:
         with transaction.atomic():
-            enrollment = Enrollment.objects.select_for_update().get(pk=pk)
-            if enrollment.status != Enrollment.Status.OFFERED:
-                continue  # confirmed/declined in the meantime
-            enrollment.status = Enrollment.Status.CANCELLED
-            enrollment.cancelled_at = now
-            enrollment.cancel_reason = Enrollment.CancelReason.OFFER_EXPIRED
-            enrollment.save()
-            notifications.queue_event(Event.OFFER_EXPIRED, enrollment)
-            notifications.queue_admin_event(
-                Event.ADMIN_OFFER_LAPSED, enrollment, lapse_reason="not answered in time"
-            )
-            processed += 1
+            cls = _locked_class(class_id)
+            before = cls.enrollments.filter(status=Enrollment.Status.OFFERED).count()
+            _expire_stale_offers_locked(cls)
+            after = cls.enrollments.filter(status=Enrollment.Status.OFFERED).count()
+            processed += before - after
     return processed
 
 
@@ -208,25 +246,23 @@ def cancel(enrollment, reason, actor=None):
             enrollment.decided_by = actor
         enrollment.save()
         notifications.queue_event(Event.SUBSCRIPTION_CANCELLED, enrollment)
-        if held_seat and cls.enrollments.filter(
-            status=Enrollment.Status.WAITLISTED
-        ).exists():
-            notifications.queue_admin_event(
-                Event.ADMIN_SEAT_FREED,
-                enrollment,
-                waitlist_count=cls.enrollments.filter(
-                    status=Enrollment.Status.WAITLISTED
-                ).count(),
-            )
+        if held_seat:
+            waitlist_count = cls.enrollments.filter(
+                status=Enrollment.Status.WAITLISTED
+            ).count()
+            if waitlist_count:
+                notifications.queue_admin_event(
+                    Event.ADMIN_SEAT_FREED, enrollment, waitlist_count=waitlist_count
+                )
     return enrollment
 
 
 def capacity_increased(activity_class):
-    """After an admin raises capacity: alert admins if a waiting list exists."""
+    """After capacity is raised: alert admins if a waiting list exists."""
     with transaction.atomic():
         cls = _locked_class(activity_class.pk)
-        waitlisted = cls.enrollments.filter(status=Enrollment.Status.WAITLISTED)
-        first = waitlisted.order_by("waitlisted_at", "id").first()
+        waitlisted = cls.enrollments.waitlist_fifo()
+        first = waitlisted.first()
         if first is not None:
             notifications.queue_admin_event(
                 Event.ADMIN_SEAT_FREED, first, waitlist_count=waitlisted.count()

@@ -30,6 +30,24 @@ class ClassSessionInline(admin.TabularInline):
     extra = 0
 
 
+class ActivityClassForm(forms.ModelForm):
+    class Meta:
+        model = ActivityClass
+        fields = "__all__"
+
+    def clean_capacity(self):
+        capacity = self.cleaned_data["capacity"]
+        if self.instance.pk:
+            seats_taken = self.instance.capacity - self.instance.places_free_now()
+            if capacity < seats_taken:
+                raise forms.ValidationError(
+                    f"Capacity cannot go below the {seats_taken} seat(s) currently "
+                    "held by enrolled children and outstanding offers. Cancel "
+                    "enrollments first if the class must shrink."
+                )
+        return capacity
+
+
 @admin.register(ActivityClass)
 class ActivityClassAdmin(admin.ModelAdmin):
     list_display = [
@@ -44,23 +62,14 @@ class ActivityClassAdmin(admin.ModelAdmin):
     search_fields = ["title", "provider__name"]
     prepopulated_fields = {"slug": ["title"]}
     inlines = [ClassSessionInline]
+    form = ActivityClassForm
     actions = ["publish_classes", "clone_into_term", "cancel_classes", "archive_classes"]
 
-    def save_model(self, request, obj, form, change):
-        old_capacity = None
-        if change:
-            old_capacity = ActivityClass.objects.get(pk=obj.pk).capacity
-        super().save_model(request, obj, form, change)
-        if old_capacity is not None and obj.capacity > old_capacity:
-            from apps.enrollments.services import capacity_increased
-
-            capacity_increased(obj)
-            self.message_user(
-                request,
-                "Capacity increased. If there is a waiting list, offer the new "
-                "seats from the waiting-list page.",
-                messages.INFO,
-            )
+    def get_readonly_fields(self, request, obj=None):
+        # Lifecycle changes must go through the actions (publish, cancel,
+        # archive) so enrollments and notifications stay consistent — editing
+        # the status directly would bypass cancel_class's bulk-cancel+notify.
+        return ["status"] if obj else []
 
     @admin.action(description="Publish and generate sessions")
     def publish_classes(self, request, queryset):
@@ -114,9 +123,24 @@ class ActivityClassAdmin(admin.ModelAdmin):
             messages.WARNING,
         )
 
-    @admin.action(description="Archive classes")
+    @admin.action(description="Archive classes (only allowed with no active enrollments)")
     def archive_classes(self, request, queryset):
-        queryset.update(status=ActivityClass.Status.ARCHIVED)
+        from apps.enrollments.models import Enrollment
+
+        blocked = queryset.filter(
+            enrollments__status__in=Enrollment.ACTIVE_STATUSES
+        ).distinct()
+        archivable = queryset.exclude(pk__in=blocked)
+        archived = archivable.update(status=ActivityClass.Status.ARCHIVED)
+        if blocked:
+            self.message_user(
+                request,
+                f"Skipped {blocked.count()} class(es) that still have active "
+                "enrollments — cancel the class (or its enrollments) first.",
+                messages.WARNING,
+            )
+        if archived:
+            self.message_user(request, f"Archived {archived} class(es).")
 
 
 @admin.register(ClassSession)

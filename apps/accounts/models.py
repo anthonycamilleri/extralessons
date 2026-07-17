@@ -2,7 +2,6 @@ import secrets
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.core.cache import cache
 from django.db import models
 
 
@@ -64,6 +63,13 @@ class User(AbstractUser):
         return f"{full_name} <{self.email}>" if full_name else self.email
 
 
+class ChildQuerySet(models.QuerySet):
+    def for_guardian(self, user):
+        """All children the given parent account may manage (single source
+        of family scoping — used by dashboards and the public class page)."""
+        return self.filter(guardians=user)
+
+
 class Child(models.Model):
     guardians = models.ManyToManyField(
         settings.AUTH_USER_MODEL, through="Guardian", related_name="children"
@@ -77,6 +83,8 @@ class Child(models.Model):
         "Visible to the providers of classes this child attends.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ChildQuerySet.as_manager()
 
     class Meta:
         verbose_name_plural = "children"
@@ -136,9 +144,6 @@ class GuardianInvite(models.Model):
         return f"Invite {self.email} → {self.child}"
 
 
-SITE_CONFIG_CACHE_KEY = "accounts.site_config"
-
-
 class SiteConfig(models.Model):
     """Singleton with school-wide settings, editable in the admin."""
 
@@ -176,12 +181,11 @@ class SiteConfig(models.Model):
     def save(self, *args, **kwargs):
         self.pk = 1  # enforce singleton
         super().save(*args, **kwargs)
-        cache.delete(SITE_CONFIG_CACHE_KEY)
 
     @classmethod
     def get(cls):
-        config = cache.get(SITE_CONFIG_CACHE_KEY)
-        if config is None:
-            config, _ = cls.objects.get_or_create(pk=1)
-            cache.set(SITE_CONFIG_CACHE_KEY, config, 60)
+        # Deliberately uncached: it's one primary-key query, and caching it
+        # per-process made admin changes (signup toggle, offer TTL) apply
+        # inconsistently across gunicorn/notifier processes.
+        config, _ = cls.objects.get_or_create(pk=1)
         return config

@@ -3,13 +3,12 @@ from django.contrib import messages
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_POST
 
 from apps.accounts.permissions import provider_required
 from apps.catalog.models import ActivityClass, ClassSession
 from apps.enrollments.models import Attendance, Enrollment
+from apps.notifications import services as notification_services
 from apps.notifications.models import Broadcast
-from apps.notifications.services import queue_broadcast
 
 
 def _own_classes(user):
@@ -35,11 +34,7 @@ def class_detail(request, class_id):
         .prefetch_related("child__guardians")
         .order_by("child__first_name", "child__last_name")
     )
-    waitlisted = (
-        cls.enrollments.filter(status=Enrollment.Status.WAITLISTED)
-        .select_related("child")
-        .order_by("waitlisted_at", "id")
-    )
+    waitlisted = cls.enrollments.waitlist_fifo().select_related("child")
     today = timezone.localdate()
     sessions = cls.sessions.all()
     next_session = cls.sessions.filter(cancelled=False, date__gte=today).first()
@@ -68,7 +63,9 @@ def attendance(request, class_id, session_id):
     )
 
     if request.method == "POST":
-        present_ids = set(map(int, request.POST.getlist("present")))
+        present_ids = {
+            int(value) for value in request.POST.getlist("present") if value.isdigit()
+        }
         with transaction.atomic():
             for enrollment in roster:
                 Attendance.objects.update_or_create(
@@ -121,15 +118,16 @@ class ProviderBroadcastForm(forms.Form):
 def broadcast(request):
     form = ProviderBroadcastForm(request.user, request.POST or None)
     if request.method == "POST" and form.is_valid():
-        with transaction.atomic():
-            b = Broadcast.objects.create(
-                sender=request.user,
-                scope=Broadcast.Scope.SELECTED_CLASSES,
-                subject=form.cleaned_data["subject"],
-                body=form.cleaned_data["body"],
-            )
-            b.classes.set(form.cleaned_data["classes"])
-            count = queue_broadcast(b)
-        messages.success(request, f"Message queued for {count} famil{'y' if count == 1 else 'ies'}.")
+        _, count = notification_services.create_broadcast(
+            sender=request.user,
+            scope=Broadcast.Scope.SELECTED_CLASSES,
+            subject=form.cleaned_data["subject"],
+            body=form.cleaned_data["body"],
+            classes=form.cleaned_data["classes"],
+        )
+        messages.success(
+            request,
+            f"Message queued for {notification_services.family_count_phrase(count)}.",
+        )
         return redirect("provider_home")
     return render(request, "dashboards/provider/broadcast.html", {"form": form})

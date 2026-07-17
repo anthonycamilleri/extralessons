@@ -24,7 +24,8 @@ def claim_batch(batch_size=None):
     now = timezone.now()
     with transaction.atomic():
         rows = list(
-            Notification.objects.select_for_update(skip_locked=True)
+            Notification.objects.select_for_update(skip_locked=True, of=("self",))
+            .select_related("recipient")
             .filter(status=Notification.Status.PENDING, next_attempt_at__lte=now)
             .order_by("id")[:batch_size]
         )
@@ -38,8 +39,32 @@ def claim_batch(batch_size=None):
     return rows
 
 
+def _skip_reason_at_send(notification):
+    """Re-check consent just before sending: preferences may have changed
+    between queue time and delivery (retries can delay a send by hours)."""
+    recipient = notification.recipient
+    if recipient is None:
+        return None
+    if notification.channel == Notification.Channel.EMAIL:
+        if not recipient.notify_email:
+            return "Email notifications disabled before delivery"
+    else:
+        if not recipient.notify_whatsapp:
+            return "WhatsApp notifications disabled before delivery"
+        if not recipient.phone_e164:
+            return "Phone number removed before delivery"
+    return None
+
+
 def deliver(notification):
     """Send one notification and record the outcome. Returns the final status."""
+    skip_reason = _skip_reason_at_send(notification)
+    if skip_reason:
+        notification.status = Notification.Status.SKIPPED
+        notification.skip_reason = skip_reason
+        notification.save(update_fields=["status", "skip_reason"])
+        return notification.status
+
     adapter = get_adapter(notification.channel)
     try:
         message_id = adapter.send(notification)

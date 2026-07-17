@@ -29,11 +29,14 @@ class EnrollmentAdmin(admin.ModelAdmin):
 
     @admin.action(description="Cancel selected enrollments (notifies families)")
     def cancel_enrollments(self, request, queryset):
-        from .services import cancel
+        from .services import EnrollmentError, cancel
 
         cancelled = 0
         for enrollment in queryset.filter(status__in=Enrollment.ACTIVE_STATUSES):
-            cancel(enrollment, Enrollment.CancelReason.ADMIN, actor=request.user)
+            try:
+                cancel(enrollment, Enrollment.CancelReason.ADMIN, actor=request.user)
+            except EnrollmentError:
+                continue  # e.g. cancelled concurrently by the parent
             cancelled += 1
         self.message_user(
             request, f"Cancelled {cancelled} enrollment(s).", messages.WARNING
