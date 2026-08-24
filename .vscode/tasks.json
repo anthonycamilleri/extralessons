@@ -4,7 +4,7 @@
         {
             "label": "Start dev environment",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build",
+            "command": "docker compose up --build",
             "isBackground": true,
             "group": { "kind": "build", "isDefault": true },
             "problemMatcher": [],
@@ -14,45 +14,45 @@
         {
             "label": "Stop dev environment",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down",
+            "command": "docker compose down",
             "problemMatcher": []
         },
         {
             "label": "Run tests",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm web pytest",
+            "command": "docker compose run --rm web pytest",
             "group": { "kind": "test", "isDefault": true },
             "problemMatcher": []
         },
         {
             "label": "Seed demo data",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm web python manage.py seed_demo",
+            "command": "docker compose run --rm web python manage.py seed_demo",
             "problemMatcher": [],
             "detail": "Creates demo admin/provider/parent accounts, a term and sample classes"
         },
         {
             "label": "Create superuser",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm web python manage.py createsuperuser",
+            "command": "docker compose run --rm web python manage.py createsuperuser",
             "problemMatcher": []
         },
         {
             "label": "Make migrations",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm web python manage.py makemigrations",
+            "command": "docker compose run --rm web python manage.py makemigrations",
             "problemMatcher": []
         },
         {
             "label": "Django shell",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm web python manage.py shell",
+            "command": "docker compose run --rm web python manage.py shell",
             "problemMatcher": []
         },
         {
             "label": "Tail logs",
             "type": "shell",
-            "command": "docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f web notifier",
+            "command": "docker compose logs -f web notifier",
             "isBackground": true,
             "problemMatcher": []
         }

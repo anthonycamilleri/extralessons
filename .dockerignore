@@ -1,11 +1,17 @@
 # Never bake secrets, VCS history, or local state into the image.
 .env
+.env.*
 .git
+.github
 .venv
+.vscode
+docs/
 media/
 staticfiles/
 __pycache__/
 *.pyc
 .pytest_cache/
-.vscode/
+.coverage
 db.sqlite3
+docker-compose*.yml
+*.egg-info/

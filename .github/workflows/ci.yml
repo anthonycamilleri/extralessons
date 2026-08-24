@@ -4,8 +4,35 @@ on:
   push:
   pull_request:
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
-  tests:
+  # The zero-dependency path: this is what a contributor gets from
+  # `python manage.py runserver` with nothing installed but Python. If it
+  # breaks, the SQLite dev story is broken.
+  test-sqlite:
+    name: tests (SQLite)
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DATABASE_URL: "sqlite://:memory:"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: python manage.py check
+      - run: pytest -q
+
+  # The authoritative run. The capacity mutex is a row lock, so the concurrency
+  # tests in tests/test_capacity_race.py only mean anything here — they skip
+  # themselves on SQLite.
+  test-postgres:
+    name: tests (PostgreSQL)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -22,18 +49,87 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
       DATABASE_URL: postgres://app:app@localhost:5432/extralessons
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-      - name: Django system checks
-        run: python manage.py check
-        env:
-          DJANGO_SETTINGS_MODULE: config.settings.test
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: python manage.py check
       - name: Run tests
-        run: pytest -x
+        run: pytest -q
+      - name: Assert the concurrency tests actually ran
+        # They skip themselves on a backend without row locks, and a silent
+        # skip here would mean the capacity mutex is untested in CI.
+        run: |
+          python -c "
+          import django; django.setup()
+          from django.db import connection
+          assert connection.features.has_select_for_update, (
+              'DATABASE_URL is not PostgreSQL: tests/test_capacity_race.py skipped itself'
+          )
+          print('row locking available:', connection.vendor)
+          "
+
+  # Production settings have to survive `check --deploy` before anything ships;
+  # a missing SECURE_* or a broken storage backend should fail here, not on
+  # Scaleway.
+  deploy-checks:
+    name: production settings
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      SECRET_KEY: ci-only-placeholder-long-enough-to-satisfy-the-check-0123456789
+      ALLOWED_HOSTS: activities.example.com
+      CSRF_TRUSTED_ORIGINS: https://activities.example.com
+      DATABASE_URL: postgres://user:pass@db.example.com:5432/extralessons?sslmode=require
+      S3_BUCKET: example-bucket
+      S3_ACCESS_KEY_ID: example
+      S3_SECRET_ACCESS_KEY: example
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e "."
+      - run: python manage.py check --deploy --fail-level WARNING
+      - name: Migrations are complete
+        run: python manage.py makemigrations --check --dry-run
+
+  # Catches Dockerfile breakage on the PR rather than on the deploy. Builds for
+  # linux/amd64 because that is all Scaleway Serverless accepts.
+  build:
+    name: container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: extralessons:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Image starts and answers its health probe
+        run: |
+          docker run -d --name smoke -p 8080:8080 \
+            -e SECRET_KEY=ci-only-placeholder \
+            -e ALLOWED_HOSTS=localhost,127.0.0.1 \
+            -e SECURE_SSL_REDIRECT=false \
+            extralessons:ci
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/_health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8080/_health || { docker logs smoke; exit 1; }
+          docker rm -f smoke

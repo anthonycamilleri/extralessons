@@ -9,6 +9,14 @@ from apps.enrollments.models import Enrollment
 
 from .factories import ActivityClassFactory, AdminFactory, ChildFactory
 
+# The capacity mutex is a row lock, and SQLite has no SELECT ... FOR UPDATE —
+# Django silently drops the clause there, so these tests would assert nothing.
+# Run the suite against PostgreSQL (as CI does) to exercise them.
+pytestmark = pytest.mark.skipif(
+    not connection.features.has_select_for_update,
+    reason="Row-level locking requires PostgreSQL; set DATABASE_URL to a Postgres server.",
+)
+
 
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_approvals_never_oversubscribe():
