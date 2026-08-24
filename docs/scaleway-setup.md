@@ -6,6 +6,26 @@ three of Serverless Containers, Serverless Jobs and Serverless SQL Database.
 
 Budget about an hour for the first run.
 
+## The short version
+
+Everything below is scripted. `deploy/provision.sh` creates the whole estate,
+is idempotent, and can be re-run after a failure — it skips whatever already
+exists:
+
+```sh
+scw init                                      # once, interactive
+cp deploy/scaleway.env.example deploy/scaleway.env
+$EDITOR deploy/scaleway.env                   # domain, admin email, SMTP password
+./deploy/provision.sh
+./deploy/github-config.sh                     # writes the Actions secrets (needs gh)
+```
+
+It prints the two things it cannot do for you — the DNS record, and creating
+the first admin user — and the exact commands for both.
+
+Read the rest of this document to understand what it made and why, or to do it
+by hand. The commands here and in the script are the same commands.
+
 ## The shape of it
 
 ```
@@ -79,7 +99,11 @@ scw iam policy create name="$APP_NAME-runtime" application-id="$APP_ID" \
   rules.1.permission-set-names.0=ObjectStorageFullAccess
 
 # The secret key is shown once. Keep it.
+# default-project-id is what makes the key usable as an Object Storage
+# credential; without it the S3 calls authenticate but have no project to
+# resolve the bucket in.
 scw iam api-key create application-id="$APP_ID" \
+  default-project-id="$PROJECT_ID" \
   description="$APP_NAME runtime" -o json
 ```
 
@@ -197,16 +221,16 @@ export SITE_URL="https://$DOMAIN"
 NS_ID=$(scw container namespace create name="$APP_NAME" -o json | jq -r '.id')
 
 scw container container create namespace-id="$NS_ID" name="$APP_NAME-web" \
-  registry-image="$IMAGE" \
+  image="$IMAGE" \
   port=8080 \
   min-scale=0 max-scale=5 \
-  memory-limit=1024 cpu-limit=1000 \
+  memory-limit-bytes=1GB mvcpu-limit=1000 \
   scaling-option.concurrent-requests-threshold=8 \
   timeout=60s \
   privacy=public \
-  http-option=redirected \
-  health-check.http.path=/_health \
-  health-check.interval=30s \
+  https-connections-only=true \
+  liveness-probe.http.path=/_health \
+  liveness-probe.interval=30s \
   environment-variables.DJANGO_SETTINGS_MODULE=config.settings.prod \
   environment-variables.ALLOWED_HOSTS="$DOMAIN" \
   environment-variables.CSRF_TRUSTED_ORIGINS="https://$DOMAIN" \
@@ -217,29 +241,33 @@ scw container container create namespace-id="$NS_ID" name="$APP_NAME-web" \
   environment-variables.EMAIL_HOST=smtp.tem.scw.cloud \
   environment-variables.EMAIL_PORT=587 \
   environment-variables.DEFAULT_FROM_EMAIL="School Activities <notifications@$DOMAIN>" \
-  secret-environment-variables.0.key=SECRET_KEY \
-  secret-environment-variables.0.value="$SECRET_KEY" \
-  secret-environment-variables.1.key=DATABASE_URL \
-  secret-environment-variables.1.value="$DATABASE_URL" \
-  secret-environment-variables.2.key=S3_ACCESS_KEY_ID \
-  secret-environment-variables.2.value="$RUNTIME_ACCESS_KEY" \
-  secret-environment-variables.3.key=S3_SECRET_ACCESS_KEY \
-  secret-environment-variables.3.value="$RUNTIME_SECRET_KEY" \
-  secret-environment-variables.4.key=EMAIL_HOST_PASSWORD \
-  secret-environment-variables.4.value="$SMTP_PASSWORD" \
+  secret-environment-variables.SECRET_KEY="$SECRET_KEY" \
+  secret-environment-variables.DATABASE_URL="$DATABASE_URL" \
+  secret-environment-variables.S3_ACCESS_KEY_ID="$RUNTIME_ACCESS_KEY" \
+  secret-environment-variables.S3_SECRET_ACCESS_KEY="$RUNTIME_SECRET_KEY" \
+  secret-environment-variables.EMAIL_HOST_PASSWORD="$SMTP_PASSWORD" \
   -o json
 ```
 
 Why these numbers:
 
+> **These argument names track scaleway-cli v2.61.** An earlier CLI spelled
+> them `registry-image`, `memory-limit` (MiB), `cpu-limit`, `http-option` and
+> `health-check.*`. Those are not deprecated aliases — they were removed, and
+> the CLI now rejects them as unknown arguments. If you are following an older
+> copy of this guide, that is why. `scw container container create -h` is the
+> authority.
+
 | Setting | Value | Reason |
 |---|---|---|
 | `scaling-option.concurrent-requests-threshold` | 8 | Matches `GUNICORN_THREADS` in `deploy/gunicorn.conf.py`. Set them together or the platform will queue work on an instance that has no thread free for it. (This replaces the deprecated `max-concurrency` flag.) |
+| `memory-limit-bytes` | `1GB` | Must carry a `G`/`GB` unit — the CLI rejects a bare byte count and rejects `MB`. |
 | `max-scale` | 5 | 5 × 8 = 40 concurrent requests, far more than a school needs on enrolment day. Raise it *and* `DB_POOL_MAX_SIZE` together — every instance holds up to `DB_POOL_MAX_SIZE` connections, and the database's connection ceiling scales with its allocated compute. |
 | `min-scale` | 0 | Scale to zero after 15 idle minutes. Set `1` if a cold start on the first morning request is unacceptable; it costs roughly a small always-on instance. |
-| `memory-limit` | 1024 | Django plus Pillow. Below 512 MB image uploads get tight. |
+| `memory-limit-bytes` | `1GB` | Django plus Pillow. Below 512 MB image uploads get tight. |
 | `timeout` | 60s | Must be ≥ `GUNICORN_TIMEOUT` so gunicorn is the one that gives up first and returns a real error. |
-| `http-option` | `redirected` | The platform redirects HTTP→HTTPS at the edge, before a request costs you an instance. |
+| `https-connections-only` | true | Insecure HTTP is turned away at the edge, before a request costs you an instance. This is the replacement for the removed `http-option=redirected`. |
+| `liveness-probe.http.path` | `/_health` | `config/health.py` answers before host validation, so a wrong `ALLOWED_HOSTS` cannot fail the probe and take every instance down. |
 
 **One interaction to know about.** Because delivery is inline, a request that
 queues notifications also sends them, and it holds its pooled database
@@ -462,6 +490,27 @@ retries. Scaleway Transactional Email on 587 avoids the question.
 `--platform linux/amd64` produces an image that fails at deploy time, not at
 build time.
 
+**On Windows, Git Bash rewrites `/_health`.** MSYS translates any argument that
+looks like a Unix absolute path into a Windows one, so
+`liveness-probe.http.path=/_health` arrives at the API as
+`C:/Program Files/Git/_health`. The container then fails every health check and
+settles in `error` with a message naming that path — which at least says what
+happened, once you know to read it. `export MSYS_NO_PATHCONV=1` before running
+any `scw` command fixes it; `deploy/provision.sh` sets it for you. The same
+applies to `docker run -v /app:...` and anything else taking a leading slash.
+PowerShell and WSL are unaffected.
+
+**A partial liveness probe is rejected at the API, not the CLI.** Passing only
+`liveness-probe.http.path` and `.interval` parses fine and then fails with
+`'liveness_probe.timeout' is required`. Supply all four:
+`.http.path`, `.interval`, `.timeout` and `.failure-threshold` (which must be
+between 3 and 50).
+
+**The container endpoint is assigned asynchronously.** `domain_name` is `null`
+for the first minute or two after creation, so read it in a loop rather than
+once — and note that a container stuck in `creating` is often really a failing
+health check that has not yet been reported as `error`.
+
 **`ALLOWED_HOSTS` must include every hostname that reaches Django**, including
 the generated `…functions.fnc.fr-par.scw.cloud` endpoint if you use it directly.
 The health probe is exempt: `config/health.py` answers it before host validation
@@ -475,4 +524,5 @@ reach for `pg_advisory_lock`, it will appear to work and then quietly not.
 
 **Redirect loops.** If `/` bounces forever, the platform is forwarding plain
 HTTP without `X-Forwarded-Proto`. Set `SECURE_SSL_REDIRECT=false` on the
-container and let `http-option=redirected` handle the redirect at the edge.
+container and let `https-connections-only=true` keep plain HTTP out at the
+edge.

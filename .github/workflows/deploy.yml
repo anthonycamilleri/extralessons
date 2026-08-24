@@ -119,7 +119,11 @@ jobs:
           scw jobs definition update "${{ vars.SCW_JOB_MIGRATE_ID }}" \
             image-uri="$IMAGE_REF" -o json > /dev/null
 
-          run_id=$(scw jobs definition start "${{ vars.SCW_JOB_MIGRATE_ID }}" -o json | jq -r '.id')
+          # The response is {"job_runs":[{...}]}, not a bare run object, so the
+          # id lives one level down. Reading `.id` here yields null and the
+          # `jobs run wait` that follows fails on a malformed UUID.
+          run_id=$(scw jobs definition start "${{ vars.SCW_JOB_MIGRATE_ID }}" -o json \
+            | jq -r '.job_runs[0].id // .id')
           echo "Migration run: $run_id"
 
           # `wait` blocks until the run reaches a stable state; it is not the
@@ -160,9 +164,11 @@ jobs:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
           set -euo pipefail
-          # Updating registry-image is what triggers the redeploy.
+          # Updating the image reference is what triggers the redeploy.
+          # The argument is `image=`; the older `registry-image=` was removed
+          # from the CLI and is now rejected as an unknown argument.
           scw container container update "${{ vars.SCW_CONTAINER_ID }}" \
-            registry-image="$IMAGE_REF" -o json > /dev/null
+            image="$IMAGE_REF" -o json > /dev/null
 
           # The container reports the *previous* deployment as ready for a
           # moment after the update lands, so settle before believing a status.
@@ -171,7 +177,10 @@ jobs:
           for attempt in $(seq 1 60); do
             json=$(scw container container get "${{ vars.SCW_CONTAINER_ID }}" -o json)
             status=$(echo "$json" | jq -r '.status')
-            image=$(echo "$json" | jq -r '.registry_image')
+            # The API has carried this field under both names; accept either
+            # so a CLI upgrade cannot make the readiness check silently
+            # compare against "null" and time out after five minutes.
+            image=$(echo "$json" | jq -r '.image // .registry_image // "unknown"')
             echo "attempt $attempt: status=$status image=$image"
 
             if [ "$status" = "ready" ] && [ "$image" = "$IMAGE_REF" ]; then

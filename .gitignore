@@ -7,3 +7,8 @@ db.sqlite3
 .env
 .pytest_cache/
 .coverage
+
+# Scaleway provisioning: local config and the generated state file, which
+# holds IAM secret keys the API only ever shows once.
+/deploy/scaleway.env
+/deploy/.scaleway-state
