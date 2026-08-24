@@ -55,8 +55,10 @@ services:
                python manage.py runserver 0.0.0.0:8000;
              fi"
 
-  # Mirrors the Scaleway notifier Job, but as a daemon so local changes take
-  # effect immediately. In production this is `run_notifier --drain` on a cron.
+  # The safety net, as a daemon so you can watch it. Delivery itself happens
+  # inline in the request; this loop only covers what no click can trigger —
+  # offer expiry, stuck-row recovery, retries due while nothing is happening.
+  # In production it is `run_notifier --drain` on a nightly cron instead.
   notifier:
     build:
       context: .

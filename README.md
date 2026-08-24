@@ -37,7 +37,7 @@ The whole thing runs serverless on Scaleway, as one image in three roles:
 |------|---------|---------|
 | `web` | Serverless Container | `gunicorn --config deploy/gunicorn.conf.py config.wsgi` |
 | `migrate` | Serverless Job, once per deploy | `manage.py migrate --noinput` |
-| `notifier` | Serverless Job, on a cron | `manage.py run_notifier --drain` |
+| `notifier` | Serverless Job, nightly | `manage.py run_notifier --drain` |
 
 Three roles rather than three images: a migration that ran against code the web
 tier does not have is exactly the failure that arrangement avoids. Locally the
@@ -55,11 +55,27 @@ and retries failures with exponential backoff up to `NOTIFIER_MAX_ATTEMPTS`. It
 also expires overdue waiting-list offers each cycle. Every row is a permanent
 delivery log, inspectable in the admin.
 
-This is also what makes the app cheap to run serverless: there is no queue
-broker and no always-on worker. The outbox lives in the database the app
-already has, and the notifier is a scheduled job that wakes, drains the queue
-and exits — `--drain` keeps it cycling past a single `NOTIFIER_BATCH_SIZE` so a
-broadcast to 300 families goes out in one run rather than one batch per tick.
+**Delivery happens inline.** Once the state change commits, the same request
+delivers what it queued (`schedule_delivery()` in
+`apps/notifications/services.py`), sharing one SMTP connection across the
+batch. A parent gets their email in seconds, and no polling loop is involved.
+This is only safe because the outbox already treats a failed send as a
+first-class state: an inline failure leaves exactly the row a failed worker
+send would have left, so it costs a retry rather than a lost notification —
+and a rolled back transaction announces nothing.
+
+**The scheduled job is a safety net, not the delivery path.** It runs once a
+night and handles the three things no click can trigger: retries whose backoff
+came due while the site was idle, rows stranded in `SENDING` by a crash, and
+waiting-list offers reaching their 48-hour deadline. It can be that rare
+because a delivery pass claims *every* due row, not just the current request's
+— so during school hours the site's own traffic flushes the queue — and
+because expired offers already stop holding a seat in SQL
+(`ActivityClassQuerySet.with_counts`), so seat availability never waits for a
+sweep.
+
+There is no queue broker and no always-on worker: the outbox lives in the
+database the app already has.
 
 **Enrollment state machine.** All transitions go through
 `apps/enrollments/services.py`, which takes a row lock on the class as a
@@ -97,9 +113,10 @@ python manage.py runserver
 ```
 
 No services, no containers. The app is at http://localhost:8000 and the admin
-at http://localhost:8000/admin/. Notifications queue as usual; deliver them
-with `python manage.py run_notifier` in a second terminal (console email in dev
-settings, so they print rather than send).
+at http://localhost:8000/admin/. Notifications deliver inline, so they print to
+the console (dev settings use the console email backend) as you click. To
+exercise the nightly safety net — offer expiry, stuck-row recovery — run
+`python manage.py run_notifier --once`.
 
 The one thing SQLite cannot do is row-level locking, so
 `tests/test_capacity_race.py` skips itself. Anything touching
@@ -176,6 +193,8 @@ set on the Serverless Container and Jobs instead of in a file — see
 | `NOTIFIER_BATCH_SIZE` | Notifications delivered per worker cycle (default 20) |
 | `NOTIFIER_MAX_ATTEMPTS` | Retries before a notification is marked failed (default 5) |
 | `NOTIFIER_DRAIN_MAX_SECONDS` | Time budget for `run_notifier --drain` (default 300) |
+| `NOTIFIER_INLINE_DELIVERY` | Deliver in the request that queued the rows (default `true`). Off falls back to the scheduled job alone |
+| `NOTIFIER_INLINE_MAX_SECONDS` | Latency budget for an inline pass (default 20); leftovers stay queued |
 
 ### Runtime configuration (Django admin)
 
@@ -245,7 +264,7 @@ apps/
 templates/            # server-rendered HTML (HTMX-enhanced)
 static/               # main.css, vendored htmx.min.js
 tests/                # pytest suite (services, capacity race, notifications, views,
-                      # health probe, notifier job modes)
+                      # health probe, inline delivery, notifier job modes)
 .github/workflows/
   ci.yml              # tests on SQLite + Postgres, deploy checks, image build
   deploy.yml          # build → migrate job → container redeploy → smoke test

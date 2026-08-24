@@ -112,10 +112,9 @@ scw sdb-sql database create name="$APP_NAME" cpu-min=0 cpu-max=4 -o json
 query it stops billing compute, and the first query afterwards pays a cold
 start of a few seconds.
 
-**Choosing `cpu-min`.** Set it to `0` while you are setting things up. Before
-go-live, read the note on the notifier schedule in step 6 — the two decisions
-interact, and picking them independently is how you end up paying for an idle
-database.
+**Choosing `cpu-min`.** `0` is right here. It only pays off if the database is
+allowed to fall idle, which is why the notifier runs nightly rather than every
+few minutes — see step 6.
 
 Get the hostname. The console shows it under *Connect application* on the
 database's Overview tab; from the CLI:
@@ -242,6 +241,15 @@ Why these numbers:
 | `timeout` | 60s | Must be ≥ `GUNICORN_TIMEOUT` so gunicorn is the one that gives up first and returns a real error. |
 | `http-option` | `redirected` | The platform redirects HTTP→HTTPS at the edge, before a request costs you an instance. |
 
+**One interaction to know about.** Because delivery is inline, a request that
+queues notifications also sends them, and it holds its pooled database
+connection while it does. For an ordinary transition that is two or three
+emails and well under a second. For a broadcast it can be the full
+`NOTIFIER_INLINE_MAX_SECONDS` (default 20). With `DB_POOL_MAX_SIZE=4`, four
+simultaneous broadcasts would make a fifth request wait — which no single
+school will ever do, but it is the reason that budget exists and the knob to
+turn if you ever see requests queueing behind sends.
+
 ### The migration job
 
 ```sh
@@ -261,12 +269,17 @@ No cron: this one only ever runs from the deploy pipeline.
 
 ### The notifier job
 
+Delivery does **not** depend on this job. Notifications go out inline, in the
+request that caused them, as soon as the state change commits — see
+`schedule_delivery()` in `apps/notifications/services.py`. This job is the
+safety net for the three things no user action can trigger.
+
 ```sh
 scw jobs definition create name="$APP_NAME-notifier" \
   image-uri="$IMAGE" \
   cpu-limit=500 memory-limit=1024 \
   job-timeout=600s \
-  cron-schedule.schedule="*/5 * * * *" \
+  cron-schedule.schedule="0 3 * * *" \
   cron-schedule.timezone="Europe/Malta" \
   startup-command.0=python startup-command.1=manage.py \
   args.0=run_notifier args.1=--drain args.2=--max-seconds args.3=240 \
@@ -281,23 +294,40 @@ scw jobs definition create name="$APP_NAME-notifier" \
   -o json
 ```
 
-`--drain` keeps cycling until the outbox is empty, then exits. Without it a run
-would move only `NOTIFIER_BATCH_SIZE` (20) rows, so a broadcast to 300 families
-would trickle out one cron tick at a time. `--max-seconds 240` keeps a run
-comfortably inside the 600-second job timeout.
+`--drain` keeps cycling until the outbox is empty, then exits. `--max-seconds
+240` keeps a run comfortably inside the 600-second job timeout.
 
-**Choosing the schedule — this is the one that costs money.** Every run queries
-the database, and the database only stops billing compute after five minutes of
-silence. A `* * * * *` schedule therefore keeps it awake permanently and you
-never see a cent of the scale-to-zero saving. Every five minutes lets it idle
-between runs.
+**Why once a night is enough.** The job does three things that inline delivery
+cannot, because all three happen when nothing else is happening:
 
-What you give up is delivery latency. Nothing in this app is
-latency-sensitive: the tightest deadline is a waiting-list offer that expires
-after 48 configurable hours. Five minutes is invisible to a parent and it is
-the setting to start from. Go to one minute only if someone complains that
-confirmation emails feel slow — and expect the database bill to change when you
-do.
+1. **Retries whose backoff came due while the site was idle.** A failed send is
+   rescheduled 2, 4, 8… minutes out. No click will land at that moment.
+2. **Rows stranded in `SENDING`** because an instance died mid-send. By
+   definition whatever would have retried them is gone.
+3. **Waiting-list offers reaching their deadline**, 48 hours after an admin
+   made them.
+
+None of these needs to be prompt, for a reason worth understanding before you
+change the schedule: **a delivery pass claims every due row, not just the ones
+the current request queued.** So any parent registering or any admin approving
+also flushes everyone else's backlog — including retries. During school hours
+the site's own traffic is the notifier. The cron only matters when the site is
+genuinely idle, and when it is idle nobody is waiting for anything.
+
+Offer expiry is safe to defer for a second reason: it is already lazy.
+`_seats_taken()` and the `with_counts()` annotation both exclude expired offers
+in SQL, and `_expire_stale_offers_locked()` runs on every transition touching
+that class. A freed seat appears in the catalogue and the review queue the
+instant it frees, whether or not this job has run. What the sweep adds is the
+*notification* that an offer lapsed.
+
+**What you give up at `0 3 * * *`:** on a completely idle site, an
+offer-expiry email and a crash-stranded notification can wait until 03:00.
+If that ever bites, make it hourly (`0 * * * *`) or every fifteen minutes
+during school hours (`*/15 7-19 * * *`) — during those hours real traffic keeps
+the database awake anyway, so it costs close to nothing. The saving from
+scaling to zero comes from nights, weekends and holidays, and a nightly job
+keeps all of it.
 
 > **Secrets in job definitions.** The commands above put `DATABASE_URL` in a
 > plain environment variable, which is readable by anyone who can read the job
@@ -412,9 +442,12 @@ natural home for it.
 
 **Cost knobs, roughly in order of impact:**
 
-1. The notifier cron interval (it decides whether the database ever idles).
-2. `min-scale` on the container.
-3. `cpu-min` on the database.
+1. `min-scale` on the container.
+2. `cpu-min` on the database.
+3. The notifier cron interval — a nightly job lets the database idle through
+   every night, weekend and holiday. Anything more frequent than about every
+   five minutes keeps it permanently awake, because idle only starts after five
+   minutes of silence.
 4. Log volume in Cockpit.
 
 ## Things that will bite you

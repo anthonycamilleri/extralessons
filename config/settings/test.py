@@ -33,4 +33,9 @@ NOTIFICATION_CHANNELS = {
     "WHATSAPP": "apps.notifications.channels.whatsapp.StubWhatsAppAdapter",
 }
 
+# Off by default so tests can assert on what queueing produced, before anything
+# has been delivered. tests/test_inline_delivery.py turns it on to exercise the
+# production path.
+NOTIFIER_INLINE_DELIVERY = False
+
 LOGGING["root"]["level"] = env("LOG_LEVEL", default="WARNING").upper()  # noqa: F405

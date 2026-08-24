@@ -1,12 +1,24 @@
-"""Delivery loop internals for the run_notifier command.
+"""Delivery internals for the outbox.
 
-Claiming uses SELECT ... FOR UPDATE SKIP LOCKED so several workers could run
-side by side, though one is plenty for a school. Sending happens outside any
-transaction so a slow SMTP/Meta call never holds a database lock.
+Two callers, same machinery:
+
+  * `drain()` runs inline right after a state change commits
+    (apps.notifications.services.schedule_delivery), so a parent sees their
+    email in seconds rather than whenever a timer next fires.
+  * `run_once()` is the scheduled safety net — it additionally expires stale
+    offers and recovers rows stranded by a crash, neither of which any user
+    action can trigger.
+
+Claiming uses SELECT ... FOR UPDATE SKIP LOCKED so the two can overlap safely.
+Sending happens outside any transaction so a slow SMTP/Meta call never holds a
+database lock.
 """
+import contextlib
 import logging
+import time
 
 from django.conf import settings
+from django.core import mail
 from django.db import transaction
 from django.utils import timezone
 
@@ -56,8 +68,12 @@ def _skip_reason_at_send(notification):
     return None
 
 
-def deliver(notification):
-    """Send one notification and record the outcome. Returns the final status."""
+def deliver(notification, adapter=None):
+    """Send one notification and record the outcome. Returns the final status.
+
+    `adapter` lets a batch reuse one adapter (and so one SMTP connection)
+    across many rows; without it each call resolves its own.
+    """
     skip_reason = _skip_reason_at_send(notification)
     if skip_reason:
         notification.status = Notification.Status.SKIPPED
@@ -65,7 +81,8 @@ def deliver(notification):
         notification.save(update_fields=["status", "skip_reason"])
         return notification.status
 
-    adapter = get_adapter(notification.channel)
+    if adapter is None:
+        adapter = get_adapter(notification.channel)
     try:
         message_id = adapter.send(notification)
     except ChannelError as exc:
@@ -126,8 +143,91 @@ def recover_stuck():
     ).update(status=Notification.Status.PENDING, next_attempt_at=timezone.now())
 
 
+@contextlib.contextmanager
+def delivery_session():
+    """Yield a channel -> adapter resolver whose adapters live for the batch.
+
+    The email adapter gets one open SMTP connection for the whole session. A
+    fresh TLS handshake per message costs more than the message, so for a
+    150-family broadcast this is the difference between seconds and minutes.
+    """
+    email_connection = mail.get_connection()
+    adapters = {}
+
+    def resolve(channel):
+        if channel not in adapters:
+            if channel == Notification.Channel.EMAIL:
+                adapters[channel] = get_adapter(channel, connection=email_connection)
+            else:
+                adapters[channel] = get_adapter(channel)
+        return adapters[channel]
+
+    try:
+        yield resolve
+    finally:
+        # Never let closing the connection mask a delivery outcome that is
+        # already recorded in the database.
+        with contextlib.suppress(Exception):
+            email_connection.close()
+
+
+def deliver_batch(batch, resolve=None):
+    """Deliver an already-claimed batch. Returns how many rows were processed."""
+    if not batch:
+        return 0
+    if resolve is not None:
+        for notification in batch:
+            deliver(notification, resolve(notification.channel))
+        return len(batch)
+    with delivery_session() as resolve:
+        for notification in batch:
+            deliver(notification, resolve(notification.channel))
+    return len(batch)
+
+
+def drain(max_seconds=None, max_rows=None):
+    """Deliver due notifications until the queue is empty or a limit is hit.
+
+    Delivery only — no offer expiry, no stuck-row recovery. Those are the
+    scheduled job's business (see `run_once`); doing them here would put a
+    class-locking sweep on the critical path of an ordinary page load.
+
+    Returns the number of rows processed.
+    """
+    deadline = None if max_seconds is None else time.monotonic() + max_seconds
+    processed = 0
+    with delivery_session() as resolve:
+        while True:
+            remaining = None if max_rows is None else max_rows - processed
+            if remaining is not None and remaining <= 0:
+                break
+            batch_size = settings.NOTIFIER_BATCH_SIZE
+            if remaining is not None:
+                batch_size = min(batch_size, remaining)
+
+            batch = claim_batch(batch_size)
+            if not batch:
+                break
+            processed += deliver_batch(batch, resolve)
+
+            if deadline is not None and time.monotonic() >= deadline:
+                logger.info(
+                    "Delivery budget spent after %s row(s); the rest goes out on the "
+                    "next state change or the scheduled sweep.",
+                    processed,
+                )
+                break
+    return processed
+
+
 def run_once():
-    """One worker cycle: expire offers, recover stuck rows, deliver a batch."""
+    """One scheduled cycle: expire offers, recover stuck rows, deliver a batch.
+
+    The two sweeps here are the reason a timer still exists at all: an offer
+    reaching its deadline and a row stranded mid-send by a crash are both
+    things that happen when nothing else is happening, so no user action can
+    stand in for them.
+    """
     from apps.enrollments.services import expire_offers
 
     expired = expire_offers()
@@ -138,6 +238,4 @@ def run_once():
         logger.warning("Recovered %s stuck notification(s)", recovered)
 
     batch = claim_batch()
-    for notification in batch:
-        deliver(notification)
-    return len(batch)
+    return deliver_batch(batch)

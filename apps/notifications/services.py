@@ -1,13 +1,19 @@
 """Queueing side of the notification pipeline (the transactional outbox).
 
 Call these from inside the same database transaction as the state change they
-announce: the Notification rows then commit atomically with the change, and
-the run_notifier worker picks them up after commit. Nothing here talks to
-SMTP or the WhatsApp API.
+announce: the Notification rows then commit atomically with the change.
+Nothing here talks to SMTP or the WhatsApp API — queueing must not be able to
+fail because a mail server is down.
+
+Delivery is asked for, not performed: each queueing helper calls
+`schedule_delivery()`, which arranges a delivery pass *after* the transaction
+commits. Rolled back state changes therefore send nothing, and the rows stay
+the single source of truth either way.
 """
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Prefetch
 from django.template import Context, Template
 from django.urls import reverse
@@ -18,6 +24,44 @@ from apps.accounts.models import SiteConfig, User
 from .models import Broadcast, Event, Notification, NotificationTemplate
 
 logger = logging.getLogger(__name__)
+
+
+def _deliver_after_commit():
+    """Deliver what is due, now that the state change is durable.
+
+    Failure here is deliberately swallowed. The outbox already treats a failed
+    send as a first-class state — the row stays PENDING with a retry stamp —
+    so there is nothing to gain by turning a mail server outage into a 500 for
+    a parent whose registration was in fact saved.
+    """
+    from . import worker
+
+    try:
+        worker.drain(max_seconds=settings.NOTIFIER_INLINE_MAX_SECONDS)
+    except Exception:
+        logger.exception(
+            "Inline delivery pass failed; rows stay queued for the next state "
+            "change or the scheduled sweep"
+        )
+
+
+def schedule_delivery():
+    """Ask for one delivery pass once the current transaction commits.
+
+    Idempotent within a transaction: a single state change queues several rows
+    (parent, co-guardian, admin alert) and they should cost one pass, not one
+    each. Django discards on_commit hooks when a transaction rolls back, so
+    inspecting the pending list is both the dedupe and the rollback handling.
+
+    Outside a transaction, Django runs an on_commit hook immediately — which is
+    the right behaviour for the few callers that queue outside one.
+    """
+    if not settings.NOTIFIER_INLINE_DELIVERY:
+        return
+    pending = transaction.get_connection().run_on_commit
+    if any(func is _deliver_after_commit for _sids, func, *_ in pending):
+        return
+    transaction.on_commit(_deliver_after_commit)
 
 
 def _absolute(url_path):
@@ -142,6 +186,7 @@ def queue_event(event, enrollment, **extra_context):
             guardian, template, context, event=event, enrollment=enrollment
         )
     Notification.objects.bulk_create(rows)
+    schedule_delivery()
 
 
 def queue_admin_event(event, enrollment, **extra_context):
@@ -173,6 +218,7 @@ def queue_admin_event(event, enrollment, **extra_context):
         for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True)
     ]
     Notification.objects.bulk_create(rows)
+    schedule_delivery()
 
 
 def queue_guardian_invite(invite):
@@ -188,6 +234,7 @@ def queue_guardian_invite(invite):
     _email_row(
         template, context, email=invite.email, event=Event.GUARDIAN_INVITE
     ).save()
+    schedule_delivery()
 
 
 def create_broadcast(sender, scope, subject, body, classes=None):
@@ -249,6 +296,7 @@ def queue_broadcast(broadcast):
             guardian, template, context, event=Event.BROADCAST, broadcast=broadcast
         )
     Notification.objects.bulk_create(rows, batch_size=500)
+    schedule_delivery()
 
     broadcast.sent_at = timezone.now()
     broadcast.save(update_fields=["sent_at"])

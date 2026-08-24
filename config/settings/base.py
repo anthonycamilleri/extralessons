@@ -152,6 +152,17 @@ NOTIFIER_IDLE_SLEEP_SECONDS = env.int("NOTIFIER_IDLE_SLEEP_SECONDS", default=5)
 # uses. Keep it comfortably under the job timeout.
 NOTIFIER_DRAIN_MAX_SECONDS = env.int("NOTIFIER_DRAIN_MAX_SECONDS", default=300)
 
+# Deliver queued notifications inline, right after the state change commits,
+# instead of waiting for the scheduled sweep. Safe because the outbox already
+# treats a failed send as a first-class state: an inline failure leaves exactly
+# the row a failed worker send would have left.
+NOTIFIER_INLINE_DELIVERY = env.bool("NOTIFIER_INLINE_DELIVERY", default=True)
+# How long an inline pass may spend sending before handing the rest back to the
+# queue. This lands in a user's request, so it is a latency budget, not a
+# throughput one — the common case (a transition queueing two or three rows)
+# finishes in well under a second.
+NOTIFIER_INLINE_MAX_SECONDS = env.int("NOTIFIER_INLINE_MAX_SECONDS", default=20)
+
 # Absolute base URL used in notification links (no trailing slash).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 
