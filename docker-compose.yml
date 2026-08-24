@@ -1,11 +1,24 @@
+# Local development against PostgreSQL.
+#
+# Production is Scaleway Serverless — see docs/scaleway-setup.md. There is no
+# compose file for it on purpose: the deployed topology is a Serverless
+# Container plus two Serverless Jobs, and a compose file pretending otherwise
+# would drift out of date the first time someone changed the real thing.
+#
+# For the fastest loop, skip this entirely: `python manage.py runserver` uses
+# SQLite with no services at all. Use this stack when you need PostgreSQL —
+# which the row-locking tests in tests/test_capacity_race.py require.
+name: extralessons
+
 services:
   db:
     image: postgres:16
-    restart: unless-stopped
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       POSTGRES_DB: extralessons
+    ports:
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,53 +28,55 @@ services:
       retries: 10
 
   web:
-    build: .
-    restart: unless-stopped
+    build:
+      context: .
+      target: dev
     env_file:
       - path: .env
         required: false
     environment:
-      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+      DJANGO_SETTINGS_MODULE: config.settings.dev
       DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:-app}@db:5432/extralessons
+      DEBUGPY: ${DEBUGPY:-0}
     volumes:
+      - .:/app
       - media:/app/media
+    ports:
+      - "8000:8000"
+      - "5678:5678"
     depends_on:
       db:
         condition: service_healthy
     command: >
       sh -c "python manage.py migrate --noinput &&
-             gunicorn config.wsgi --workers 3 --bind 0.0.0.0:8000"
+             if [ \"$$DEBUGPY\" = \"1\" ]; then
+               python -m debugpy --listen 0.0.0.0:5678 manage.py runserver 0.0.0.0:8000;
+             else
+               python manage.py runserver 0.0.0.0:8000;
+             fi"
 
+  # The safety net, as a daemon so you can watch it. Delivery itself happens
+  # inline in the request; this loop only covers what no click can trigger —
+  # offer expiry, stuck-row recovery, retries due while nothing is happening.
+  # In production it is `run_notifier --drain` on a nightly cron instead.
   notifier:
-    build: .
-    restart: unless-stopped
+    build:
+      context: .
+      target: dev
     env_file:
       - path: .env
         required: false
     environment:
-      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.prod}
+      DJANGO_SETTINGS_MODULE: config.settings.dev
       DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:-app}@db:5432/extralessons
+    volumes:
+      - .:/app
+      - media:/app/media
     depends_on:
       db:
         condition: service_healthy
     command: python manage.py run_notifier
 
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:-http://localhost}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - media:/srv/media:ro
-      - caddy_data:/data
-    depends_on:
-      - web
-
 volumes:
   pgdata:
   media:
-  caddy_data:

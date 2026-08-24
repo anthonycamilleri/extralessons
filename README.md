@@ -27,20 +27,62 @@ A booking system for school extra-curricular activities. The school publishes a 
 
 ## Architecture at a glance
 
-Django 5 + PostgreSQL, server-rendered templates progressively enhanced with HTMX (vendored, no JS build step). Static files via WhiteNoise, media served by Caddy in production.
+Django 5 + PostgreSQL, server-rendered templates progressively enhanced with
+HTMX (vendored, no JS build step). Static files via WhiteNoise, uploaded images
+on S3-compatible object storage.
 
-Docker Compose services:
+The whole thing runs serverless on Scaleway, as one image in three roles:
 
-| Service    | Role                                                                 |
-|------------|----------------------------------------------------------------------|
-| `db`       | PostgreSQL 16                                                        |
-| `web`      | Django under gunicorn (dev override: `runserver` with autoreload)    |
-| `notifier` | `python manage.py run_notifier` — notification delivery worker       |
-| `caddy`    | Reverse proxy + automatic TLS + media file serving (disabled in dev) |
+| Role | Runs as | Command |
+|------|---------|---------|
+| `web` | Serverless Container | `gunicorn --config deploy/gunicorn.conf.py config.wsgi` |
+| `migrate` | Serverless Job, once per deploy | `manage.py migrate --noinput` |
+| `notifier` | Serverless Job, nightly | `manage.py run_notifier --drain` |
 
-**Transactional outbox.** State changes never talk to SMTP or the WhatsApp API directly. Instead, `Notification` rows are queued inside the same database transaction as the state change (`apps/notifications/services.py`), so they commit atomically with it. The `notifier` service (`apps/notifications/worker.py`) claims batches with `SELECT ... FOR UPDATE SKIP LOCKED`, sends outside any transaction, and retries failures with exponential backoff up to `NOTIFIER_MAX_ATTEMPTS`. It also expires overdue waiting-list offers each cycle. Every row is a permanent delivery log, inspectable in the admin.
+Three roles rather than three images: a migration that ran against code the web
+tier does not have is exactly the failure that arrangement avoids. Locally the
+same code runs from `docker-compose.yml`, or with no services at all against
+SQLite.
 
-**Enrollment state machine.** All transitions go through `apps/enrollments/services.py`, which takes a row lock on the class as a capacity mutex so a class can never be oversubscribed under concurrent requests.
+Full deployment instructions: [docs/scaleway-setup.md](docs/scaleway-setup.md).
+
+**Transactional outbox.** State changes never talk to SMTP or the WhatsApp API
+directly. Instead, `Notification` rows are queued inside the same database
+transaction as the state change (`apps/notifications/services.py`), so they
+commit atomically with it. The notifier (`apps/notifications/worker.py`) claims
+batches with `SELECT ... FOR UPDATE SKIP LOCKED`, sends outside any transaction,
+and retries failures with exponential backoff up to `NOTIFIER_MAX_ATTEMPTS`. It
+also expires overdue waiting-list offers each cycle. Every row is a permanent
+delivery log, inspectable in the admin.
+
+**Delivery happens inline.** Once the state change commits, the same request
+delivers what it queued (`schedule_delivery()` in
+`apps/notifications/services.py`), sharing one SMTP connection across the
+batch. A parent gets their email in seconds, and no polling loop is involved.
+This is only safe because the outbox already treats a failed send as a
+first-class state: an inline failure leaves exactly the row a failed worker
+send would have left, so it costs a retry rather than a lost notification —
+and a rolled back transaction announces nothing.
+
+**The scheduled job is a safety net, not the delivery path.** It runs once a
+night and handles the three things no click can trigger: retries whose backoff
+came due while the site was idle, rows stranded in `SENDING` by a crash, and
+waiting-list offers reaching their 48-hour deadline. It can be that rare
+because a delivery pass claims *every* due row, not just the current request's
+— so during school hours the site's own traffic flushes the queue — and
+because expired offers already stop holding a seat in SQL
+(`ActivityClassQuerySet.with_counts`), so seat availability never waits for a
+sweep.
+
+There is no queue broker and no always-on worker: the outbox lives in the
+database the app already has.
+
+**Enrollment state machine.** All transitions go through
+`apps/enrollments/services.py`, which takes a row lock on the class as a
+capacity mutex so a class can never be oversubscribed under concurrent
+requests. The lock is row-level `SELECT ... FOR UPDATE` inside a transaction,
+which survives a transaction-mode connection pooler — unlike advisory locks,
+which Serverless SQL Database does not guarantee.
 
 ```
 parent registers ──► REQUESTED ── admin approves ──► ENROLLED   (seat free)
@@ -53,25 +95,48 @@ OFFERED ── parent declines / offer expires (48h, configurable) ──► CAN
 any active state ── withdrawal / admin cancel / class cancelled ──► CANCELLED
 ```
 
-`ENROLLED` and `OFFERED` hold a seat; an offer reserves the seat until confirmed, declined, or expired.
+`ENROLLED` and `OFFERED` hold a seat; an offer reserves the seat until
+confirmed, declined, or expired.
 
 ## Local development
 
-Prerequisites: Docker Desktop and VS Code.
+Two ways to run it. Pick the first unless you need PostgreSQL.
 
-**Quickstart:** open the folder in VS Code, then *Terminal → Run Task → "Start dev environment"*. Or from a terminal:
-
-```sh
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
-
-This boots Postgres, the Django dev server (autoreload, console email, stub WhatsApp), and the notifier worker. Caddy is not started in dev. Then seed demo data (task *"Seed demo data"*, or):
+### Without Docker (SQLite)
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm web python manage.py seed_demo
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+python manage.py migrate
+python manage.py seed_demo
+python manage.py runserver
 ```
 
-The app is at http://localhost:8000 and the Django admin at http://localhost:8000/admin/. Demo accounts (all with password `demo1234`):
+No services, no containers. The app is at http://localhost:8000 and the admin
+at http://localhost:8000/admin/. Notifications deliver inline, so they print to
+the console (dev settings use the console email backend) as you click. To
+exercise the nightly safety net — offer expiry, stuck-row recovery — run
+`python manage.py run_notifier --once`.
+
+The one thing SQLite cannot do is row-level locking, so
+`tests/test_capacity_race.py` skips itself. Anything touching
+`apps/enrollments/services.py` needs the PostgreSQL path below before you trust
+it.
+
+### With Docker (PostgreSQL)
+
+Open the folder in VS Code and run *Terminal → Run Task → "Start dev
+environment"*, or:
+
+```sh
+docker compose up --build
+docker compose run --rm web python manage.py seed_demo
+```
+
+This boots Postgres, the Django dev server (autoreload, console email, stub
+WhatsApp) and the notifier as a daemon. Same URLs as above.
+
+Demo accounts (all with password `demo1234`):
 
 | Account                | Role                                    |
 |------------------------|-----------------------------------------|
@@ -83,39 +148,53 @@ The app is at http://localhost:8000 and the Django admin at http://localhost:800
 
 Seeding is idempotent and also creates a demo term and four sample classes.
 
-Other VS Code tasks: *Run tests*, *Create superuser*, *Make migrations*, *Django shell*, *Tail logs*, *Stop dev environment*.
+Other VS Code tasks: *Run tests*, *Create superuser*, *Make migrations*,
+*Django shell*, *Tail logs*, *Stop dev environment*.
 
-**Debugging:** start the stack with `DEBUGPY=1` (e.g. `DEBUGPY=1 docker compose -f docker-compose.yml -f docker-compose.dev.yml up`), then use the *"Attach to Django (docker, DEBUGPY=1)"* launch configuration to attach on port 5678.
+**Debugging:** start the stack with `DEBUGPY=1`, then use the *"Attach to Django
+(docker, DEBUGPY=1)"* launch configuration to attach on port 5678.
 
-**Tests** run with pytest inside the web container and need Postgres (the test settings point at the same database server):
+### Tests
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm web pytest
+pytest                                                    # SQLite, fast
+DATABASE_URL=postgres://app:app@localhost:5432/extralessons pytest   # full
 ```
+
+CI runs both. The PostgreSQL run is the authoritative one.
 
 ## Configuration
 
-### Environment variables (`.env`)
+### Environment variables
 
-Copy `.env.example` to `.env`. Docker Compose reads it for the `web` and `notifier` services.
+Copy `.env.example` to `.env` for local development. In production these are
+set on the Serverless Container and Jobs instead of in a file — see
+[docs/scaleway-setup.md](docs/scaleway-setup.md).
 
 | Variable | Purpose |
 |---|---|
-| `DJANGO_SETTINGS_MODULE` | `config.settings.prod` in production (dev override sets `config.settings.dev`) |
+| `DJANGO_SETTINGS_MODULE` | `config.settings.prod` in production, `config.settings.dev` locally |
 | `SECRET_KEY` | Django secret key — set to a long random string |
 | `DEBUG` | Keep `false` outside development |
 | `ALLOWED_HOSTS` | Comma-separated hostnames the app serves |
 | `CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. `https://activities.example.com` |
-| `SITE_ADDRESS` | Address Caddy serves (drives automatic TLS) |
-| `SITE_URL` | Absolute base URL used in notification links (default `http://localhost:8000`) |
+| `SITE_URL` | Absolute base URL used in notification links |
 | `TIME_ZONE` | Default `Europe/Malta` |
-| `POSTGRES_PASSWORD` | Used by the `db` container and the app's connection string |
-| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS` | SMTP settings for outgoing email |
+| `LOG_LEVEL` | Root log level; everything goes to stdout |
+| `DATABASE_URL` | Unset = SQLite. On Scaleway the username is an IAM application ID and the password its API secret key |
+| `DB_POOL` / `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | Client-side connection pool (PostgreSQL only). Raise `DB_POOL_MAX_SIZE` and the container's max-scale together |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT_URL` | Object storage for uploaded class images. Unset = local disk, which is ephemeral on serverless |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Object storage credentials |
+| `S3_CUSTOM_DOMAIN` | Optional CDN hostname for media URLs |
+| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS` | SMTP. Ports 25 and 465 are blocked outbound on Scaleway Serverless; use 587 |
 | `DEFAULT_FROM_EMAIL` | From address, e.g. `School Activities <notifications@example.com>` |
 | `WHATSAPP_ENABLED` | `false` = log WhatsApp messages instead of sending (stub) |
 | `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_API_VERSION` | Meta WhatsApp Cloud API credentials |
 | `NOTIFIER_BATCH_SIZE` | Notifications delivered per worker cycle (default 20) |
 | `NOTIFIER_MAX_ATTEMPTS` | Retries before a notification is marked failed (default 5) |
+| `NOTIFIER_DRAIN_MAX_SECONDS` | Time budget for `run_notifier --drain` (default 300) |
+| `NOTIFIER_INLINE_DELIVERY` | Deliver in the request that queued the rows (default `true`). Off falls back to the scheduled job alone |
+| `NOTIFIER_INLINE_MAX_SECONDS` | Latency budget for an inline pass (default 20); leftovers stay queued |
 
 ### Runtime configuration (Django admin)
 
@@ -135,39 +214,39 @@ WhatsApp delivery uses the Meta WhatsApp Cloud API and sends business-initiated 
 
 With `WHATSAPP_ENABLED=false` (the default, and always in dev settings) a stub adapter logs messages instead of calling Meta; the production settings switch to the real `WhatsAppCloudAdapter` only when the flag is true. Parents opt in per account and must have a phone number in international format.
 
-## Production deployment (VPS)
+## Deployment
 
-```sh
-cp .env.example .env
-# edit .env: SITE_ADDRESS, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, SITE_URL,
-# SECRET_KEY, POSTGRES_PASSWORD, SMTP + WhatsApp credentials
-docker compose up -d
-```
+Production runs on Scaleway Serverless. Push to `main` and
+`.github/workflows/deploy.yml` builds the image for `linux/amd64`, pushes it to
+Scaleway Container Registry, runs migrations as a Serverless Job and waits for
+them, repoints the notifier job, redeploys the container, then smoke-tests
+`/_health`.
 
-Point your domain's DNS at the server; Caddy obtains and renews TLS certificates automatically for the `SITE_ADDRESS` you set. Migrations run automatically on `web` startup. Create the first admin account:
+Images are tagged by commit SHA, so a rollback is *Actions → Deploy to Scaleway
+→ Run workflow* with `image_tag` set to an earlier SHA.
 
-```sh
-docker compose run --rm web python manage.py createsuperuser
-```
-
-**Backups:** the database lives in the `pgdata` volume. A nightly `pg_dump` cron is the minimum, e.g.:
-
-```
-0 3 * * * cd /path/to/extralessons && docker compose exec -T db pg_dump -U app extralessons | gzip > /var/backups/extralessons-$(date +\%F).sql.gz
-```
-
-Also back up the `media` volume (uploaded images).
+One-time provisioning — the database, bucket, registry, container, jobs, domain
+and GitHub secrets — is in
+**[docs/scaleway-setup.md](docs/scaleway-setup.md)**. That document also covers
+the two settings that decide the bill (the notifier cron interval and
+`min-scale`), backups, and the platform limits worth knowing before you hit
+them.
 
 ## Project layout
 
 ```
 config/
   settings/
-    base.py           # shared settings (env-driven)
-    dev.py            # DEBUG, console email, stub WhatsApp
-    prod.py           # SMTP, real WhatsApp when enabled, security headers
-    test.py           # pytest settings (needs Postgres)
+    base.py           # shared settings (env-driven); SQLite unless DATABASE_URL is set
+    dev.py            # DEBUG, console email, stub WhatsApp, SQLite pragmas
+    prod.py           # Scaleway: S3 media, connection pooling, SMTP, security headers
+    test.py           # pytest settings (SQLite or Postgres via DATABASE_URL)
+  health.py           # /_health middleware, ahead of ALLOWED_HOSTS and the HTTPS redirect
   urls.py             # /admin/, /accounts/, /me/, /provider/, /admin-tools/, catalogue at /
+deploy/
+  gunicorn.conf.py    # tuned for a Serverless Container (1 process, threads, preload)
+docs/
+  scaleway-setup.md   # one-time provisioning: database, bucket, container, jobs, domain
 apps/
   accounts/           # custom email-login User (roles: ADMIN/PROVIDER/PARENT),
                       # Child, Guardian, GuardianInvite, SiteConfig singleton,
@@ -180,9 +259,13 @@ apps/
                       # services.py = queueing/rendering (call inside the state-change
                       # transaction); worker.py = delivery loop (claim, send, retry,
                       # expire offers); channels/ = email + WhatsApp adapters (stub & Meta);
-                      # management/commands/run_notifier.py
+                      # management/commands/run_notifier.py (--once/--drain/daemon)
   dashboards/         # parent, provider and admin-tools views/urls
 templates/            # server-rendered HTML (HTMX-enhanced)
 static/               # main.css, vendored htmx.min.js
-tests/                # pytest suite (services, capacity race, notifications, views)
+tests/                # pytest suite (services, capacity race, notifications, views,
+                      # health probe, inline delivery, notifier job modes)
+.github/workflows/
+  ci.yml              # tests on SQLite + Postgres, deploy checks, image build
+  deploy.yml          # build → migrate job → container redeploy → smoke test
 ```

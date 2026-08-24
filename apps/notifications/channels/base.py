@@ -7,10 +7,15 @@ class ChannelError(Exception):
         self.permanent = permanent
 
 
-def get_adapter(channel):
-    """Resolve the adapter configured for a channel in settings.NOTIFICATION_CHANNELS."""
+def get_adapter(channel, **kwargs):
+    """Resolve the adapter configured for a channel in settings.NOTIFICATION_CHANNELS.
+
+    Keyword arguments are passed to the adapter's constructor. The worker uses
+    this to hand the email adapter one already-open SMTP connection for a whole
+    batch; see apps.notifications.worker.delivery_session.
+    """
     from django.conf import settings
     from django.utils.module_loading import import_string
 
     path = settings.NOTIFICATION_CHANNELS[channel]
-    return import_string(path)()
+    return import_string(path)(**kwargs)

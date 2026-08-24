@@ -7,7 +7,17 @@ from .base import ChannelError
 
 
 class EmailAdapter:
-    """Send via Django's configured email backend (SMTP in prod, console in dev)."""
+    """Send via Django's configured email backend (SMTP in prod, console in dev).
+
+    With no `connection`, every message opens and tears down its own SMTP
+    session — fine for one email, ruinous for a batch, where the TLS handshake
+    dominates. The worker passes one open connection for the whole batch, which
+    is the difference between a 150-family broadcast taking seconds and taking
+    minutes.
+    """
+
+    def __init__(self, connection=None):
+        self.connection = connection
 
     def send(self, notification):
         if not notification.recipient_email:
@@ -17,6 +27,7 @@ class EmailAdapter:
             body=notification.rendered_body,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[notification.recipient_email],
+            connection=self.connection,
         )
         try:
             message.send(fail_silently=False)
