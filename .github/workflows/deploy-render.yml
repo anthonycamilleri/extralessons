@@ -1,0 +1,97 @@
+name: Deploy to Render
+
+# Render builds the image from the Dockerfile itself, runs the migrations as
+# the web service's pre-deploy command, and only switches traffic once the new
+# version answers /_health. What this workflow adds is the *when*: a deploy
+# happens only after CI has passed on the commit, web before notifier so the
+# schema is migrated before the cron job can meet it, and a rollback is a
+# re-run of this workflow with an earlier commit.
+#
+# Render's own "deploy after checks pass" trigger would do most of this with
+# no workflow at all; see the note at the top of render.yaml.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Commit to deploy. Defaults to the head of main; give an earlier SHA to roll back."
+        required: false
+        type: string
+
+# Never let two deploys interleave: a pre-deploy migration is not safe to run
+# twice concurrently, and the second deploy would race the first.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # workflow_run fires for every CI conclusion; only a green one deploys.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required configuration is present
+        # Failing here with a readable message beats a 401 from the API
+        # halfway through. See docs/render-setup.md.
+        env:
+          RENDER_WEB_SERVICE_ID: ${{ vars.RENDER_WEB_SERVICE_ID }}
+          RENDER_CRON_SERVICE_ID: ${{ vars.RENDER_CRON_SERVICE_ID }}
+        run: |
+          missing=""
+          for name in RENDER_API_KEY RENDER_WEB_SERVICE_ID RENDER_CRON_SERVICE_ID; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets/variables:$missing"
+            echo "Run deploy/render-github-config.sh, or set them under"
+            echo "Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Resolve the commit to deploy
+        id: commit
+        # On a workflow_run event github.sha is the head of the default branch
+        # at the time the event fired, which is not necessarily the commit CI
+        # just tested; head_sha is.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            sha="${{ github.event.workflow_run.head_sha }}"
+          else
+            sha="${{ inputs.commit_sha || github.sha }}"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Deploying $sha"
+
+      - name: Deploy the web service (runs migrations first)
+        run: deploy/render-deploy.sh "${{ vars.RENDER_WEB_SERVICE_ID }}" "${{ steps.commit.outputs.sha }}"
+
+      - name: Deploy the notifier cron job
+        # Cron jobs deploy by building the image too; nothing runs until the
+        # next scheduled tick, which now uses the same code as the web tier.
+        run: deploy/render-deploy.sh "${{ vars.RENDER_CRON_SERVICE_ID }}" "${{ steps.commit.outputs.sha }}"
+
+      - name: Smoke test
+        if: ${{ vars.APP_URL != '' }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.APP_URL }}/_health" || true)
+            [ "$code" = "200" ] && { echo "health ok"; exit 0; }
+            echo "attempt $attempt: HTTP $code"
+            sleep 5
+          done
+          echo "::error::${{ vars.APP_URL }}/_health never returned 200."
+          exit 1

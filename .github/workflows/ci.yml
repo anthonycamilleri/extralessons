@@ -78,8 +78,9 @@ jobs:
           "
 
   # Production settings have to survive `check --deploy` before anything ships;
-  # a missing SECURE_* or a broken storage backend should fail here, not on
-  # Scaleway.
+  # a missing SECURE_* or a broken storage backend should fail here, not in
+  # the pre-deploy step on Render. RENDER_EXTERNAL_HOSTNAME is set so the
+  # host-list handling in prod.py runs under the check too.
   deploy-checks:
     name: production settings
     runs-on: ubuntu-latest
@@ -88,6 +89,7 @@ jobs:
       SECRET_KEY: ci-only-placeholder-long-enough-to-satisfy-the-check-0123456789
       ALLOWED_HOSTS: activities.example.com
       CSRF_TRUSTED_ORIGINS: https://activities.example.com
+      RENDER_EXTERNAL_HOSTNAME: extralessons-web.onrender.com
       DATABASE_URL: postgres://user:pass@db.example.com:5432/extralessons?sslmode=require
       S3_BUCKET: example-bucket
       S3_ACCESS_KEY_ID: example
@@ -104,8 +106,9 @@ jobs:
       - name: Migrations are complete
         run: python manage.py makemigrations --check --dry-run
 
-  # Catches Dockerfile breakage on the PR rather than on the deploy. Builds for
-  # linux/amd64 because that is all Scaleway Serverless accepts.
+  # Catches Dockerfile breakage on the PR rather than on the deploy. Builds the
+  # default (final) stage with no target, exactly as Render does, for
+  # linux/amd64, which is what Render runs.
   build:
     name: container image
     runs-on: ubuntu-latest
@@ -115,7 +118,6 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          target: runtime
           platforms: linux/amd64
           push: false
           load: true

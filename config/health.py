@@ -1,6 +1,6 @@
-"""Liveness endpoint for the serverless platform's probe.
+"""Liveness endpoint for the platform's health probe.
 
-Deliberately *not* a Django view. Scaleway probes the container with whatever
+Deliberately *not* a Django view. The platform probes the container with whatever
 Host header it likes, and probes must keep answering while the database is
 cold-starting, so this has to run before ALLOWED_HOSTS validation
 (`CommonMiddleware`), before `SecurityMiddleware`'s HTTPS redirect, and without

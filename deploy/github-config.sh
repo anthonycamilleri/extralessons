@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 #
+# LEGACY (Scaleway). The Render equivalent is deploy/render-github-config.sh.
+#
 # Push the secrets and variables .github/workflows/deploy.yml needs into the
 # GitHub repository, reading them from deploy/.scaleway-state.
 #

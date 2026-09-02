@@ -1,4 +1,12 @@
-# Deploying Extralessons on Scaleway Serverless
+# Deploying Extralessons on Scaleway Serverless (legacy)
+
+> **Superseded.** Production now runs on Render — see
+> [render-setup.md](render-setup.md). Nothing here is triggered automatically
+> any more: `.github/workflows/deploy.yml` only runs from *Actions → Run
+> workflow*, and `deploy/provision.sh` is kept for reference and for tearing
+> the old estate down. The Scaleway-specific environment variables (IAM
+> credentials in `DATABASE_URL`, `S3_*` pointing at `fr-par`) still work
+> unchanged if you ever need them.
 
 End-to-end setup, from an empty Scaleway project to a deploying-on-push
 pipeline. Everything is in `fr-par`, the only region that currently offers all

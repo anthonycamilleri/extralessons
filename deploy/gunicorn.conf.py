@@ -1,4 +1,4 @@
-"""Gunicorn tuning for a Serverless Container.
+"""Gunicorn tuning for a small, horizontally scaled container.
 
 The shape is the opposite of the usual VM advice. On a VM you size workers to
 the box and let one process handle everything; here the *platform* scales, so
@@ -8,7 +8,7 @@ one instance can hold bounded, which matters when the platform is free to run
 50 instances against a database whose connection ceiling scales with its
 allocated compute.
 
-Set the container's max-concurrency to match `threads`.
+On a platform that scales by instance count, size the instance to `threads`.
 """
 import os
 
@@ -44,7 +44,7 @@ class HealthCheckFilteringLogger(glogging.Logger):
     """Keep the platform's probe out of the access log.
 
     The probe runs continuously against every instance and says nothing. Logs
-    are billed by volume on Cockpit, so this is a real line item, and it keeps
+    are retained and searched by volume, so this is a real line item, and it keeps
     the log readable when something is actually wrong.
     """
 

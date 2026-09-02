@@ -5,8 +5,8 @@ Three modes, because the same command serves two very different runtimes:
   --once            one cycle, then exit. Smallest possible unit of work.
   --drain [--max-seconds N]
                     keep cycling until the queue is empty or the time budget
-                    runs out, then exit. This is the mode a scheduled
-                    Serverless Job uses: a single cycle only moves
+                    runs out, then exit. This is the mode the scheduled
+                    cron job uses: a single cycle only moves
                     NOTIFIER_BATCH_SIZE rows, so a broadcast to 300 families
                     would otherwise trickle out one cron tick at a time.
   (no flag)         loop forever. The container/VM daemon mode.
@@ -39,7 +39,7 @@ class Command(BaseCommand):
             "--drain",
             action="store_true",
             help="Cycle until the queue is empty or --max-seconds elapses, then exit. "
-            "Intended for a scheduled Serverless Job.",
+            "Intended for the scheduled cron job.",
         )
         parser.add_argument(
             "--max-seconds",
