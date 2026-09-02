@@ -40,26 +40,44 @@ jobs:
       contents: read
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      # The service names from render.yaml. Ids are looked up from these at
+      # run time, so the only configuration GitHub needs is the API key.
+      WEB_SERVICE_NAME: extralessons-web
+      CRON_SERVICE_NAME: extralessons-notifier
     steps:
       - uses: actions/checkout@v4
 
       - name: Check required configuration is present
         # Failing here with a readable message beats a 401 from the API
         # halfway through. See docs/render-setup.md.
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::Missing repository secret RENDER_API_KEY."
+            echo "Create one under Render → Account settings → API Keys and add it"
+            echo "under Settings → Secrets and variables → Actions (or run"
+            echo "deploy/render-github-config.sh)."
+            exit 1
+          fi
+
+      - name: Resolve the Render services
+        id: render
+        # Repository variables, when set, are honoured as overrides; otherwise
+        # the ids and the site URL come from the Render API by service name.
         env:
           RENDER_WEB_SERVICE_ID: ${{ vars.RENDER_WEB_SERVICE_ID }}
           RENDER_CRON_SERVICE_ID: ${{ vars.RENDER_CRON_SERVICE_ID }}
+          APP_URL: ${{ vars.APP_URL }}
         run: |
-          missing=""
-          for name in RENDER_API_KEY RENDER_WEB_SERVICE_ID RENDER_CRON_SERVICE_ID; do
-            [ -n "${!name}" ] || missing="$missing $name"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::Missing repository secrets/variables:$missing"
-            echo "Run deploy/render-github-config.sh, or set them under"
-            echo "Settings → Secrets and variables → Actions."
-            exit 1
-          fi
+          set -euo pipefail
+          web="${RENDER_WEB_SERVICE_ID:-$(deploy/render-service-id.sh "$WEB_SERVICE_NAME")}"
+          cron="${RENDER_CRON_SERVICE_ID:-$(deploy/render-service-id.sh "$CRON_SERVICE_NAME")}"
+          url="${APP_URL:-$(deploy/render-service-id.sh --url "$WEB_SERVICE_NAME")}"
+          echo "web=$web"   >> "$GITHUB_OUTPUT"
+          echo "cron=$cron" >> "$GITHUB_OUTPUT"
+          echo "url=$url"   >> "$GITHUB_OUTPUT"
+          echo "web service: $web"
+          echo "cron job:    $cron"
+          echo "site:        ${url:-<unknown, smoke test skipped>}"
 
       - name: Resolve the commit to deploy
         id: commit
@@ -76,22 +94,24 @@ jobs:
           echo "Deploying $sha"
 
       - name: Deploy the web service (runs migrations first)
-        run: deploy/render-deploy.sh "${{ vars.RENDER_WEB_SERVICE_ID }}" "${{ steps.commit.outputs.sha }}"
+        run: deploy/render-deploy.sh "${{ steps.render.outputs.web }}" "${{ steps.commit.outputs.sha }}"
 
       - name: Deploy the notifier cron job
         # Cron jobs deploy by building the image too; nothing runs until the
         # next scheduled tick, which now uses the same code as the web tier.
-        run: deploy/render-deploy.sh "${{ vars.RENDER_CRON_SERVICE_ID }}" "${{ steps.commit.outputs.sha }}"
+        run: deploy/render-deploy.sh "${{ steps.render.outputs.cron }}" "${{ steps.commit.outputs.sha }}"
 
       - name: Smoke test
-        if: ${{ vars.APP_URL != '' }}
+        if: ${{ steps.render.outputs.url != '' }}
+        env:
+          APP_URL: ${{ steps.render.outputs.url }}
         run: |
           set -euo pipefail
           for attempt in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.APP_URL }}/_health" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/_health" || true)
             [ "$code" = "200" ] && { echo "health ok"; exit 0; }
             echo "attempt $attempt: HTTP $code"
             sleep 5
           done
-          echo "::error::${{ vars.APP_URL }}/_health never returned 200."
+          echo "::error::$APP_URL/_health never returned 200."
           exit 1

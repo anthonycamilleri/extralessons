@@ -12,9 +12,9 @@ Budget about half an hour for the first run; most of it is waiting for builds.
    Mail Token. Set `DEFAULT_FROM_EMAIL` in `render.yaml`, commit to `main`.
 3. Dashboard → **New → Blueprint** → connect the repo → branch `main` →
    paste the ZeptoMail token when asked → **Deploy Blueprint**.
-4. Create an API key, then `RENDER_API_KEY=… ./deploy/render-github-config.sh`
-   to hand the service IDs to GitHub Actions.
-5. Create the first admin from the web service's **Shell** tab.
+4. Create a Render API key and add it to the repository as the
+   `RENDER_API_KEY` Actions secret; create the `production` environment.
+5. Open the set-password email the first deploy sends to `ADMIN_EMAIL`.
 
 From then on every push to `main` that passes CI deploys itself.
 
@@ -164,17 +164,19 @@ generated hostname in as `RENDER_EXTERNAL_HOSTNAME` and
 
 `render.yaml` sets `autoDeployTrigger: "off"` on both services, so Render does
 **not** deploy on its own when `main` moves. `.github/workflows/deploy-render.yml`
-does, after `CI` has passed on the commit. It needs:
+does, after `CI` has passed on the commit. It needs one secret:
 
 | Kind | Name | Where from |
 |---|---|---|
 | secret | `RENDER_API_KEY` | Dashboard → avatar → *Account settings → API Keys → Create*. Scope it to the workspace |
-| variable | `RENDER_WEB_SERVICE_ID` | The `srv-…` in the web service's URL |
-| variable | `RENDER_CRON_SERVICE_ID` | The `crn-…` in the cron job's URL |
-| variable | `APP_URL` | Optional. The URL the site answers on; enables the smoke test |
 
-`deploy/render-github-config.sh` looks the IDs up by service name and writes
-all four with the `gh` CLI:
+Add it under *Settings → Secrets and variables → Actions*. The workflow finds
+the two services by their `render.yaml` names through the API
+(`deploy/render-service-id.sh`) and reads the site URL from the web service, so
+nothing else has to be copied. Three optional variables override that lookup:
+`RENDER_WEB_SERVICE_ID`, `RENDER_CRON_SERVICE_ID` and `APP_URL`.
+`deploy/render-github-config.sh` writes all four with the `gh` CLI if you
+prefer:
 
 ```sh
 gh auth login
@@ -196,13 +198,20 @@ already knows.
 
 ### 5. The first admin user
 
-Web service → **Shell** tab (paid instances have one), then:
+Nothing to run. The pre-deploy command is `migrate` followed by
+`manage.py ensure_admin`, which creates the account named by `ADMIN_EMAIL` in
+the shared group (a superuser with a random, unknown password) the first time
+it runs, and emails that address the same set-password link the login page's
+*Forgotten your password?* produces. Check the inbox after the first deploy,
+follow the link, choose a password, log in at `/admin/` and fill in *Site
+configuration*.
 
-```sh
-python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); U.objects.create_superuser(email='you@example.com', password='CHANGE-ME')"
-```
-
-Log in at `/admin/`, change the password, then fill in *Site configuration*.
+If no email arrived (the ZeptoMail token was not in place yet, say), the
+account still exists: use *Forgotten your password?* on the login page once
+email works, or resend from the web service's **Shell** tab with
+`python manage.py ensure_admin --send-reset`. The command is idempotent and
+runs on every deploy; changing `ADMIN_EMAIL` later creates a second admin
+rather than renaming the first. Add further administrators from the admin.
 
 ### 6. A custom domain
 

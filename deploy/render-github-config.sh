@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 #
-# Push the secret and variables .github/workflows/deploy-render.yml needs into
-# the GitHub repository, looking the service IDs up from the Render API.
+# Push the Render API key, and optionally the service ids and site URL, into
+# the GitHub repository for .github/workflows/deploy-render.yml.
+#
+# Only the RENDER_API_KEY secret is required: the workflow looks the services
+# up by name at run time. The variables written here are overrides that save
+# it two API calls, and APP_URL pins the smoke test to a custom domain.
 #
 # Run after the Blueprint has been created (docs/render-setup.md). Requires the
 # gh CLI, authenticated, and a Render API key:
@@ -15,7 +19,7 @@
 
 set -euo pipefail
 
-API="${RENDER_API:-https://api.render.com/v1}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${RENDER_API_KEY:?set RENDER_API_KEY (Account settings → API Keys)}"
 WEB_SERVICE_NAME="${WEB_SERVICE_NAME:-extralessons-web}"
 CRON_SERVICE_NAME="${CRON_SERVICE_NAME:-extralessons-notifier}"
@@ -26,25 +30,11 @@ command -v jq >/dev/null || { echo "jq not found" >&2; exit 1; }
 REPO_ARG=()
 [ $# -ge 1 ] && REPO_ARG=(--repo "$1")
 
-lookup() { # lookup NAME -> prints the service JSON, fails if not exactly one
-  local name="$1" matches
-  matches=$(curl -fsS "$API/services?name=$name&limit=20" \
-      -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json" \
-    | jq -c --arg n "$name" '[.[].service | select(.name == $n)]')
-  case "$(jq 'length' <<<"$matches")" in
-    1) jq -c '.[0]' <<<"$matches" ;;
-    0) echo "no Render service named '$name' — has the Blueprint been created?" >&2; exit 1 ;;
-    *) echo "several Render services named '$name'; delete the stray one" >&2; exit 1 ;;
-  esac
-}
-
-web=$(lookup "$WEB_SERVICE_NAME")
-cron=$(lookup "$CRON_SERVICE_NAME")
-WEB_ID=$(jq -r '.id' <<<"$web")
-CRON_ID=$(jq -r '.id' <<<"$cron")
+WEB_ID=$("$HERE/render-service-id.sh" "$WEB_SERVICE_NAME")
+CRON_ID=$("$HERE/render-service-id.sh" "$CRON_SERVICE_NAME")
 # The URL the service actually answers on: the custom domain once one is
 # attached, the generated *.onrender.com one until then.
-APP_URL=$(jq -r '.serviceDetails.url // empty' <<<"$web")
+APP_URL=$("$HERE/render-service-id.sh" --url "$WEB_SERVICE_NAME")
 
 set_secret() {
   # gh reads the value from stdin when --body is omitted, which keeps the
@@ -69,5 +59,6 @@ cat <<'EOF'
 Done. deploy-render.yml pins its job to the "production" environment — if that
 environment does not exist yet, create it under Settings → Environments, or
 the workflow will not start. Re-run this script after attaching a custom
-domain so APP_URL follows it.
+domain so APP_URL follows it (or delete the APP_URL variable and the workflow
+will ask Render for the current URL each time).
 EOF

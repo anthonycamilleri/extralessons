@@ -32,8 +32,10 @@ services:
     # Runs in the freshly built image, once, before the new version takes
     # traffic. If it fails the deploy is abandoned and the old version keeps
     # serving. This assumes additive migrations, the normal Django case; a
-    # destructive one needs the usual two-deploy dance.
-    preDeployCommand: python manage.py migrate --noinput
+    # destructive one needs the usual two-deploy dance. ensure_admin then
+    # creates the ADMIN_EMAIL account on first deploy and emails it a
+    # set-password link; on every later deploy it finds it and does nothing.
+    preDeployCommand: python manage.py migrate --noinput && python manage.py ensure_admin
     # Custom domain. Uncomment together with the three host variables below
     # once the DNS record exists; Render issues the certificate itself.
     # domains:
@@ -145,6 +147,10 @@ envVarGroups:
         value: config.settings.prod
       - key: SECRET_KEY
         generateValue: true
+      # The first administrator. Created by the pre-deploy step with a
+      # set-password email; further admins are added from the admin itself.
+      - key: ADMIN_EMAIL
+        value: anthony@camilleri.com
       - key: TIME_ZONE
         value: Europe/Malta
       - key: LOG_LEVEL
