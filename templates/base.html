@@ -4,15 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Activities{% endblock %} · {{ site_config.school_name }}</title>
+  <meta name="description" content="{% block description %}Extra-curricular activities at {{ site_config.school_name }} — browse the catalogue and register your children.{% endblock %}">
+  <meta name="theme-color" content="#0072bb">
+  <link rel="icon" href="{% static 'img/icon-32.png' %}" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="{% static 'img/icon-180.png' %}">
+  {# Self-hosted display face: the page makes no third-party requests. #}
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="{% static 'fonts/fredoka-latin.woff2' %}">
   <link rel="stylesheet" href="{% static 'css/main.css' %}">
   <script src="{% static 'js/htmx.min.js' %}" defer></script>
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<a class="skip-link" href="#content">Skip to content</a>
+
 <header class="site-header">
-  <nav class="container">
-    <a class="brand" href="{% url 'catalogue' %}">{{ site_config.school_name }} <span>activities</span></a>
+  <nav class="container" aria-label="Main">
+    {# The logo PNG has an opaque white background, so the header surface stays white. #}
+    <a class="brand" href="{% url 'catalogue' %}">
+      <img src="{% static 'img/pta-logo.png' %}" width="270" height="150" alt="">
+      <span class="brand-name">{{ site_config.school_name }}<span>Activities</span></span>
+    </a>
     <div class="nav-links">
-      <a href="{% url 'catalogue' %}">Catalogue</a>
+      <a href="{% url 'catalogue' %}"{% if request.resolver_match.url_name == "catalogue" %} aria-current="page"{% endif %}>Catalogue</a>
       {% if user.is_authenticated %}
         {% if user.role == "PARENT" %}
           <a href="{% url 'parent_home' %}">My family</a>
@@ -32,22 +44,32 @@
       {% endif %}
     </div>
   </nav>
+  {# The three logo colours, kept inside the sticky header so they stay in view. #}
+  <div class="brand-stripe" aria-hidden="true"></div>
 </header>
 
-<main class="container">
+<main class="container" id="content" tabindex="-1">
   {% if messages %}
-    {% for message in messages %}
-      <div class="flash flash-{{ message.tags }}">{{ message }}</div>
-    {% endfor %}
+    <div role="status" aria-live="polite">
+      {% for message in messages %}
+        <div class="flash flash-{{ message.tags }}">{{ message }}</div>
+      {% endfor %}
+    </div>
   {% endif %}
   {% block content %}{% endblock %}
 </main>
 
 <footer class="site-footer">
-  <div class="container">
-    {{ site_config.school_name }}
-    {% if site_config.contact_email %} · <a href="mailto:{{ site_config.contact_email }}">{{ site_config.contact_email }}</a>{% endif %}
+  <div class="container footer-inner">
+    <div>
+      <strong>{{ site_config.school_name }}</strong>
+      {% if site_config.contact_email %}
+        · <a href="mailto:{{ site_config.contact_email }}">{{ site_config.contact_email }}</a>
+      {% endif %}
+    </div>
+    <span class="footer-dots" aria-hidden="true"><i></i><i></i><i></i></span>
   </div>
 </footer>
+{% block scripts %}{% endblock %}
 </body>
 </html>

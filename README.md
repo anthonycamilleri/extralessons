@@ -262,7 +262,10 @@ apps/
                       # management/commands/run_notifier.py (--once/--drain/daemon)
   dashboards/         # parent, provider and admin-tools views/urls
 templates/            # server-rendered HTML (HTMX-enhanced)
-static/               # main.css, vendored htmx.min.js
+static/               # main.css (the whole design system), vendored htmx.min.js,
+                      # img/ (PTA logo + generated favicons), fonts/ (self-hosted
+                      # Fredoka woff2 + OFL licence — no third-party font requests)
+scripts/              # make_icons.py: regenerate the favicons from the logo
 tests/                # pytest suite (services, capacity race, notifications, views,
                       # health probe, inline delivery, notifier job modes)
 .github/workflows/

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Enrollment requests{% endblock %}
+{% block title %}Enrolment requests{% endblock %}
 {% block content %}
 <div class="panel-title">
-  <h1>Enrollment requests</h1>
+  <h1>Enrolment requests</h1>
   <div class="actions">
     <a class="btn btn-small" href="{% url 'admintools_broadcast' %}">Send announcement</a>
     <a class="btn btn-secondary btn-small" href="{% url 'admin:index' %}">Django admin</a>
@@ -10,19 +10,19 @@
 </div>
 
 {% if pending %}
-<div class="table-wrap"><table class="list">
+<div class="table-wrap"><table class="list stacked">
   <tr><th>Requested</th><th>Child</th><th>Guardians</th><th>Class</th><th>Availability</th><th></th></tr>
   {% for e in pending %}
   <tr>
-    <td class="small muted">{{ e.created_at|date:"j M, H:i" }}</td>
-    <td>{{ e.child.full_name }}
+    <td class="small muted" data-label="Requested">{{ e.created_at|date:"j M, H:i" }}</td>
+    <td data-label="Child">{{ e.child.full_name }}
       <div class="muted small">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
-    <td class="small">
+    <td class="small" data-label="Guardians">
       {% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
     </td>
-    <td>{{ e.activity_class.title }}
+    <td data-label="Class">{{ e.activity_class.title }}
       <div class="muted small">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div></td>
-    <td>
+    <td data-label="Availability">
       {% if e.places_free > 0 %}
         <span class="badge badge-ok">{{ e.places_free }} free</span>
       {% else %}
@@ -48,14 +48,14 @@
 {% endif %}
 
 <h2>Classes this term</h2>
-<div class="table-wrap"><table class="list">
+<div class="table-wrap"><table class="list stacked">
   <tr><th>Class</th><th>Enrolled / capacity</th><th>Waiting list</th><th>Pending</th><th></th></tr>
   {% for cls in classes %}
   <tr>
-    <td>{{ cls.title }} <div class="muted small">{{ cls.provider.name }} · {{ cls.get_status_display }}</div></td>
-    <td>{{ cls.enrolled_count }} / {{ cls.capacity }}</td>
-    <td>{{ cls.waitlist_count }}</td>
-    <td>{{ cls.requested_count }}</td>
+    <td data-label="Class">{{ cls.title }} <div class="muted small">{{ cls.provider.name }} · {{ cls.get_status_display }}</div></td>
+    <td data-label="Enrolled / capacity">{{ cls.enrolled_count }} / {{ cls.capacity }}</td>
+    <td data-label="Waiting list">{{ cls.waitlist_count }}</td>
+    <td data-label="Pending">{{ cls.requested_count }}</td>
     <td><a href="{% url 'admintools_waitlist' cls.pk %}">Waiting list</a></td>
   </tr>
   {% endfor %}

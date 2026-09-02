@@ -10,12 +10,12 @@
   {% endif %}
 </p>
 
-<div class="table-wrap"><table class="list">
+<div class="table-wrap"><table class="list stacked">
   <tr><th>Date</th><th>Attendance</th></tr>
   {% for row in rows %}
   <tr>
-    <td>{{ row.session.date|date:"l j F Y" }}</td>
-    <td>
+    <td data-label="Date">{{ row.session.date|date:"l j F Y" }}</td>
+    <td data-label="Attendance">
       {% if row.state == "present" %}<span class="badge badge-ok">Present</span>
       {% elif row.state == "absent" %}<span class="badge badge-bad">Absent</span>
       {% elif row.state == "upcoming" %}<span class="badge">Upcoming</span>

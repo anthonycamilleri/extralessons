@@ -10,8 +10,8 @@
 </div>
 
 {% if offers %}
-<div class="panel" style="border-color:#e8d5a8;">
-  <h2 style="margin-top:0;">⏳ Seats waiting for your confirmation</h2>
+<div class="panel panel-accent">
+  <h2>⏳ Seats waiting for your confirmation</h2>
   {% for offer in offers %}
     <p>
       A seat in <strong>{{ offer.activity_class.title }}</strong> is being held for
@@ -40,23 +40,23 @@
 {% for family in families %}
 <div class="panel">
   <div class="panel-title">
-    <h2 style="margin:0;">{{ family.child.full_name }} <span class="muted small">({{ family.child.date_of_birth|date:"j M Y" }})</span></h2>
+    <h2>{{ family.child.full_name }} <span class="muted small">({{ family.child.date_of_birth|date:"j M Y" }})</span></h2>
     <div class="actions small">
       <a href="{% url 'child_edit' family.child.pk %}">Edit details</a>
       <a href="{% url 'child_invite_guardian' family.child.pk %}">Invite co-parent</a>
     </div>
   </div>
   {% if family.enrollments %}
-  <div class="table-wrap"><table class="list">
+  <div class="table-wrap"><table class="list stacked">
     <tr><th>Class</th><th>Schedule</th><th>Status</th><th></th></tr>
     {% for e in family.enrollments %}
       <tr>
-        <td>
+        <td data-label="Class">
           <a href="{{ e.activity_class.get_absolute_url }}">{{ e.activity_class.title }}</a>
           <div class="muted small">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div>
         </td>
-        <td>{{ e.activity_class.schedule_display }}</td>
-        <td>
+        <td data-label="Schedule">{{ e.activity_class.schedule_display }}</td>
+        <td data-label="Status">
           {% if e.status == "ENROLLED" %}<span class="badge badge-ok">Enrolled</span>
           {% elif e.status == "REQUESTED" %}<span class="badge badge-info">Awaiting confirmation</span>
           {% elif e.status == "OFFERED" %}<span class="badge badge-warn">Seat offered — respond above!</span>
@@ -79,7 +79,7 @@
     {% endfor %}
   </table></div>
   {% else %}
-  <p class="muted small">No activities yet — <a href="{% url 'catalogue' %}">browse the catalogue</a> to enroll {{ family.child.first_name }}.</p>
+  <p class="muted small">No activities yet — <a href="{% url 'catalogue' %}">browse the catalogue</a> to enrol {{ family.child.first_name }}.</p>
   {% endif %}
 </div>
 {% endfor %}

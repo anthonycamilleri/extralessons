@@ -20,7 +20,7 @@ class Command(BaseCommand):
         config = SiteConfig.get()
         config.school_name = "St Example Primary"
         config.catalogue_intro = (
-            "Browse this term's extra-curricular activities and enroll your children. "
+            "Browse this term's extra-curricular activities and enrol your children. "
             "Places are confirmed by the school office."
         )
         config.save()
@@ -55,21 +55,35 @@ class Command(BaseCommand):
             },
         )
 
+        # Spread across days, rooms, ages and start times so the catalogue
+        # filters have something to bite on in a demo.
         classes = [
-            (sports, "Football Juniors", "football-juniors", 5, 8, 12, 0,
+            (sports, "Football Juniors", "football-juniors", 5, 8, 12, 0, "15:30",
+             "Sports hall",
              "Fun, skills-focused football for beginners. All levels welcome.",
              "Bring shin pads, water bottle and trainers."),
-            (sports, "Athletics Club", "athletics-club", 8, 11, 20, 2,
-             "Running, jumping and throwing — a taste of every discipline.",
-             "Outdoor kit; sessions run rain or shine."),
-            (arts, "Chess Club", "chess-club", 6, 12, 2, 1,
+            (arts, "Chess Club", "chess-club", 6, 12, 2, 1, "15:30",
+             "Library",
              "Learn openings, tactics and play friendly tournaments.",
              "Beginners welcome, boards provided."),
-            (arts, "Drama Workshop", "drama-workshop", 7, 12, 16, 3,
+            (sports, "Athletics Club", "athletics-club", 8, 11, 20, 2, "16:00",
+             "School grounds",
+             "Running, jumping and throwing — a taste of every discipline.",
+             "Outdoor kit; sessions run rain or shine."),
+            (arts, "Drama Workshop", "drama-workshop", 7, 12, 16, 3, "15:30",
+             "Main hall",
              "Improvisation and stagecraft leading to an end-of-term show.",
              "Comfortable clothes. Parents are invited to the final performance."),
+            (arts, "Coding Club", "coding-club", 9, 13, 14, 3, "16:30",
+             "Library",
+             "Build games and gadgets with Scratch and micro:bit.",
+             "Laptops provided. No experience needed."),
+            (arts, "Choir", "choir", 5, 12, 30, 4, "15:30",
+             "Music room",
+             "Singing together, from folk songs to film scores.",
+             "Ends with a family concert in the main hall."),
         ]
-        for provider, title, slug, amin, amax, cap, weekday, desc, extra in classes:
+        for provider, title, slug, amin, amax, cap, weekday, start, where, desc, extra in classes:
             cls, created = ActivityClass.objects.get_or_create(
                 term=term,
                 slug=slug,
@@ -82,9 +96,9 @@ class Command(BaseCommand):
                     "age_max": amax,
                     "capacity": cap,
                     "weekday": weekday,
-                    "start_time": datetime.time(15, 30),
-                    "end_time": datetime.time(16, 30),
-                    "location": "School grounds",
+                    "start_time": datetime.time(*map(int, start.split(":"))),
+                    "end_time": datetime.time(int(start[:2]) + 1, int(start[3:])),
+                    "location": where,
                     "status": ActivityClass.Status.PUBLISHED,
                 },
             )

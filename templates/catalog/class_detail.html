@@ -1,63 +1,81 @@
 {% extends "base.html" %}
 {% block title %}{{ cls.title }}{% endblock %}
+{% block description %}{{ cls.description|striptags|truncatewords:30 }}{% endblock %}
 {% block content %}
-<h1>{{ cls.title }}</h1>
-<div class="detail-grid">
-  <div>
-    {% if cls.image %}<img class="class-hero" src="{{ cls.image.url }}" alt="{{ cls.title }}">{% endif %}
-    <p>{{ cls.description|linebreaks }}</p>
-    {% if cls.extra_details %}
-      <h2>Good to know</h2>
-      <p class="muted">{{ cls.extra_details|linebreaks }}</p>
-    {% endif %}
-  </div>
-  <div>
-    <div class="panel">
-      <dl class="kv">
-        <dt>Provider</dt><dd>{{ cls.provider.name }}</dd>
-        <dt>When</dt><dd>{{ cls.schedule_display }}</dd>
-        <dt>Term</dt><dd>{{ cls.term.name }} ({{ cls.term.start_date|date:"j M" }} – {{ cls.term.end_date|date:"j M Y" }})</dd>
-        {% if cls.location %}<dt>Where</dt><dd>{{ cls.location }}</dd>{% endif %}
-        <dt>Ages</dt><dd>{{ cls.age_min }}–{{ cls.age_max }}</dd>
-        <dt>Availability</dt>
-        <dd>
-          {% if cls.places_free > 0 %}
-            <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
-          {% else %}
-            <span class="badge badge-warn">Full — join the waiting list</span>
-          {% endif %}
-        </dd>
-      </dl>
-    </div>
+{# One centred column, in reading order: picture, the facts, the story, register. #}
+<div class="class-page">
+<a class="back-link" href="{% url 'catalogue' %}">← All activities</a>
 
-    <div class="panel">
-      {% if user.is_authenticated and user.role == "PARENT" %}
-        {% if children %}
-          <form method="post" action="{% url 'enroll' cls.pk %}">
-            {% csrf_token %}
-            <p>
-              <label for="child">Register</label>
-              <select name="child" id="child" required>
-                {% for child in children %}<option value="{{ child.pk }}">{{ child.full_name }}</option>{% endfor %}
-              </select>
-            </p>
-            <button type="submit" class="btn">
-              {% if cls.places_free > 0 %}Request a place{% else %}Join the waiting list{% endif %}
-            </button>
-            <p class="small muted">Places are confirmed by the school office — you'll be notified.</p>
-          </form>
-        {% else %}
-          <p><a href="{% url 'child_add' %}">Add your children</a> to your family first, then register them here.</p>
-        {% endif %}
-      {% elif user.is_authenticated %}
-        <p class="muted small">Only parent accounts can register children.</p>
-      {% else %}
-        <p><a class="btn" href="{% url 'login' %}?next={{ request.path }}">Log in to register</a></p>
-        {% if site_config.signup_open %}
-          <p class="small muted">No account yet? <a href="{% url 'signup' %}">Sign up</a></p>
-        {% endif %}
-      {% endif %}
-    </div>
+<article class="day-{{ cls.weekday }}">
+  {% if cls.image %}
+    <img class="detail-hero" src="{{ cls.image.url }}" alt="" width="1600" height="900">
+  {% else %}
+    <div class="detail-hero placeholder" data-initial="{{ cls.title|first|upper }}" aria-hidden="true"></div>
+  {% endif %}
+
+  <div class="detail-title">
+    <h1>{{ cls.title }}</h1>
+    <p class="by">with {{ cls.provider.name }}</p>
   </div>
+
+  <ul class="meta-chips">
+    <li class="meta-chip meta-chip-day"><span class="ico" aria-hidden="true">📅</span> <b>{{ cls.get_weekday_display }}s</b> {{ cls.start_time|time:"H:i" }}–{{ cls.end_time|time:"H:i" }}</li>
+    {% if cls.location %}<li class="meta-chip"><span class="ico" aria-hidden="true">📍</span> {{ cls.location }}</li>{% endif %}
+    <li class="meta-chip"><span class="ico" aria-hidden="true">🎒</span> Ages {{ cls.age_min }}–{{ cls.age_max }}</li>
+    <li class="meta-chip"><span class="ico" aria-hidden="true">🗓️</span> {{ cls.term.name }} · {{ cls.term.start_date|date:"j M" }} – {{ cls.term.end_date|date:"j M Y" }}</li>
+    <li>
+      {% if cls.places_free > 0 %}
+        <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
+      {% else %}
+        <span class="badge badge-warn">Full — join the waiting list</span>
+      {% endif %}
+    </li>
+  </ul>
+
+  <p class="sticky-cta">
+    <a class="btn btn-cta" href="#register">
+      {% if cls.places_free > 0 %}Register for this activity{% else %}Join the waiting list{% endif %}
+    </a>
+  </p>
+
+  <div class="prose">{{ cls.description|linebreaks }}</div>
+
+  {% if cls.extra_details %}
+    <section class="panel panel-accent">
+      <h2>Good to know</h2>
+      {{ cls.extra_details|linebreaks }}
+    </section>
+  {% endif %}
+
+  <section class="register-card" id="register">
+    <h2>Register</h2>
+    {% if user.is_authenticated and user.role == "PARENT" %}
+      {% if children %}
+        <form method="post" action="{% url 'enroll' cls.pk %}">
+          {% csrf_token %}
+          <p>
+            <label for="child">Which child?</label>
+            <select name="child" id="child" required>
+              {% for child in children %}<option value="{{ child.pk }}">{{ child.full_name }}</option>{% endfor %}
+            </select>
+          </p>
+          <button type="submit" class="btn btn-cta">
+            {% if cls.places_free > 0 %}Request a place{% else %}Join the waiting list{% endif %}
+          </button>
+          <p class="small muted">Places are confirmed by the school office — you'll be notified.</p>
+        </form>
+      {% else %}
+        <p><a href="{% url 'child_add' %}">Add your children</a> to your family first, then register them here.</p>
+      {% endif %}
+    {% elif user.is_authenticated %}
+      <p class="muted small">Only parent accounts can register children.</p>
+    {% else %}
+      <p><a class="btn btn-cta" href="{% url 'login' %}?next={{ request.path }}">Log in to register</a></p>
+      {% if site_config.signup_open %}
+        <p class="small muted">No account yet? <a href="{% url 'signup' %}">Sign up</a></p>
+      {% endif %}
+    {% endif %}
+  </section>
+</article>
 </div>
 {% endblock %}

@@ -13,13 +13,13 @@
 
 {% if offered %}
 <h2>Outstanding offers</h2>
-<div class="table-wrap"><table class="list">
+<div class="table-wrap"><table class="list stacked">
   <tr><th>Child</th><th>Offered</th><th>Expires</th></tr>
   {% for e in offered %}
   <tr>
-    <td>{{ e.child.full_name }}</td>
-    <td class="small muted">{{ e.offered_at|date:"j M, H:i" }}</td>
-    <td>{{ e.offer_expires_at|date:"l j M, H:i" }}</td>
+    <td data-label="Child">{{ e.child.full_name }}</td>
+    <td class="small muted" data-label="Offered">{{ e.offered_at|date:"j M, H:i" }}</td>
+    <td data-label="Expires">{{ e.offer_expires_at|date:"l j M, H:i" }}</td>
   </tr>
   {% endfor %}
 </table></div>
@@ -27,17 +27,17 @@
 
 <h2>Waiting list (first-come first-served order shown as guidance)</h2>
 {% if waitlisted %}
-<div class="table-wrap"><table class="list">
+<div class="table-wrap"><table class="list stacked">
   <tr><th>#</th><th>Child</th><th>Guardians</th><th>Waiting since</th><th></th></tr>
   {% for e in waitlisted %}
   <tr>
-    <td>{{ forloop.counter }}</td>
-    <td>{{ e.child.full_name }}
+    <td data-label="Position">{{ forloop.counter }}</td>
+    <td data-label="Child">{{ e.child.full_name }}
       <div class="muted small">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
-    <td class="small">
+    <td class="small" data-label="Guardians">
       {% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
     </td>
-    <td class="small muted">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
+    <td class="small muted" data-label="Waiting since">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
     <td>
       <form method="post" action="{% url 'admintools_waitlist_offer' e.pk %}">{% csrf_token %}
         <button type="submit" class="btn btn-small" {% if seats_free < 1 %}disabled{% endif %}>
