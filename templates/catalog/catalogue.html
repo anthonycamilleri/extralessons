@@ -90,12 +90,17 @@
       <div class="meta">{{ cls.provider.name }} · ages {{ cls.age_min }}–{{ cls.age_max }}</div>
       <p class="small">{{ cls.description|truncatewords:22 }}</p>
       <div class="spacer"></div>
-      <div>
+      <div class="card-foot">
         {% if cls.places_free > 0 %}
           <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
         {% else %}
           <span class="badge badge-warn">Full — waiting list{% if cls.waitlist_count %} ({{ cls.waitlist_count }}){% endif %}</span>
         {% endif %}
+        {# Always present, logged in or not: the class page's register card
+           knows what to do next (the form, or the log-in / sign-up choice). #}
+        <a class="btn btn-small btn-cta card-cta" href="{{ cls.get_absolute_url }}#register">
+          {% if cls.places_free > 0 %}Register{% else %}Join waiting list{% endif %}
+        </a>
       </div>
     </div>
   </article>

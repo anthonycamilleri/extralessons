@@ -2,12 +2,16 @@
 {% block title %}{% if child %}Edit {{ child.first_name }}{% else %}Add a child{% endif %}{% endblock %}
 {% block content %}
 <h1>{% if child %}Edit {{ child.full_name }}{% else %}Add a child{% endif %}</h1>
+{% if next and not child %}
+  <p class="muted">Add the child you want to register, and we'll take you straight back to the activity.</p>
+{% endif %}
 <div class="panel">
   <form method="post">
     {% csrf_token %}
     {{ form.as_p }}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     <button type="submit" class="btn">Save</button>
-    <a class="btn btn-secondary" href="{% url 'parent_home' %}">Cancel</a>
+    <a class="btn btn-secondary" href="{% if next %}{{ next }}{% else %}{% url 'parent_home' %}{% endif %}">Cancel</a>
   </form>
 </div>
 {% endblock %}

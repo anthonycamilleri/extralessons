@@ -7,6 +7,7 @@ from django.views.decorators.http import require_POST
 from apps.accounts.forms import ChildForm, GuardianInviteForm, ProfileForm
 from apps.accounts.models import Child, Guardian
 from apps.accounts.permissions import parent_required
+from apps.accounts.redirects import safe_next
 from apps.catalog.models import ActivityClass
 from apps.enrollments import services as enrollment_services
 from apps.enrollments.models import Attendance, Enrollment
@@ -55,13 +56,20 @@ def profile(request):
 @parent_required
 def child_add(request):
     form = ChildForm(request.POST or None)
+    # A parent sent here from a class page ("add your children first") goes
+    # straight back to that class's register form once the child exists.
+    next_url = safe_next(request)
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             child = form.save()
             Guardian.objects.create(child=child, user=request.user, is_primary=True)
         messages.success(request, f"{child.full_name} added to your family.")
-        return redirect("parent_home")
-    return render(request, "dashboards/parent/child_form.html", {"form": form, "child": None})
+        return redirect(next_url or "parent_home")
+    return render(
+        request,
+        "dashboards/parent/child_form.html",
+        {"form": form, "child": None, "next": next_url or ""},
+    )
 
 
 @parent_required

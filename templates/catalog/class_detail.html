@@ -77,14 +77,23 @@
           <p class="small muted">Places are confirmed by the school office — you'll be notified.</p>
         </form>
       {% else %}
-        <p><a href="{% url 'child_add' %}">Add your children</a> to your family first, then register them here.</p>
+        {# Straight back here once the child is saved; see child_add. #}
+        <p>Tell us who to register first: <a class="btn btn-cta" href="{% url 'child_add' %}?next={{ request.path|urlencode }}%23register">Add a child</a></p>
+        <p class="small muted">Takes a minute. You'll come straight back to this activity.</p>
       {% endif %}
     {% elif user.is_authenticated %}
       <p class="muted small">Only parent accounts can register children.</p>
     {% else %}
-      <p><a class="btn btn-cta" href="{% url 'login' %}?next={{ request.path }}">Log in to register</a></p>
-      {% if site_config.signup_open %}
-        <p class="small muted">No account yet? <a href="{% url 'signup' %}">Sign up</a></p>
+      {# Anonymous: both doors lead back to this register card via ?next=. #}
+      <p>To {% if cls.places_free > 0 %}register{% else %}join the waiting list{% endif %}, log in or create a parent account. You'll come straight back here.</p>
+      <p class="auth-choice">
+        <a class="btn btn-cta" href="{% url 'login' %}?next={{ request.path|urlencode }}%23register">Log in to register</a>
+        {% if site_config.signup_open %}
+          <a class="btn btn-secondary" href="{% url 'signup' %}?next={{ request.path|urlencode }}%23register">Create an account</a>
+        {% endif %}
+      </p>
+      {% if not site_config.signup_open %}
+        <p class="small muted">No account yet? Accounts are created by the school office — get in touch with them.</p>
       {% endif %}
     {% endif %}
   </section>

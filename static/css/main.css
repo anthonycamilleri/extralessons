@@ -466,6 +466,10 @@ legend { font-weight: 600; padding: 0; }
 .card-body h3 a::after { content: ""; position: absolute; inset: 0; }
 .card-body .meta { color: var(--muted); font-size: .88rem; }
 .card-body .spacer { flex: 1; }
+/* Availability on the left, the register button on the right. The button sits
+   above the whole-card overlay so it is its own click target. */
+.card-foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+.card-foot .card-cta { position: relative; z-index: 1; margin-left: auto; white-space: nowrap; }
 .card-tags { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .15rem; }
 
 /* --- Class detail ------------------------------------------------------- */
@@ -526,6 +530,8 @@ legend { font-weight: 600; padding: 0; }
 }
 .register-card h2 { margin-top: 0; }
 .register-card select { max-width: 22rem; background: #fff; }
+/* Log in or create an account: two doors, side by side, stacking on phones. */
+.auth-choice { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
 
 /* A jump link to the registration card. It sits just under the metadata, and
    on phones it is sticky: because its parent ends at the registration card, it
@@ -635,7 +641,7 @@ table.list tbody tr:hover td { background: #fafcfe; }
   .detail-hero { aspect-ratio: 4/3; }
   .detail-title { margin: -1.75rem .5rem 1.25rem; padding: 1rem 1.1rem; }
   .register-card { padding: 1.15rem; border-radius: var(--radius); }
-  form > button.btn, .auth-box .btn, .register-card button.btn { width: 100%; }
+  form > button.btn, .auth-box .btn, .register-card button.btn, .auth-choice .btn { width: 100%; }
   .actions form > button.btn, .actions .btn { width: auto; }
   input[type=text], input[type=email], input[type=password], input[type=date],
   input[type=time], input[type=number], input[type=tel], input[type=search], select, textarea { max-width: 100%; }

@@ -6,19 +6,12 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
 
 from .forms import SignupForm
 from .models import Guardian, GuardianInvite, SiteConfig, User
+from .redirects import safe_next
 
 INVITE_TTL_DAYS = 14
-
-
-def _safe_next(request):
-    next_url = request.POST.get("next") or request.GET.get("next") or ""
-    if url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
-        return next_url
-    return None
 
 
 def signup(request):
@@ -26,19 +19,25 @@ def signup(request):
         messages.info(request, "Account creation is currently handled by the school office.")
         return redirect("login")
     if request.user.is_authenticated:
-        return redirect("post_login")
+        return redirect(safe_next(request) or "post_login")
 
     form = SignupForm(request.POST or None)
+    next_url = safe_next(request)
     if request.method == "POST" and form.is_valid():
         user = form.save()
         login(request, user)
+        # Honour ?next= so the register flow and guardian invites continue
+        # where they started. A parent arriving from a class page has no
+        # children yet; that page tells them so and offers the add-child form.
+        if next_url:
+            messages.success(request, "Welcome! Your account is ready.")
+            return redirect(next_url)
         messages.success(request, "Welcome! Start by adding your children to your family.")
-        # Honor ?next= so flows like guardian invites continue after signup.
-        return redirect(_safe_next(request) or "parent_home")
+        return redirect("parent_home")
     return render(
         request,
         "registration/signup.html",
-        {"form": form, "next": request.GET.get("next", "")},
+        {"form": form, "next": next_url or ""},
     )
 
 

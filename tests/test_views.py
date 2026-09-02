@@ -154,6 +154,131 @@ class TestSignupAndFamily:
         assert parent.children.filter(first_name="Ada").exists()
 
 
+class TestRegisterFlowWhenNotLoggedIn:
+    """A parent who is not logged in can still start registering from any
+    class, and every door (log in, sign up, add a child) leads back to that
+    class's register form."""
+
+    def _back_here(self, cls):
+        return f"next={cls.get_absolute_url()}%23register"
+
+    def test_catalogue_card_always_offers_a_register_button(self, client):
+        cls = ActivityClassFactory(title="Chess Club", capacity=5)
+        full = ActivityClassFactory(title="Robotics", capacity=1)
+        services.register(ChildFactory(), full)
+        services.approve_request(Enrollment.objects.get(activity_class=full), AdminFactory())
+
+        content = client.get(reverse("catalogue")).content.decode()
+
+        assert f'href="{cls.get_absolute_url()}#register"' in content
+        assert content.count("#register") == 2
+        assert "Join waiting list" in content
+
+    def test_class_page_offers_login_and_signup_that_return_here(self, client):
+        cls = ActivityClassFactory()
+        content = client.get(cls.get_absolute_url()).content.decode()
+
+        assert f'{reverse("login")}?{self._back_here(cls)}' in content
+        assert f'{reverse("signup")}?{self._back_here(cls)}' in content
+        assert "Log in to register" in content
+        assert "Create an account" in content
+
+    def test_class_page_without_open_signup_points_to_the_office(self, client):
+        config = SiteConfig.get()
+        config.signup_open = False
+        config.save()
+        cls = ActivityClassFactory()
+        content = client.get(cls.get_absolute_url()).content.decode()
+        assert "Log in to register" in content
+        assert reverse("signup") not in content
+        assert "school office" in content
+
+    def test_login_page_keeps_the_return_address_on_its_signup_link(self, client):
+        cls = ActivityClassFactory()
+        response = client.get(reverse("login"), {"next": cls.get_absolute_url() + "#register"})
+        content = response.content.decode()
+        assert f'{reverse("signup")}?{self._back_here(cls)}' in content
+
+    def test_signup_page_keeps_the_return_address_on_its_login_link(self, client):
+        cls = ActivityClassFactory()
+        response = client.get(reverse("signup"), {"next": cls.get_absolute_url() + "#register"})
+        content = response.content.decode()
+        assert f'{reverse("login")}?{self._back_here(cls)}' in content
+
+    def test_signup_returns_to_the_class(self, client):
+        cls = ActivityClassFactory()
+        response = client.post(
+            reverse("signup"),
+            {
+                "email": "new@parent.test",
+                "first_name": "New",
+                "last_name": "Parent",
+                "phone_e164": "",
+                "password1": "s3cure-pass-123",
+                "password2": "s3cure-pass-123",
+                "next": cls.get_absolute_url() + "#register",
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == cls.get_absolute_url() + "#register"
+
+    def test_signup_ignores_an_offsite_return_address(self, client):
+        response = client.post(
+            reverse("signup"),
+            {
+                "email": "new@parent.test",
+                "first_name": "New",
+                "last_name": "Parent",
+                "phone_e164": "",
+                "password1": "s3cure-pass-123",
+                "password2": "s3cure-pass-123",
+                "next": "https://evil.example/phish",
+            },
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("parent_home")
+
+    def test_login_returns_to_the_class(self, client):
+        parent = UserFactory(email="p@family.test")
+        parent.set_password("s3cure-pass-123")
+        parent.save()
+        cls = ActivityClassFactory()
+        response = client.post(
+            reverse("login"),
+            {"username": "p@family.test", "password": "s3cure-pass-123", "next": cls.get_absolute_url() + "#register"},
+        )
+        assert response.status_code == 302
+        assert response.url == cls.get_absolute_url() + "#register"
+
+    def test_new_parent_is_sent_to_add_a_child_and_comes_back(self, client):
+        parent = UserFactory()
+        client.force_login(parent)
+        cls = ActivityClassFactory()
+
+        content = client.get(cls.get_absolute_url()).content.decode()
+        assert f'{reverse("child_add")}?{self._back_here(cls)}' in content
+        assert "Add a child" in content
+
+        response = client.post(
+            reverse("child_add") + f"?next={cls.get_absolute_url()}%23register",
+            {"first_name": "Ada", "last_name": "Test", "date_of_birth": "2018-04-01", "notes": ""},
+        )
+        assert response.status_code == 302
+        assert response.url == cls.get_absolute_url() + "#register"
+
+        content = client.get(cls.get_absolute_url()).content.decode()
+        assert 'name="child"' in content  # the register form, with Ada in it
+        assert "Ada Test" in content
+
+    def test_child_add_without_return_address_goes_home(self, client):
+        client.force_login(UserFactory())
+        response = client.post(
+            reverse("child_add"),
+            {"first_name": "Ada", "last_name": "Test", "date_of_birth": "2018-04-01", "notes": ""},
+        )
+        assert response.url == reverse("parent_home")
+
+
 class TestEnrollmentViews:
     def test_parent_can_request_place(self, client):
         parent = UserFactory()
