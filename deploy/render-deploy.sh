@@ -26,17 +26,21 @@ API="${RENDER_API:-https://api.render.com/v1}"
 # health-checked switch add more. Thirty minutes is generous, not paranoid.
 TIMEOUT_SECONDS="${RENDER_DEPLOY_TIMEOUT:-1800}"
 POLL_SECONDS=10
+# Every API call is bounded. Without this a stalled connection to the Render
+# API hangs the whole job: the deadline below is only checked between polls,
+# so one curl that never returns turned a 30-minute limit into a six-hour one.
+API_TIMEOUT_SECONDS="${RENDER_API_TIMEOUT:-30}"
 
 api() { # api METHOD PATH [JSON-BODY]
   local method="$1" path="$2" body="${3:-}"
   if [ -n "$body" ]; then
-    curl -fsS -X "$method" "$API$path" \
+    curl -fsS --max-time "$API_TIMEOUT_SECONDS" -X "$method" "$API$path" \
       -H "Authorization: Bearer $RENDER_API_KEY" \
       -H "Accept: application/json" \
       -H "Content-Type: application/json" \
       -d "$body"
   else
-    curl -fsS -X "$method" "$API$path" \
+    curl -fsS --max-time "$API_TIMEOUT_SECONDS" -X "$method" "$API$path" \
       -H "Authorization: Bearer $RENDER_API_KEY" \
       -H "Accept: application/json"
   fi
@@ -66,7 +70,10 @@ echo "Deploy: $deploy_id"
 deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
 last=""
 while :; do
-  status=$(api GET "/services/$SERVICE_ID/deploys/$deploy_id" | jq -r '.status // "unknown"')
+  # A poll that fails or times out is not a verdict on the deploy: report it
+  # and try again until the deadline. Only Render's own status ends the loop.
+  status=$(api GET "/services/$SERVICE_ID/deploys/$deploy_id" | jq -r '.status // "unknown"') \
+    || status="unknown (API call failed)"
   if [ "$status" != "$last" ]; then
     echo "$(date -u +%H:%M:%S) $status"
     last="$status"

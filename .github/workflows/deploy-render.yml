@@ -39,6 +39,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    # A hard stop above the deploy script's own 30-minute limit, so a hung
+    # step can never hold the deploy-production concurrency group for hours.
+    timeout-minutes: 40
     environment: production
     permissions:
       contents: read
