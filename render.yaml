@@ -30,12 +30,11 @@ services:
     autoDeployTrigger: "off"
     healthCheckPath: /_health
     # Runs in the freshly built image, once, before the new version takes
-    # traffic. If it fails the deploy is abandoned and the old version keeps
-    # serving. This assumes additive migrations, the normal Django case; a
-    # destructive one needs the usual two-deploy dance. ensure_admin then
-    # creates the ADMIN_EMAIL account on first deploy and emails it a
-    # set-password link; on every later deploy it finds it and does nothing.
-    preDeployCommand: python manage.py migrate --noinput && python manage.py ensure_admin
+    # traffic: migrations, then the first-admin bootstrap (deploy/pre-deploy.sh
+    # explains both). If it fails the deploy is abandoned and the old version
+    # keeps serving. Render does not run this through a shell, hence a script
+    # rather than "a && b".
+    preDeployCommand: sh deploy/pre-deploy.sh
     # Custom domain. Uncomment together with the three host variables below
     # once the DNS record exists; Render issues the certificate itself.
     # domains:

@@ -87,9 +87,11 @@ Everything lives on Render: two services and one database, no third-party
 storage.
 
 Both services build the same `Dockerfile`, on Render, from the same commit.
-The web service additionally has a **pre-deploy command**, `manage.py migrate`,
-which Render runs in the freshly built image after the build and before the new
-version takes any traffic. If it fails, the deploy is abandoned and the old
+The web service additionally has a **pre-deploy command**,
+`sh deploy/pre-deploy.sh` (migrations, then the first-admin bootstrap), which
+Render runs in the freshly built image after the build and before the new
+version takes any traffic. It is a script because Render runs the command
+directly, not through a shell. If it fails, the deploy is abandoned and the old
 version keeps serving. This is the one feature that dictates the instance type:
 pre-deploy commands need a paid instance (`starter` is the smallest), which is
 why `render.yaml` does not use `free` anywhere.
@@ -198,8 +200,8 @@ already knows.
 
 ### 5. The first admin user
 
-Nothing to run. The pre-deploy command is `migrate` followed by
-`manage.py ensure_admin`, which creates the account named by `ADMIN_EMAIL` in
+Nothing to run. The pre-deploy command (`deploy/pre-deploy.sh`) is `migrate`
+followed by `manage.py ensure_admin`, which creates the account named by `ADMIN_EMAIL` in
 the shared group (a superuser with a random, unknown password) the first time
 it runs, and emails that address the same set-password link the login page's
 *Forgotten your password?* produces. Check the inbox after the first deploy,

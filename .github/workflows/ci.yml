@@ -137,3 +137,12 @@ jobs:
           done
           curl -sf http://127.0.0.1:8080/_health || { docker logs smoke; exit 1; }
           docker rm -f smoke
+      - name: The pre-deploy script runs in the image
+        # Exactly what Render executes before switching traffic, against a
+        # throwaway SQLite file, with no ADMIN_EMAIL so ensure_admin is a no-op.
+        run: |
+          docker run --rm \
+            -e SECRET_KEY=ci-only-placeholder \
+            -e ALLOWED_HOSTS=localhost \
+            -e DATABASE_URL=sqlite:////tmp/predeploy.sqlite3 \
+            extralessons:ci sh deploy/pre-deploy.sh
