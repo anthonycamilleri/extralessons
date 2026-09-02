@@ -169,6 +169,46 @@ def test_tools_call_reads_and_writes_through_the_real_tools(client):
     assert "Chess Club Ltd" in text
 
 
+def test_tool_call_uses_the_request_connection_not_a_private_one(client):
+    """Regression for a production outage. Running the tool inside an event loop
+    made Django hand it a connection object of its own, scoped to the loop's
+    context; it was never closed and, with a pool, never returned. The tool must
+    run on the request thread and touch only the request's connection, so no
+    new connection object may appear during the call."""
+    from django.db import connection
+    from django.db.backends.signals import connection_created
+
+    connection.ensure_connection()  # the request thread's connection exists already
+    opened = []
+
+    def capture(sender, connection, **kwargs):
+        opened.append(connection)
+
+    connection_created.connect(capture)
+    try:
+        result = rpc(client, "tools/call", {"name": "get_overview", "arguments": {}}).json()["result"]
+    finally:
+        connection_created.disconnect(capture)
+
+    assert result.get("isError") is not True
+    assert opened == [], "the tool opened a connection of its own instead of using the request's"
+
+
+def test_tool_arguments_are_validated_like_the_stdio_server(client):
+    result = rpc(client, "tools/call", {"name": "get_class", "arguments": {"class_id": "not-a-number"}}).json()["result"]
+    assert result["isError"] is True
+    assert "class_id" in result["content"][0]["text"]
+    # Coercion the SDK does over stdio happens here too: a numeric string is fine.
+    result = rpc(client, "tools/call", {"name": "get_class", "arguments": {"class_id": "999"}}).json()["result"]
+    assert "No class with id 999" in result["content"][0]["text"]
+
+
+def test_list_results_are_wrapped_like_the_stdio_server(client):
+    result = rpc(client, "tools/call", {"name": "list_classes", "arguments": {}}).json()["result"]
+    assert result["structuredContent"] == {"result": []}
+    assert json.loads(result["content"][0]["text"]) == []
+
+
 def test_tool_failure_is_a_result_with_is_error(client):
     result = rpc(client, "tools/call", {"name": "get_class", "arguments": {"class_id": 999}}).json()["result"]
     assert result["isError"] is True

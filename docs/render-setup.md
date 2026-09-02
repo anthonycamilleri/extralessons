@@ -325,9 +325,10 @@ that works.
 
 **Scaling.** The web service scales by instance count and instance type, both
 in `render.yaml` (`plan`, `numInstances`). Keep `DB_POOL_MAX_SIZE × instances`
-comfortably under the database plan's connection limit; the gunicorn config
-holds one process with eight threads per instance, and eight concurrent
-requests per instance is a lot for this application.
+comfortably under the database plan's connection limit (97 on
+`basic-256mb`); the gunicorn config holds one process with eight threads per
+instance and the pool matches that, so eight concurrent requests per instance
+never wait for a connection, and eight is a lot for this application.
 
 **Cost knobs, in order:** the web instance type; the database plan; then
 nothing else worth the effort — the cron job runs for minutes a night.

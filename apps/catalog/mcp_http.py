@@ -11,6 +11,16 @@ server-initiated stream (GET answers 405), which is the entire protocol surface
 a tools-only server needs. Doing this as a plain Django view, rather than
 mounting the SDK's ASGI app, keeps the app a single WSGI process under gunicorn.
 
+Tool calls run synchronously on the request thread, on purpose. The SDK's own
+call path is asyncio, and inside a running event loop Django scopes database
+connections per async context rather than per thread: the tool would get a
+connection object of its own, unreachable once the loop ends and never returned
+to the pool. Four such calls emptied the production pool and took the site down
+with "couldn't get a connection after 10.00 sec". Calling the function directly
+means it uses the request's own connection, which Django closes at request end
+like any other. Only the tool *listing* still goes through the SDK, and that
+touches no database.
+
 Auth. One token, MCP_API_TOKEN, which the connector sends as a fixed request
 header, either `Authorization: Bearer <token>` or `X-API-Key: <token>`. The
 tools can create and publish classes, so the token carries the trust of a
@@ -20,14 +30,13 @@ else. An empty token switches the endpoint off (404).
 import asyncio
 import json
 import logging
-import os
 import secrets
 
 from django.conf import settings
 from django.http import Http404, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from .mcp_server import SERVER_INSTRUCTIONS, SERVER_NAME, build_server
+from .mcp_server import SERVER_INSTRUCTIONS, SERVER_NAME, TOOLS, build_server
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +50,29 @@ PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR =
     -32700, -32600, -32601, -32602, -32603,
 )
 
-_server = None
+_tool_descriptions = None
+_tool_index = None
 
 
-def get_server():
-    global _server
-    if _server is None:
-        _server = build_server()
-    return _server
+def _tool_list():
+    """The tools/list payload, built once from the same FastMCP server the stdio
+    command runs, so both transports advertise identical names and schemas."""
+    global _tool_descriptions
+    if _tool_descriptions is None:
+        tools = asyncio.run(build_server().list_tools())
+        _tool_descriptions = [tool.model_dump(by_alias=True, exclude_none=True) for tool in tools]
+    return _tool_descriptions
 
 
-def _run(coroutine):
-    """Run one SDK coroutine to completion on this request's thread.
+def _tools():
+    """name -> (function, argument metadata), using the SDK's own validation
+    helper so arguments are checked exactly as they would be over stdio."""
+    global _tool_index
+    if _tool_index is None:
+        from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 
-    FastMCP is asyncio-native and calls our synchronous tools from inside its
-    loop, where Django's ORM guard would refuse to work. The guard exists to
-    stop blocking calls stalling a shared event loop; this loop lives for one
-    request on one gunicorn thread and is shared with nothing, so there is
-    nothing to protect. Same reasoning as the stdio command.
-    """
-    os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
-    return asyncio.run(coroutine)
+        _tool_index = {fn.__name__: (fn, func_metadata(fn)) for fn in TOOLS}
+    return _tool_index
 
 
 # --------------------------------------------------------------------------- #
@@ -101,31 +112,35 @@ def _authorised(request, token):
     return secrets.compare_digest(presented.encode(), token.encode())
 
 
-def _tool_result(result):
-    """Shape FastMCP's return value into a CallToolResult.
+def _tool_error(name, message):
+    # The SDK's own convention: a tool that failed is a successful response
+    # carrying isError, so the assistant can read the message and try again,
+    # rather than a protocol failure.
+    return {"content": [{"type": "text", "text": f"Error executing tool {name}: {message}"}], "isError": True}
 
-    call_tool() hands back a list of content blocks, a (content, structured)
-    pair when the tool declares an output schema, or a bare dict.
-    """
-    content, structured = [], None
-    if isinstance(result, tuple):
-        content, structured = result
-    elif isinstance(result, dict):
-        structured = result
-    else:
-        content = list(result)
-    body = {"content": [block.model_dump(by_alias=True, exclude_none=True) for block in content]}
-    if structured is not None:
-        body["structuredContent"] = structured
-        if not body["content"]:
-            body["content"] = [{"type": "text", "text": json.dumps(structured, default=str)}]
-    return body
+
+def _call_tool(name, arguments):
+    entry = _tools().get(name)
+    if entry is None:
+        return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
+    fn, meta = entry
+    logger.info("mcp tools/call %s", name)
+    try:
+        parsed = meta.arg_model.model_validate(meta.pre_parse_json(arguments))
+        result = fn(**parsed.model_dump_one_level())
+    except Exception as exc:  # noqa: BLE001 - every failure is reported to the assistant
+        return _tool_error(name, exc)
+    # Mirror FastMCP's shaping: a dict is the structured result as-is, anything
+    # else is wrapped under "result"; the text block carries the JSON for
+    # clients that only read text.
+    structured = result if isinstance(result, dict) else {"result": result}
+    return {
+        "content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}],
+        "structuredContent": structured,
+    }
 
 
 def _dispatch(method, params):
-    from mcp.server.fastmcp.exceptions import ToolError
-
-    server = get_server()
     if method == "initialize":
         requested = str(params.get("protocolVersion", ""))
         return {
@@ -137,21 +152,13 @@ def _dispatch(method, params):
     if method == "ping":
         return {}
     if method == "tools/list":
-        tools = _run(server.list_tools())
-        return {"tools": [tool.model_dump(by_alias=True, exclude_none=True) for tool in tools]}
+        return {"tools": _tool_list()}
     if method == "tools/call":
         name = params.get("name")
         arguments = params.get("arguments") or {}
         if not isinstance(name, str) or not isinstance(arguments, dict):
             raise RpcError(INVALID_PARAMS, "tools/call needs a tool name and an arguments object")
-        logger.info("mcp tools/call %s", name)
-        try:
-            return _tool_result(_run(server.call_tool(name, arguments)))
-        except ToolError as exc:
-            # The SDK's own convention: a tool that failed is a successful
-            # response carrying isError, so the assistant can read the message
-            # and try again, rather than a protocol failure.
-            return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+        return _call_tool(name, arguments)
     raise RpcError(METHOD_NOT_FOUND, f"Method not found: {method}")
 
 

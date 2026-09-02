@@ -154,11 +154,12 @@ envVarGroups:
         value: Europe/Malta
       - key: LOG_LEVEL
         value: INFO
-      # Each instance holds at most this many database connections. Raise it
-      # together with the number of instances, and keep the product well
-      # under the plan's connection limit.
+      # Each instance holds at most this many database connections. Matches
+      # gunicorn's eight threads so a burst of parallel requests (Claude firing
+      # several tool calls at once) never queues on the pool. Raise it together
+      # with the number of instances; the plan allows 97 in total.
       - key: DB_POOL_MAX_SIZE
-        value: "4"
+        value: "8"
       # --- Email: Zoho ZeptoMail over its API ---
       # The From address must be on a domain verified in the Mail Agent.
       # Accounts on the EU data centre (zeptomail.zoho.eu) use api.zeptomail.eu;
