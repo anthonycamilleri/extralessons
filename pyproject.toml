@@ -12,18 +12,18 @@ dependencies = [
     "django-environ~=0.12",
     "requests~=2.32",
     "django-storages[s3]~=1.14",
+    # The MCP SDK ships in the runtime image: the web service serves the
+    # catalogue tools at /mcp (apps.catalog.mcp_http) as well as over stdio.
+    "mcp>=1.29,<2",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest-django~=4.9",
     "factory-boy~=3.3",
-    "mcp>=1.29,<2",
 ]
-# `manage.py mcp_server`: lets Claude Code / Claude Desktop populate the catalogue.
-mcp = [
-    "mcp>=1.29,<2",
-]
+# Kept for older instructions; the SDK is now a core dependency.
+mcp = []
 
 [build-system]
 requires = ["setuptools>=69"]

@@ -179,6 +179,12 @@ NOTIFIER_INLINE_MAX_SECONDS = env.int("NOTIFIER_INLINE_MAX_SECONDS", default=20)
 # Absolute base URL used in notification links (no trailing slash).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 
+# --- Remote MCP (apps.catalog.mcp_http) ---
+# Bearer token for the /mcp endpoint that lets Claude Desktop, Cowork and
+# claude.ai populate the catalogue as a custom connector. Empty = endpoint off.
+# It carries the trust of a school-office login; Render generates it.
+MCP_API_TOKEN = env("MCP_API_TOKEN", default="")
+
 # --- Logging ---
 # A managed platform has no `docker compose logs`: stdout is the only channel,
 # and it is what Render collects. Django's default console handler is gated
