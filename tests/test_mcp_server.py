@@ -12,7 +12,7 @@ from apps.catalog import mcp_server as tools
 from apps.catalog.models import ActivityClass, ClassSession, SchoolYear, Term
 from apps.enrollments.models import Enrollment
 
-from .factories import ActivityClassFactory, EnrollmentFactory
+from .factories import ActivityClassFactory, ChildFactory, EnrollmentFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -126,9 +126,13 @@ def test_publish_generates_sessions_and_skips_holidays(calendar):
     assert not holiday_week & set(dates)
     assert result["session_count"] == len(dates)
 
-    # Re-upserting a published class with a new weekday moves its calendar
-    # (past sessions are kept as history, exactly as the admin action does).
-    moved = _chess(weekday=3)
+    # Re-upserting a published class with a new weekday leaves the calendar
+    # alone and says so; asking for a rebuild moves it (past sessions are kept
+    # as history, exactly as the admin action does).
+    unchanged = _chess(weekday=3)
+    assert unchanged["sessions"] is None and unchanged["schedule_changed"] is True
+    assert set(ClassSession.objects.filter(activity_class_id=cls_id).values_list("date", flat=True)) == set(dates)
+    moved = _chess(weekday=3, rebuild_sessions=True)
     assert moved["sessions"] is not None
     future = ClassSession.objects.filter(
         activity_class_id=cls_id, date__gte=timezone.localdate()
@@ -216,3 +220,126 @@ def test_command_explains_missing_sdk(monkeypatch):
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", None)
     with pytest.raises(CommandError, match="pip install"):
         call_command("mcp_server")
+
+
+# --------------------------------------------------------------------------- #
+# Lesson dates: edits leave them alone; individual dates can be cancelled
+# --------------------------------------------------------------------------- #
+
+
+def _future(dates):
+    today = timezone.localdate()
+    return [d for d in dates if datetime.date.fromisoformat(d) >= today]
+
+
+def _published_chess(**overrides):
+    cls_id = _chess(**overrides)["id"]
+    tools.publish_class(cls_id)
+    return cls_id
+
+
+def test_upsert_leaves_session_dates_alone_by_default(calendar):
+    cls_id = _published_chess()
+    dates_before = [s["date"] for s in tools.get_class(cls_id)["sessions"]]
+    tools.cancel_sessions(cls_id, [dates_before[1]], notes="Coach away")
+
+    result = _chess(description="New blurb", capacity=20)
+
+    assert result["created"] is False
+    assert result["sessions"] is None
+    assert result["schedule_changed"] is False
+    after = tools.get_class(cls_id)
+    assert [s["date"] for s in after["sessions"]] == dates_before
+    assert after["sessions"][1]["cancelled"] is True
+    assert after["sessions"][1]["notes"] == "Coach away"
+
+
+def test_upsert_reports_a_schedule_change_without_touching_dates(calendar):
+    cls_id = _published_chess()
+    dates_before = [s["date"] for s in tools.get_class(cls_id)["sessions"]]
+
+    result = _chess(weekday=3)
+
+    assert result["schedule_changed"] is True
+    assert result["sessions"] is None
+    assert "regenerate_sessions" in result["note"]
+    assert [s["date"] for s in tools.get_class(cls_id)["sessions"]] == dates_before  # still Tuesdays
+
+    rebuilt = tools.regenerate_sessions(cls_id)
+    new_dates = [s["date"] for s in tools.get_class(cls_id)["sessions"]]
+    assert new_dates != dates_before
+    # Past dates stay as history; every future lesson is now on the new weekday.
+    assert all(datetime.date.fromisoformat(d).weekday() == 3 for d in _future(new_dates))
+    assert "created" in rebuilt["sessions"]
+
+
+def test_upsert_can_be_asked_to_rebuild_sessions(calendar):
+    cls_id = _published_chess()
+    result = _chess(weekday=3, rebuild_sessions=True)
+    assert result["schedule_changed"] is True
+    assert result["sessions"] is not None
+    future = _future(s["date"] for s in tools.get_class(cls_id)["sessions"])
+    assert future and all(datetime.date.fromisoformat(d).weekday() == 3 for d in future)
+
+
+def test_cancel_sessions_marks_dates_and_survives_regeneration(calendar):
+    cls_id = _published_chess()
+    dates = [s["date"] for s in tools.get_class(cls_id)["sessions"]]
+    off = dates[:2]
+
+    result = tools.cancel_sessions(cls_id, off, notes="Hall booked for exams")
+
+    assert result["cancelled"] == off
+    assert result["cancelled_total"] == 2
+    sessions = {s["date"]: s for s in tools.get_class(cls_id)["sessions"]}
+    assert all(sessions[d]["cancelled"] and sessions[d]["notes"] == "Hall booked for exams" for d in off)
+    assert not sessions[dates[2]]["cancelled"]
+
+    tools.regenerate_sessions(cls_id)
+    tools.upsert_holiday("2026/27", "Extra day", dates[-1], dates[-1])  # triggers reconciliation too
+    sessions = {s["date"]: s for s in tools.get_class(cls_id)["sessions"]}
+    assert all(sessions[d]["cancelled"] for d in off)
+    assert dates[-1] not in sessions  # the holiday still removes its date
+
+    restored = tools.restore_sessions(cls_id, [off[0]])
+    assert restored["restored"] == [off[0]]
+    assert restored["cancelled_total"] == 1
+    sessions = {s["date"]: s for s in tools.get_class(cls_id)["sessions"]}
+    assert sessions[off[0]]["cancelled"] is False and sessions[off[0]]["notes"] == ""
+
+
+def test_cancel_sessions_needs_real_dates(calendar):
+    cls_id = _published_chess()
+    with pytest.raises(ValueError, match="has no session on 2030-01-01"):
+        tools.cancel_sessions(cls_id, ["2030-01-01"])
+    with pytest.raises(ValueError, match="at least one date"):
+        tools.cancel_sessions(cls_id, [])
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        tools.cancel_sessions(cls_id, ["next tuesday"])
+
+
+def test_cancel_sessions_refuses_lessons_with_attendance(calendar):
+    from apps.enrollments.models import Attendance
+
+    cls_id = _published_chess()
+    first = ClassSession.objects.filter(activity_class_id=cls_id).order_by("date").first()
+    Attendance.objects.create(session=first, child=ChildFactory(), present=True)
+
+    with pytest.raises(ValueError, match="Attendance has already been recorded"):
+        tools.cancel_sessions(cls_id, [first.date.isoformat()])
+    first.refresh_from_db()
+    assert first.cancelled is False
+
+
+def test_delete_term_only_when_empty(calendar):
+    tools.upsert_term("Spring", _monday(8).isoformat(), _monday(20).isoformat(), school_year="2026/27")
+    assert Term.objects.filter(name="Spring").exists()
+
+    result = tools.delete_term("Spring")
+    assert result["deleted"] is True and result["name"] == "Spring"
+    assert not Term.objects.filter(name="Spring").exists()
+
+    _published_chess()
+    with pytest.raises(ValueError, match="still has 1 class"):
+        tools.delete_term("Autumn")
+    assert Term.objects.filter(name="Autumn").exists()

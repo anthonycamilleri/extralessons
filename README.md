@@ -301,9 +301,12 @@ once you have looked them over.
 | `upsert_holiday(school_year, name, start_date, end_date)` | Inclusive dates; existing calendars are re-reconciled immediately. |
 | `upsert_term(name, start_date, end_date, school_year?, is_active?)` | Create or update; `is_active` left out keeps the current flag. |
 | `upsert_provider(name, description?, contact_email?, contact_phone?)` | Create or update by name. Linking user accounts stays in the admin. |
-| `upsert_class(term, provider, title, description, age_min, age_max, weekday, start_time, end_time, capacity?, location?, extra_details?, runs_during_holidays?, slug?)` | Create as DRAFT or update; matched by slug within the term. Updating a class that has sessions regenerates them. |
+| `upsert_class(term, provider, title, description, age_min, age_max, weekday, start_time, end_time, capacity?, location?, extra_details?, runs_during_holidays?, slug?, rebuild_sessions?)` | Create as DRAFT or update; matched by slug within the term. Updating never touches existing lesson dates; the result flags a schedule change, and `rebuild_sessions` opts in to regenerating them. |
 | `publish_class(class_id)` | Set PUBLISHED and generate sessions around the school holidays. |
-| `regenerate_sessions(class_id)` | Re-run the calendar reconciliation only. |
+| `regenerate_sessions(class_id)` | Re-run the calendar reconciliation only. Cancelled lessons stay cancelled. |
+| `cancel_sessions(class_id, dates, notes?)` | Cancel individual lessons by date. They stay in the calendar marked cancelled, survive regeneration, and are refused once attendance is recorded. |
+| `restore_sessions(class_id, dates)` | Undo `cancel_sessions`. |
+| `delete_term(name, school_year?)` | Delete a term that has no classes. |
 | `archive_class(class_id)` | Archive a finished class; refused while enrolments are active. |
 | `cancel_class(class_id)` | Cancel the class and every family's place, notifying them. Claude is told to confirm with you first. |
 

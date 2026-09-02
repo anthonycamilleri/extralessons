@@ -45,8 +45,11 @@ SERVER_INSTRUCTIONS = (
     "exist, then list_classes for the catalogue. Upsert tools are idempotent: "
     "calling them again with the same name updates the record instead of "
     "duplicating it. New classes are created as DRAFT and only appear to "
-    "parents after publish_class. Ask the user before cancel_class: it "
-    "cancels every family's place and notifies them."
+    "parents after publish_class. Editing a class never changes its lesson "
+    "dates; use cancel_sessions for individual dates that are off, and "
+    "regenerate_sessions only when the whole calendar should follow a new "
+    "schedule. Ask the user before cancel_class: it cancels every family's "
+    "place and notifies them."
 )
 
 
@@ -443,15 +446,19 @@ def upsert_class(
     runs_during_holidays: bool = False,
     slug: str | None = None,
     school_year: str | None = None,
+    rebuild_sessions: bool = False,
 ) -> dict:
     """Create or update a class in a term. Matched by slug (derived from the title) within the term.
 
     New classes start as DRAFT; call publish_class to open them to parents and
-    generate their session calendar. Updating a class that already has
-    sessions re-reconciles them against the new schedule. Pass an explicit
-    slug to keep two classes with the same title apart. Set
-    runs_during_holidays for holiday camps. Cancelled or archived classes
-    cannot be edited.
+    generate their session calendar. Updating an existing class never touches
+    its session dates unless rebuild_sessions is true: cancelled lessons and
+    one-off overrides survive edits to the title, description, capacity and so
+    on. If the schedule itself changed (term, weekday, times, holiday rule)
+    the result says so; call regenerate_sessions, or pass rebuild_sessions,
+    when the dates should follow. Pass an explicit slug to keep two classes
+    with the same title apart. Set runs_during_holidays for holiday camps.
+    Cancelled or archived classes cannot be edited.
     """
     term_obj = _term(term, school_year)
     provider_obj = _provider(provider)
@@ -479,6 +486,10 @@ def upsert_class(
     if capacity < 1:
         raise ValueError("capacity must be at least 1.")
 
+    # The fields the session calendar is derived from. Compared before the
+    # save so the caller can be told when the dates no longer match.
+    schedule_before = (cls.term_id, cls.weekday, cls.start_time, cls.end_time, cls.runs_during_holidays)
+
     cls.provider = provider_obj
     cls.title = title
     cls.description = description
@@ -493,11 +504,25 @@ def upsert_class(
     cls.runs_during_holidays = runs_during_holidays
     _save(cls)
 
+    schedule_after = (cls.term_id, cls.weekday, cls.start_time, cls.end_time, cls.runs_during_holidays)
+    schedule_changed = not created and schedule_before != schedule_after
+    has_sessions = not created and cls.sessions.exists()
+
     sessions = None
-    if not created and cls.sessions.exists():
+    note = None
+    if has_sessions and rebuild_sessions:
         sessions = generate_sessions(cls).summary
+    elif has_sessions and schedule_changed:
+        note = (
+            "The schedule changed but the existing session dates were left as they "
+            "are. Call regenerate_sessions to rebuild them (cancelled lessons stay "
+            "cancelled), or upsert again with rebuild_sessions=true."
+        )
     cls = _class(cls.id)
-    return {"created": created, "sessions": sessions, **_class_dict(cls)}
+    result = {"created": created, "sessions": sessions, "schedule_changed": schedule_changed, **_class_dict(cls)}
+    if note:
+        result["note"] = note
+    return result
 
 
 @tool_errors
@@ -521,12 +546,98 @@ def publish_class(class_id: int) -> dict:
 def regenerate_sessions(class_id: int) -> dict:
     """Re-reconcile a class's session dates with its schedule and the school holidays.
 
-    Safe to repeat: existing dates are kept, missing ones added, and future
-    dates that no longer fit are removed unless attendance was taken.
+    Safe to repeat: existing dates are kept (cancelled ones stay cancelled),
+    missing ones added, and future dates that no longer fit are removed unless
+    attendance was taken.
     """
     cls = _class(class_id)
     plan = generate_sessions(cls)
     return {"sessions": plan.summary, **_class_dict(_class(cls.id))}
+
+
+def _sessions_on(cls, dates, label):
+    """The class's sessions on the given ISO dates, or a ValueError naming the misses."""
+    wanted = [_date(value, label) for value in dates]
+    if not wanted:
+        raise ValueError(f"{label} must list at least one date.")
+    found = {s.date: s for s in cls.sessions.filter(date__in=wanted)}
+    missing = [d.isoformat() for d in wanted if d not in found]
+    if missing:
+        have = ", ".join(d.isoformat() for d in cls.sessions.values_list("date", flat=True)[:60])
+        raise ValueError(
+            f"Class {cls.id} ({cls.title}) has no session on {', '.join(missing)}. "
+            f"Its dates are: {have or 'none yet — publish it first'}."
+        )
+    return [found[d] for d in wanted]
+
+
+@tool_errors
+def cancel_sessions(class_id: int, dates: list[str], notes: str = "") -> dict:
+    """Cancel individual lessons of a class by date (YYYY-MM-DD), for example a date the provider cannot make.
+
+    The dates stay in the calendar marked as cancelled, so providers and
+    parents see that the lesson is off and regenerate_sessions will not bring
+    them back. Optional notes are shown against each cancelled date. Lessons
+    whose attendance has already been recorded cannot be cancelled. Use
+    restore_sessions to undo.
+    """
+    cls = _class(class_id)
+    sessions = _sessions_on(cls, dates, "dates")
+    taken = [s.date.isoformat() for s in sessions if s.attendance.exists()]
+    if taken:
+        raise ValueError(
+            f"Attendance has already been recorded for {', '.join(taken)}; those lessons "
+            "happened and cannot be cancelled."
+        )
+    with transaction.atomic():
+        for session in sessions:
+            session.cancelled = True
+            if notes:
+                session.notes = notes[:200]
+            session.save(update_fields=["cancelled", "notes"])
+    return {
+        "cancelled": [s.date.isoformat() for s in sessions],
+        "cancelled_total": cls.sessions.filter(cancelled=True).count(),
+        **_class_dict(_class(cls.id)),
+    }
+
+
+@tool_errors
+def restore_sessions(class_id: int, dates: list[str]) -> dict:
+    """Undo cancel_sessions: the lessons on these dates (YYYY-MM-DD) are on again."""
+    cls = _class(class_id)
+    sessions = _sessions_on(cls, dates, "dates")
+    with transaction.atomic():
+        for session in sessions:
+            session.cancelled = False
+            session.notes = ""
+            session.save(update_fields=["cancelled", "notes"])
+    return {
+        "restored": [s.date.isoformat() for s in sessions],
+        "cancelled_total": cls.sessions.filter(cancelled=True).count(),
+        **_class_dict(_class(cls.id)),
+    }
+
+
+@tool_errors
+def delete_term(name: str, school_year: str | None = None) -> dict:
+    """Delete a term that has no classes, for example one created by mistake.
+
+    Refused while any class, in any status, belongs to it: move or archive
+    those first. Deleting the active term leaves the school with no active
+    term until upsert_term sets another.
+    """
+    term = _term(name, school_year)
+    classes = ActivityClass.objects.filter(term=term)
+    if classes.exists():
+        titles = ", ".join(classes.order_by("title").values_list("title", flat=True)[:10])
+        raise ValueError(
+            f"Term {term.name!r} still has {classes.count()} class(es) ({titles}); "
+            "a term with classes cannot be deleted."
+        )
+    data = _term_dict(term)
+    term.delete()
+    return {"deleted": True, **data}
 
 
 @tool_errors
@@ -567,6 +678,9 @@ TOOLS = [
     upsert_class,
     publish_class,
     regenerate_sessions,
+    cancel_sessions,
+    restore_sessions,
+    delete_term,
     archive_class,
     cancel_class,
 ]
