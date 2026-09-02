@@ -221,9 +221,11 @@ database stays private.
    the value of `MCP_API_TOKEN` (Render generated it from `render.yaml`).
 2. In Claude: **Settings → Connectors → Add custom connector**. Name it
    `Extralessons`, URL `https://extralessons-web.onrender.com/mcp` (or the
-   custom domain once attached). Under **Request headers** add
-   `Authorization` with the value `Bearer <the token>`. Leave the OAuth
-   fields empty. Add.
+   custom domain once attached). Set **Authentication** to **None** (the
+   dialog may say it detected OAuth; it did not, it saw a 401). Under
+   **Additional request headers** add one header: `X-API-Key` with the token
+   as its value (`Authorization: Bearer <token>` also works if the dialog
+   allows that name). Add.
 3. Enable the connector in a chat or a Cowork task and ask for the school
    overview.
 

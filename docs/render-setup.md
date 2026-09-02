@@ -273,8 +273,10 @@ token when the Blueprint was created.
 1. Web service → **Environment** → copy the value of `MCP_API_TOKEN`.
 2. In Claude: **Settings → Connectors → Add custom connector**. Name
    `Extralessons`; URL `https://extralessons-web.onrender.com/mcp` (the custom
-   domain, once attached). Under **Request headers** add `Authorization:
-   Bearer <token>`. No OAuth fields. Add.
+   domain, once attached). **Authentication: None** — this is an API-key
+   server, whatever the dialog says it detected. Under **Additional request
+   headers** add `X-API-Key` with the token as its value (`Authorization:
+   Bearer <token>` works too where the dialog allows that name). Add.
 3. In a chat or Cowork task, enable the connector and ask for the school
    overview.
 

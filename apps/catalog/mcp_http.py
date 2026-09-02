@@ -11,10 +11,11 @@ server-initiated stream (GET answers 405), which is the entire protocol surface
 a tools-only server needs. Doing this as a plain Django view, rather than
 mounting the SDK's ASGI app, keeps the app a single WSGI process under gunicorn.
 
-Auth. One bearer token, MCP_API_TOKEN, which the connector sends as a fixed
-request header. The tools can create and publish classes, so the token carries
-the trust of a school-office login: keep it in Render and in the connector
-settings, nowhere else. An empty token switches the endpoint off (404).
+Auth. One token, MCP_API_TOKEN, which the connector sends as a fixed request
+header, either `Authorization: Bearer <token>` or `X-API-Key: <token>`. The
+tools can create and publish classes, so the token carries the trust of a
+school-office login: keep it in Render and in the connector settings, nowhere
+else. An empty token switches the endpoint off (404).
 """
 import asyncio
 import json
@@ -82,11 +83,22 @@ def _error_body(request_id, code, message, data=None):
 
 
 def _authorised(request, token):
+    """Accept the token as `Authorization: Bearer <token>` or `X-API-Key: <token>`.
+
+    Two spellings because connector dialogs differ: some let you add an
+    Authorization header, others reserve that name for OAuth and only allow
+    custom ones. Either way the comparison is constant-time.
+    """
+    presented = ""
     header = request.headers.get("Authorization", "")
-    scheme, _, presented = header.partition(" ")
-    if scheme.lower() != "bearer" or not presented:
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() == "bearer":
+        presented = value.strip()
+    if not presented:
+        presented = request.headers.get("X-API-Key", "").strip()
+    if not presented:
         return False
-    return secrets.compare_digest(presented.strip().encode(), token.encode())
+    return secrets.compare_digest(presented.encode(), token.encode())
 
 
 def _tool_result(result):
@@ -182,10 +194,11 @@ def mcp_endpoint(request):
         # No server-to-client stream and no sessions to delete.
         return HttpResponse(status=405, headers={"Allow": "POST"})
     if not _authorised(request, token):
-        return HttpResponse(
-            status=401,
-            headers={"WWW-Authenticate": f'Bearer realm="{SERVER_NAME}"'},
-        )
+        # Deliberately no WWW-Authenticate header: to an MCP client that is the
+        # cue to start OAuth discovery, and Claude's connector dialog then
+        # reports the server as "authentication always required". This is an
+        # API-key server; a bare 401 says "wrong or missing key" and no more.
+        return HttpResponse(status=401)
     try:
         payload = json.loads(request.body or b"")
     except ValueError:

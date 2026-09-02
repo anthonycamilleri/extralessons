@@ -37,11 +37,27 @@ def test_disabled_without_a_token(client, settings):
     assert rpc(client, "ping").status_code == 404
 
 
-def test_missing_or_wrong_token_is_401_with_challenge(client):
+def test_missing_or_wrong_token_is_a_bare_401(client):
     response = rpc(client, "ping", token=None)
     assert response.status_code == 401
-    assert response["WWW-Authenticate"].startswith("Bearer")
+    # No WWW-Authenticate: that header makes MCP clients start OAuth discovery.
+    assert "WWW-Authenticate" not in response
     assert rpc(client, "ping", token="nope").status_code == 401
+
+
+def test_x_api_key_header_is_accepted_too(client):
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    ok = client.post(URL, data=body, content_type="application/json", headers={"X-API-Key": TOKEN})
+    assert ok.status_code == 200
+    bad = client.post(URL, data=body, content_type="application/json", headers={"X-API-Key": "nope"})
+    assert bad.status_code == 401
+    # A wrong bearer token is not rescued by a correct X-API-Key: the
+    # Authorization header wins when it is present and well-formed.
+    mixed = client.post(
+        URL, data=body, content_type="application/json",
+        headers={"Authorization": "Bearer nope", "X-API-Key": TOKEN},
+    )
+    assert mixed.status_code == 401
 
 
 def test_only_post_is_served(client):
