@@ -109,14 +109,84 @@ class TestCatalogueFilters:
         assert "Nothing matches those filters" in content
         assert "check back soon" not in content
 
-    def test_clear_link_appears_only_while_filtering(self, client, three):
-        assert ">Clear<" not in client.get(reverse("catalogue")).content.decode()
-        assert ">Clear<" in client.get(reverse("catalogue"), {"day": 0}).content.decode()
+    def test_clear_button_is_always_present_but_disabled_until_filtering(self, client, three):
+        idle = client.get(reverse("catalogue")).content.decode()
+        assert ">Clear filters<" in idle
+        assert 'aria-disabled="true"' in idle
+
+        active = client.get(reverse("catalogue"), {"day": 0}).content.decode()
+        assert ">Clear filters<" in active
+        assert 'aria-disabled="true"' not in active
 
     def test_filtered_page_keeps_the_availability_wording(self, client):
         ActivityClassFactory(title="Monday Chess", weekday=0, capacity=5)
         content = client.get(reverse("catalogue"), {"day": 0}).content.decode()
         assert "5 of 5 places available" in content
+
+    def test_filters_are_remembered_on_the_next_visit(self, client, three):
+        client.get(reverse("catalogue"), {"day": 1, "location": "Library"})
+        assert "catalogue_filters" in client.cookies
+        assert client.cookies["catalogue_filters"]["max-age"] == 365 * 24 * 60 * 60
+
+        content = client.get(reverse("catalogue")).content.decode()
+        assert "Tuesday Judo" in content
+        assert "Tuesday Football" not in content
+        assert "Monday Chess" not in content
+        assert "filters from your last visit" in content
+        # The form reflects the remembered selection too.
+        assert 'id="day-1" value="1" checked' in content
+        assert '<option value="Library" selected>' in content
+
+    def test_remembered_filters_are_not_claimed_on_an_explicit_url(self, client, three):
+        content = client.get(reverse("catalogue"), {"day": 1}).content.decode()
+        assert "filters from your last visit" not in content
+
+    def test_an_explicit_url_beats_the_remembered_filters(self, client, three):
+        client.get(reverse("catalogue"), {"day": 1})
+        content = client.get(reverse("catalogue"), {"day": 0}).content.decode()
+        assert "Monday Chess" in content
+        assert "Tuesday Judo" not in content
+        # ...and becomes the new remembered selection.
+        content = client.get(reverse("catalogue")).content.decode()
+        assert "Monday Chess" in content
+        assert "Tuesday Judo" not in content
+
+    def test_choosing_any_everywhere_forgets_the_filters(self, client, three):
+        client.get(reverse("catalogue"), {"day": 1})
+        # What the form submits when every control is back on "Any".
+        client.get(reverse("catalogue"), {"day": "", "location": "", "age": ""})
+        assert not client.cookies.get("catalogue_filters", None) or (
+            client.cookies["catalogue_filters"].value == ""
+        )
+        content = client.get(reverse("catalogue")).content.decode()
+        assert all(cls.title in content for cls in three.values())
+
+    def test_clear_forgets_the_filters_and_returns_to_the_catalogue(self, client, three):
+        client.get(reverse("catalogue"), {"day": 1})
+
+        response = client.get(reverse("catalogue"), {"clear": ""})
+        assert response.status_code == 302
+        assert response["Location"] == reverse("catalogue")
+
+        content = client.get(reverse("catalogue")).content.decode()
+        assert all(cls.title in content for cls in three.values())
+        assert "filters from your last visit" not in content
+
+    def test_a_stale_remembered_filter_is_dropped(self, client, three):
+        # A day the catalogue no longer offers, e.g. after a term change.
+        client.cookies["catalogue_filters"] = "day=4&location=Narnia"
+        content = client.get(reverse("catalogue")).content.decode()
+        assert all(cls.title in content for cls in three.values())
+        assert "filters from your last visit" not in content
+        assert client.cookies["catalogue_filters"].value == ""
+
+    def test_remembered_location_survives_a_space_and_accents(self, client):
+        ActivityClassFactory(title="Judo", location="Športna dvorana")
+        ActivityClassFactory(title="Chess", location="Library")
+        client.get(reverse("catalogue"), {"location": "Športna dvorana"})
+        content = client.get(reverse("catalogue")).content.decode()
+        assert "Judo" in content
+        assert "Chess" not in content
 
     def test_catalogue_stays_within_its_query_budget(
         self, client, three, django_assert_max_num_queries

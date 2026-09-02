@@ -51,13 +51,18 @@
     </div>
     <div class="filter-field filter-actions">
       <button type="submit" class="btn filter-apply">Show activities</button>
-      {% if filters_active %}<a class="btn btn-secondary" href="{% url 'catalogue' %}">Clear</a>{% endif %}
+      {% comment %}Always on the page so it can be found before it is needed; it
+         also forgets the remembered selection, which a plain link would not.{% endcomment %}
+      <a class="btn btn-secondary filter-clear" href="{% url 'catalogue' %}?clear"{% if not filters_active %} aria-disabled="true" tabindex="-1"{% endif %}>Clear filters</a>
     </div>
   </div>
 </form>
 
 {# `length` populates the queryset cache, which the loop below then reuses. #}
-<p class="result-count">Showing <b>{{ classes|length }}</b> of {{ total_count }} activit{{ total_count|pluralize:"y,ies" }}</p>
+<p class="result-count">
+  Showing <b>{{ classes|length }}</b> of {{ total_count }} activit{{ total_count|pluralize:"y,ies" }}
+  {% if filters_remembered %}<span class="result-note">· using the filters from your last visit</span>{% endif %}
+</p>
 {% endif %}
 
 {% if not classes %}
@@ -65,7 +70,7 @@
     {% if filters_active %}
       <span class="emoji" aria-hidden="true">🔍</span>
       <p>Nothing matches those filters — try another day or age group.</p>
-      <p><a class="btn btn-secondary" href="{% url 'catalogue' %}">Show all activities</a></p>
+      <p><a class="btn btn-secondary" href="{% url 'catalogue' %}?clear">Show all activities</a></p>
     {% else %}
       <span class="emoji" aria-hidden="true">🌱</span>
       <p>No classes are open for registration right now — check back soon!</p>

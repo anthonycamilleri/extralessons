@@ -428,8 +428,9 @@ form p:has(> input[type=checkbox]) { flex-wrap: wrap; }
 
 .filter-actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
 .filter-bar.js-autosubmit .filter-apply { display: none; }
-.filter-bar.js-autosubmit .filter-actions:not(:has(a)) { display: none; }
+.filter-clear[aria-disabled="true"] { opacity: .45; pointer-events: none; box-shadow: none; }
 .result-count { margin: 0 0 1rem; color: var(--muted); font-weight: 600; }
+.result-note { font-weight: 400; }
 .result-count b { color: var(--ink); }
 
 .empty-state {
