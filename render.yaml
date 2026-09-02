@@ -36,10 +36,10 @@ services:
     # keeps serving. Render does not run this through a shell, hence a script
     # rather than "a && b".
     preDeployCommand: sh deploy/pre-deploy.sh
-    # Custom domain. Uncomment together with the three host variables below
-    # once the DNS record exists; Render issues the certificate itself.
-    # domains:
-    #   - activities.example.com
+    # Custom domain. Render issues the certificate itself once the DNS record
+    # exists. The three host variables below must name the same domain.
+    domains:
+      - www.esljparents.eu
     envVars:
       - fromGroup: extralessons-shared
       - key: DATABASE_URL
@@ -53,15 +53,15 @@ services:
       # the value in the dashboard and re-syncing the Blueprint.
       - key: MCP_API_TOKEN
         generateValue: true
-      # Until these are set, config/settings/prod.py serves the generated
-      # *.onrender.com hostname, which Render passes in as
-      # RENDER_EXTERNAL_HOSTNAME — so a fresh service works before any DNS.
-      # - key: ALLOWED_HOSTS
-      #   value: activities.example.com
-      # - key: CSRF_TRUSTED_ORIGINS
-      #   value: https://activities.example.com
-      # - key: SITE_URL
-      #   value: https://activities.example.com
+      # The custom domain. config/settings/prod.py adds the generated
+      # *.onrender.com hostname (RENDER_EXTERNAL_HOSTNAME) alongside, so that
+      # address keeps working too. Without these Django 400s the custom domain.
+      - key: ALLOWED_HOSTS
+        value: www.esljparents.eu
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://www.esljparents.eu
+      - key: SITE_URL
+        value: https://www.esljparents.eu
       #
       # sync: false = a secret. Render asks for the value when the Blueprint
       # is first created and never overwrites what is in the dashboard.
