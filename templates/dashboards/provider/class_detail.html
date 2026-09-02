@@ -47,6 +47,12 @@
 {% endif %}
 
 <h2>Sessions</h2>
+{% if holidays %}
+<p class="small muted">
+  Skipped for school holidays:
+  {% for holiday in holidays %}{{ holiday.name }} ({{ holiday.date_display }}){% if not forloop.last %}, {% endif %}{% endfor %}.
+</p>
+{% endif %}
 <div class="table-wrap"><table class="list stacked">
   <tr><th>Date</th><th>Status</th><th></th></tr>
   {% for session in sessions %}
@@ -56,6 +62,7 @@
       {% if session.cancelled %}<span class="badge badge-bad">Cancelled</span>
       {% elif session.date < today %}<span class="badge">Past</span>
       {% else %}<span class="badge badge-ok">Planned</span>{% endif %}
+      {% if session.holiday_override %}<span class="badge badge-warn">Holiday exception</span>{% endif %}
       {% if session.notes %}<span class="small muted">{{ session.notes }}</span>{% endif %}
     </td>
     <td>

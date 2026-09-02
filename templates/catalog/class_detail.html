@@ -40,6 +40,18 @@
 
   <div class="prose">{{ cls.description|linebreaks }}</div>
 
+  {% if holidays %}
+    <section class="panel">
+      <h2>No sessions during</h2>
+      <ul class="plain">
+        {% for holiday in holidays %}
+          <li><b>{{ holiday.name }}</b> · {{ holiday.date_display }}</li>
+        {% endfor %}
+      </ul>
+      <p class="small muted">School holidays — the club takes a break and resumes afterwards.</p>
+    </section>
+  {% endif %}
+
   {% if cls.extra_details %}
     <section class="panel panel-accent">
       <h2>Good to know</h2>

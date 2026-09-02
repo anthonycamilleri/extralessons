@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<h1>Copy school holidays</h1>
+<p>The holidays of <strong>{{ source }}</strong> will be copied into the school year you pick,
+   shifted by whole weeks so each period keeps its weekdays. Anything that would land outside
+   the target year is skipped, and existing holidays are left alone.</p>
+<ul>
+  {% for holiday in source.holidays.all %}<li>{{ holiday }}</li>
+  {% empty %}<li>{{ source }} has no holidays to copy.</li>{% endfor %}
+</ul>
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <input type="hidden" name="_selected_action" value="{{ source.pk }}">
+  <input type="hidden" name="action" value="copy_holidays">
+  <input type="submit" name="apply" value="Copy holidays" class="default">
+  <a href="{% url 'admin:catalog_schoolyear_changelist' %}" class="button cancel-link">Cancel</a>
+</form>
+{% endblock %}

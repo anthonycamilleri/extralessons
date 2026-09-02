@@ -1,4 +1,4 @@
-"""Create demo data for local development: accounts, a term, and classes.
+"""Create demo data for local development: accounts, a school year, a term, and classes.
 
 Idempotent — safe to run repeatedly. All demo passwords are 'demo1234'.
 """
@@ -8,7 +8,14 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from apps.accounts.models import Child, Guardian, SiteConfig, User
-from apps.catalog.models import ActivityClass, Provider, Term, generate_sessions
+from apps.catalog.models import (
+    ActivityClass,
+    Holiday,
+    Provider,
+    SchoolYear,
+    Term,
+    generate_sessions,
+)
 
 PASSWORD = "demo1234"
 
@@ -46,13 +53,32 @@ class Command(BaseCommand):
         arts.members.add(tutor)
 
         today = timezone.localdate()
+        year, _ = SchoolYear.objects.get_or_create(
+            name=f"Demo Year {today.year}",
+            defaults={
+                "start_date": today - datetime.timedelta(days=60),
+                "end_date": today + datetime.timedelta(days=240),
+            },
+        )
         term, _ = Term.objects.get_or_create(
             name=f"Demo Term {today.year}",
             defaults={
+                "school_year": year,
                 "start_date": today - datetime.timedelta(days=7),
                 "end_date": today + datetime.timedelta(days=70),
                 "is_active": True,
             },
+        )
+
+        # A half-term break inside the demo term, so the generated calendars
+        # show the holiday skip rather than needing it explained.
+        break_start = today + datetime.timedelta(days=28)
+        break_start -= datetime.timedelta(days=break_start.weekday())  # snap to Monday
+        Holiday.objects.get_or_create(
+            school_year=year,
+            name="Half-term break",
+            start_date=break_start,
+            defaults={"end_date": break_start + datetime.timedelta(days=4)},
         )
 
         # Spread across days, rooms, ages and start times so the catalogue

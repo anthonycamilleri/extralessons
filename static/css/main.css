@@ -333,6 +333,8 @@ legend { font-weight: 600; padding: 0; }
 .panel-accent { border-color: var(--brand-orange); border-left-width: 6px; background: var(--brand-orange-soft); }
 .panel-title { display: flex; justify-content: space-between; align-items: center; gap: .75rem 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .panel-title h1, .panel-title h2 { margin: 0; }
+.plain { list-style: none; padding: 0; margin: 0 0 .6rem; }
+.plain li + li { margin-top: .3rem; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .auth-box { max-width: 26rem; margin: 2rem auto; }
 .auth-box h1 { text-align: center; }

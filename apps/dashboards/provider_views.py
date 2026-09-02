@@ -14,7 +14,7 @@ from apps.notifications.models import Broadcast
 def _own_classes(user):
     return (
         ActivityClass.objects.filter(provider__members=user)
-        .select_related("provider", "term")
+        .select_related("provider", "term", "term__school_year")
         .order_by("-term__start_date", "weekday", "start_time")
     )
 
@@ -47,6 +47,7 @@ def class_detail(request, class_id):
             "waitlisted": waitlisted,
             "sessions": sessions,
             "next_session": next_session,
+            "holidays": cls.skipped_holidays(),
             "today": today,
         },
     )

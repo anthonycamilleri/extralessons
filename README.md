@@ -20,6 +20,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Message the families of their classes (announcements/broadcasts).
 
 **School admin**
+- Set up the school year once — term dates plus every holiday period — and every class generated in it skips those days automatically.
 - Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists).
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48).
 - Optional email alerts on new requests and freed seats.
@@ -97,6 +98,26 @@ any active state ── withdrawal / admin cancel / class cancelled ──► CA
 
 `ENROLLED` and `OFFERED` hold a seat; an offer reserves the seat until
 confirmed, declined, or expired.
+
+**The school calendar is a default, not a cage.** Holidays live once, on the
+`SchoolYear`, and every term in that year inherits them
+(`apps/catalog/models.py`). `generate_sessions()` reconciles a class's
+`ClassSession` rows against three inputs — the term dates, the class weekday,
+and the year's holidays — and is idempotent, so it is safe to re-run at any
+time (admin action *"Regenerate sessions"*). Two escape hatches sit above the
+default, because a holiday club is a real thing and so is a one-off make-up
+session:
+
+| Override | Where | Effect |
+|---|---|---|
+| `ActivityClass.runs_during_holidays` | the class | the whole class ignores holidays |
+| `ClassSession.holiday_override` | one session | that date survives reconciliation |
+
+Editing a holiday takes the already-generated sessions with it — a `post_save`
+/ `post_delete` signal re-reconciles every class in the year, so the holiday
+list is not just a rule for classes published afterwards. Two things are never
+removed: sessions that already have attendance, and sessions in the past.
+Adding a holiday retroactively closes future dates, not history.
 
 ## Local development
 
@@ -201,6 +222,7 @@ set on the Serverless Container and Jobs instead of in a file — see
 Most day-to-day settings are editable in the admin without redeploying, and both are seeded with sensible defaults:
 
 - **Site configuration** (singleton): school name, contact email, catalogue intro text, whether parent self-signup is open, waiting-list offer expiry in hours, and toggles for the admin alert emails (new request, seat freed).
+- **School years and holidays**: a `SchoolYear` holds the calendar; its `School holiday` rows (half-terms, Christmas, public holidays — inclusive date ranges) are the system-level default. Terms point at a school year and inherit them. "Copy holidays into another school year…" sets next year up from this one, shifted by whole weeks so periods keep their weekdays.
 - **Notification templates** (one row per event): email subject/body as Django template strings (context includes `school_name`, `parent_name`, `child_name`, `class_title`, `schedule`, `action_url`, `offer_expires_at`, ...), an enabled flag, plus the WhatsApp mapping — approved template name, language, and which context keys fill the `{{1}}..{{n}}` placeholders. Leave the WhatsApp template name empty to skip WhatsApp for that event.
 
 ## WhatsApp setup
@@ -251,7 +273,10 @@ apps/
   accounts/           # custom email-login User (roles: ADMIN/PROVIDER/PARENT),
                       # Child, Guardian, GuardianInvite, SiteConfig singleton,
                       # management/commands/seed_demo.py
-  catalog/            # Provider, Term, ActivityClass, ClassSession; public catalogue views
+  catalog/            # SchoolYear + Holiday (the school calendar), Provider, Term,
+                      # ActivityClass, ClassSession; generate_sessions() reconciles a
+                      # class's dates against the schedule and the year's holidays;
+                      # public catalogue views
   enrollments/        # Enrollment + Attendance models;
                       # services.py = ALL state transitions (register/approve/reject/
                       # offer/confirm/decline/expire/cancel) under a per-class row lock
@@ -267,7 +292,7 @@ static/               # main.css (the whole design system), vendored htmx.min.js
                       # Fredoka woff2 + OFL licence — no third-party font requests)
 scripts/              # make_icons.py: regenerate the favicons from the logo
 tests/                # pytest suite (services, capacity race, notifications, views,
-                      # health probe, inline delivery, notifier job modes)
+                      # school holidays, health probe, inline delivery, notifier job modes)
 .github/workflows/
   ci.yml              # tests on SQLite + Postgres, deploy checks, image build
   deploy.yml          # build → migrate job → container redeploy → smoke test

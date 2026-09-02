@@ -4,7 +4,7 @@ import factory
 from django.utils import timezone
 
 from apps.accounts.models import Child, Guardian, User
-from apps.catalog.models import ActivityClass, Provider, Term
+from apps.catalog.models import ActivityClass, Holiday, Provider, SchoolYear, Term
 from apps.enrollments.models import Enrollment
 
 
@@ -56,6 +56,25 @@ class ProviderFactory(factory.django.DjangoModelFactory):
         model = Provider
 
     name = factory.Sequence(lambda n: f"Provider {n}")
+
+
+class SchoolYearFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = SchoolYear
+
+    name = factory.Sequence(lambda n: f"School year {n}")
+    start_date = factory.LazyFunction(lambda: timezone.localdate() - datetime.timedelta(days=60))
+    end_date = factory.LazyFunction(lambda: timezone.localdate() + datetime.timedelta(days=240))
+
+
+class HolidayFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Holiday
+
+    school_year = factory.SubFactory(SchoolYearFactory)
+    name = factory.Sequence(lambda n: f"Holiday {n}")
+    start_date = factory.LazyFunction(lambda: timezone.localdate() + datetime.timedelta(days=7))
+    end_date = factory.LazyFunction(lambda: timezone.localdate() + datetime.timedelta(days=11))
 
 
 class TermFactory(factory.django.DjangoModelFactory):

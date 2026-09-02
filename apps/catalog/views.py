@@ -80,7 +80,9 @@ def catalogue(request):
 
 def class_detail(request, term_id, slug):
     cls = get_object_or_404(
-        ActivityClass.objects.published().with_counts().select_related("provider", "term"),
+        ActivityClass.objects.published()
+        .with_counts()
+        .select_related("provider", "term", "term__school_year"),
         term_id=term_id,
         slug=slug,
     )
@@ -90,5 +92,5 @@ def class_detail(request, term_id, slug):
     return render(
         request,
         "catalog/class_detail.html",
-        {"cls": cls, "children": children},
+        {"cls": cls, "children": children, "holidays": cls.skipped_holidays()},
     )
