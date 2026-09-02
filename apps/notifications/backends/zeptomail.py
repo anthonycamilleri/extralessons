@@ -53,6 +53,17 @@ REQUEST_ID_HEADER = "X-ZeptoMail-Request-Id"
 # a fixed token or a recovered service lets the queued row go out.
 PERMANENT_STATUSES = frozenset({400, 404, 413, 415, 422})
 
+# ZeptoMail's dashboard copies the token as "Zoho-enczapikey <token>", i.e.
+# the whole Authorization value, and its docs show the bare token. Accept both.
+AUTH_SCHEME = "Zoho-enczapikey"
+
+
+def normalise_token(value):
+    value = (value or "").strip()
+    if value.lower().startswith(AUTH_SCHEME.lower()):
+        value = value[len(AUTH_SCHEME):].strip()
+    return value
+
 
 class ZeptoMailError(Exception):
     """A send that ZeptoMail rejected or that never reached it."""
@@ -78,7 +89,9 @@ class ZeptoMailBackend(BaseEmailBackend):
     ):
         super().__init__(fail_silently=fail_silently, **kwargs)
         self.api_url = api_url or settings.ZEPTOMAIL_API_URL
-        self.token = token if token is not None else settings.ZEPTOMAIL_SEND_MAIL_TOKEN
+        self.token = normalise_token(
+            token if token is not None else settings.ZEPTOMAIL_SEND_MAIL_TOKEN
+        )
         self.bounce_address = (
             bounce_address
             if bounce_address is not None
@@ -105,7 +118,7 @@ class ZeptoMailBackend(BaseEmailBackend):
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "Authorization": f"Zoho-enczapikey {self.token}",
+                "Authorization": f"{AUTH_SCHEME} {self.token}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             }

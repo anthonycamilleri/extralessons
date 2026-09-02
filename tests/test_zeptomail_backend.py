@@ -170,6 +170,19 @@ def test_session_carries_authorization_header():
     assert conn.session is None
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [TOKEN, f"Zoho-enczapikey {TOKEN}", f"  zoho-enczapikey   {TOKEN}\n"],
+)
+def test_token_pasted_with_the_dashboard_prefix_still_authenticates(raw):
+    conn = backend(token=raw)
+    conn.open()
+    try:
+        assert conn.session.headers["Authorization"] == f"Zoho-enczapikey {TOKEN}"
+    finally:
+        conn.close()
+
+
 def test_batch_reuses_one_session_when_caller_holds_it_open(post):
     conn = backend()
     conn.open()

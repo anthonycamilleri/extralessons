@@ -122,14 +122,17 @@ In ZeptoMail (`zeptomail.zoho.eu` for an EU account):
    SPF records it gives you. Unverified domains cannot send.
 2. **Mail Agents → Add**, one called `extralessons`. A Mail Agent is
    ZeptoMail's unit of configuration and reporting; one per application.
-3. On the agent, **Setup info → API → Send Mail Token → Generate**. Copy it;
-   this is the only secret.
+3. On the agent, **SMTP / API → API → Send Mail token**. Copy it; this is the
+   only secret. The copy button copies `Zoho-enczapikey <token>`, the whole
+   Authorization header; the backend accepts that or the bare token.
 4. Optionally add a bounce address under the agent's settings and set it as
    `ZEPTOMAIL_BOUNCE_ADDRESS` in the shared group.
 
 Then in `render.yaml`, in the `extralessons-shared` group, set
-`DEFAULT_FROM_EMAIL` to an address on the verified domain. `ZEPTOMAIL_API_URL`
-defaults to the EU endpoint; a `.com` account needs
+`DEFAULT_FROM_EMAIL` to the verified sender address (currently
+`anthony@knowledgeinnovation.eu`; the agent's *Domain / Sender Address* field
+shows what is allowed). `ZEPTOMAIL_API_URL` defaults to the EU endpoint, which
+matches the `api.zeptomail.eu` host the agent shows; a `.com` account needs
 `https://api.zeptomail.com/v1.1/email`. Commit. Leave the custom domain and
 object storage blocks commented out for now; they come later.
 
