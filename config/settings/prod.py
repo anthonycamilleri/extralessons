@@ -11,7 +11,7 @@ The database section is shaped by managed PostgreSQL offerings that front or
 cap connections; see docs/render-setup.md for the reasoning.
 """
 from .base import *  # noqa: F401,F403
-from .base import ALLOWED_HOSTS, DATABASES, STORAGES, env, is_postgres
+from .base import ALLOWED_HOSTS, DATABASES, MEDIA_MAX_AGE, STORAGES, env, is_postgres
 
 DEBUG = False
 
@@ -67,14 +67,18 @@ if is_postgres():
     DATABASES["default"].setdefault("OPTIONS", {})
     DATABASES["default"]["OPTIONS"].setdefault("sslmode", env("DB_SSLMODE", default="require"))
 
-# --- Media files on S3-compatible object storage ---
+# --- Media files ---
 # Container filesystems are ephemeral and per-instance: an upload written by one
-# instance does not exist for the next request. Without a bucket configured the
-# app still boots on local disk, so a first deploy is not blocked on it — but
-# uploads will not survive. Any S3-compatible provider works; set
-# S3_ENDPOINT_URL and S3_REGION for yours (the defaults are Scaleway's).
+# instance does not exist for the next request. By default uploads therefore go
+# into the database (apps.media): no second provider, no disk pinning the
+# service to one instance, backed up with everything else, and the only uploads
+# are class images already shrunk to a small JPEG. Set S3_BUCKET to use an
+# S3-compatible bucket instead (S3_ENDPOINT_URL and S3_REGION for your provider;
+# the defaults are Scaleway's).
 S3_BUCKET = env("S3_BUCKET", default="")
-if S3_BUCKET:
+if not S3_BUCKET:
+    STORAGES["default"] = {"BACKEND": "apps.media.storage.DatabaseStorage"}
+else:
     STORAGES["default"] = {
         "BACKEND": "storages.backends.s3.S3Storage",
         "OPTIONS": {
@@ -93,8 +97,7 @@ if S3_BUCKET:
             # is never replaced under the same URL and can be cached forever.
             "file_overwrite": False,
             "object_parameters": {
-                "CacheControl": "public, max-age=%d, immutable"
-                % env.int("MEDIA_MAX_AGE", default=60 * 60 * 24 * 365),
+                "CacheControl": "public, max-age=%d, immutable" % MEDIA_MAX_AGE,
             },
             # Set to a CDN hostname in front of the bucket to serve media
             # through it.

@@ -30,8 +30,10 @@ A booking system for school extra-curricular activities. The school publishes a 
 ## Architecture at a glance
 
 Django 5 + PostgreSQL, server-rendered templates progressively enhanced with
-HTMX (vendored, no JS build step). Static files via WhiteNoise, uploaded images
-on S3-compatible object storage, email through Zoho ZeptoMail's API.
+HTMX (vendored, no JS build step). Static files via WhiteNoise, uploaded class
+images in the database (`apps/media`, served at `/media/` with immutable
+caching; an S3 bucket is a one-variable switch), email through Zoho
+ZeptoMail's API.
 
 The whole thing runs on Render, as one image in three roles, all declared in
 [`render.yaml`](render.yaml):
@@ -311,7 +313,8 @@ set on the Render services instead of in a file, most of them from
 | `DATABASE_URL` | Unset = SQLite. On Render, wired from the database by `render.yaml` |
 | `DB_SSLMODE` | Default `require`; `prefer` if the database offers no TLS on the private network |
 | `DB_POOL` / `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | Client-side connection pool (PostgreSQL only). Raise `DB_POOL_MAX_SIZE` and the instance count together |
-| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT_URL` | Any S3-compatible object storage for uploaded class images. Unset = local disk, which does not survive a deploy |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT_URL` | Optional S3-compatible bucket for uploaded class images. Unset = stored in the database (production) or on local disk (development) |
+| `MEDIA_MAX_AGE` | Cache lifetime for served uploads (default one year; names are never reused) |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Object storage credentials |
 | `S3_CUSTOM_DOMAIN` | Optional CDN hostname for media URLs |
 | `ZEPTOMAIL_SEND_MAIL_TOKEN` | Zoho ZeptoMail Mail Agent token. When set, production sends through ZeptoMail's API (`apps/notifications/backends/zeptomail.py`) |
@@ -405,6 +408,8 @@ apps/
                       # backends/zeptomail.py = Django email backend for ZeptoMail's API;
                       # management/commands/run_notifier.py (--once/--drain/daemon)
   dashboards/         # parent, provider and admin-tools views/urls
+  media/              # StoredFile + DatabaseStorage: uploads kept in Postgres, served at
+                      # /media/<name> immutably; prune_stored_files removes orphans
 templates/            # server-rendered HTML (HTMX-enhanced)
 static/               # main.css (the whole design system), vendored htmx.min.js,
                       # img/ (PTA logo + generated favicons), fonts/ (self-hosted

@@ -59,10 +59,10 @@ services:
       # ZeptoMail: the Mail Agent's "Send Mail Token".
       - key: ZEPTOMAIL_SEND_MAIL_TOKEN
         sync: false
-      # Object storage for uploaded class images. Render has no bucket
-      # product of its own; any S3-compatible one works (Scaleway Object
-      # Storage, Cloudflare R2, Backblaze B2, AWS S3). Without it uploads land
-      # on the instance's disk and vanish on the next deploy.
+      # Uploaded class images live in the database (apps/media) — nothing to
+      # configure. To use an S3-compatible bucket instead (Scaleway Object
+      # Storage, Cloudflare R2, AWS S3...), set these; S3_BUCKET being present
+      # is what switches the storage over.
       # - key: S3_BUCKET
       #   value: extralessons-media
       # - key: S3_ENDPOINT_URL

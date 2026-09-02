@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "apps.enrollments",
     "apps.notifications",
     "apps.dashboards",
+    "apps.media",
 ]
 
 MIDDLEWARE = [
@@ -113,8 +114,9 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 WHITENOISE_MAX_AGE = env.int("WHITENOISE_MAX_AGE", default=60 * 60 * 24 * 365)
 
 # --- Media files ---
-# Overridden to S3-compatible Object Storage in prod: container filesystems are
-# ephemeral and per-instance, so uploads must not live on local disk.
+# Local disk here; overridden in prod, where container filesystems are
+# ephemeral and per-instance, so uploads live in the database
+# (apps.media.storage.DatabaseStorage) or in an S3 bucket if one is configured.
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
@@ -122,6 +124,9 @@ STORAGES = {
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = env("MEDIA_ROOT", default=str(BASE_DIR / "media"))
+# How long served uploads may be cached. Stored names are never reused, so
+# "forever" is safe.
+MEDIA_MAX_AGE = env.int("MEDIA_MAX_AGE", default=60 * 60 * 24 * 365)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

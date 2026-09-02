@@ -72,16 +72,19 @@ The difference between the two *New* routes matters here:
                                    │                runs the migrations.
               ┌────────────────────┼────────────────────┐
               │                    │                     │
-   ┌──────────▼──────────┐  ┌──────▼───────────┐  ┌──────▼──────────────┐
-   │ Render Postgres     │  │ S3-compatible    │  │ ZeptoMail API /      │
-   │ "extralessons-db"   │  │ object storage   │  │ WhatsApp (outbound)  │
-   └──────────▲──────────┘  │ (class images,   │  └──────────────────────┘
-              │             │  your choice)    │
-   ┌──────────┴──────────┐  └──────────────────┘
+   ┌──────────▼──────────┐                        ┌──────▼──────────────┐
+   │ Render Postgres     │  rows + uploaded class │ ZeptoMail API /      │
+   │ "extralessons-db"   │  images (apps/media)   │ WhatsApp (outbound)  │
+   └──────────▲──────────┘                        └──────────────────────┘
+              │
+   ┌──────────┴──────────┐
    │ Cron job            │  nightly `run_notifier --drain`
    │ "extralessons-notifier"
    └─────────────────────┘
 ```
+
+Everything lives on Render: two services and one database, no third-party
+storage.
 
 Both services build the same `Dockerfile`, on Render, from the same commit.
 The web service additionally has a **pre-deploy command**, `manage.py migrate`,
@@ -211,23 +214,40 @@ domain, commit. The Blueprint sync applies them. The generated hostname keeps
 working alongside. Re-run `deploy/render-github-config.sh` so `APP_URL`
 follows the domain.
 
-### 7. Object storage for uploads
+### 7. Uploaded images
 
-Render has no bucket product. Class images therefore need an S3-compatible
-bucket somewhere else, and the settings are provider-neutral:
+Nothing to set up: in production, uploaded class images are stored in the
+Postgres database and served by the web service at `/media/<name>` with a
+one-year immutable cache header. This is `apps/media`, a small Django storage
+backend, and it exists because the alternatives on Render are worse fits:
 
-| Provider | `S3_ENDPOINT_URL` | `S3_REGION` | Notes |
-|---|---|---|---|
-| Scaleway Object Storage | `https://s3.fr-par.scw.cloud` | `fr-par` | Keep the existing bucket; the media stays where it is |
-| Cloudflare R2 | `https://<account-id>.r2.cloudflarestorage.com` | `auto` | No egress fees; public access via a custom domain, set as `S3_CUSTOM_DOMAIN` |
-| Backblaze B2 | `https://s3.eu-central-003.backblazeb2.com` | `eu-central-003` | Cheapest storage |
-| AWS S3 | leave unset | `eu-central-1` | |
+- **Static sites** serve files produced by a build. They cannot take uploads
+  at run time.
+- **Persistent disks** would work, but a disk pins the service to a single
+  instance and removes zero-downtime deploys (the instance is stopped before
+  its replacement starts), and the pre-deploy migration step cannot see it.
+- **A bucket** means a second provider, which is what this avoids.
 
-Uncomment the `S3_*` block on the web service in `render.yaml`, fill in the
-literals, commit; enter the two keys in the dashboard when the sync asks (or
-add them under *Environment* on the web service first). Until then uploads land
-on the instance's disk and vanish on the next deploy — the app boots fine, so
-this is not a blocker for the first deploy, only for going live with parents.
+The database is the right size for the job. Every upload is shrunk to a JPEG of
+at most 1600px before it is stored (`apps/catalog/images.py`), so a class image
+is one or two hundred kilobytes; a school's whole catalogue is tens of
+megabytes, inside the smallest database plan, and covered by its backups.
+
+Replacing an image leaves the old row behind on purpose (its URL may still be
+cached or open somewhere). Reclaim the space now and then from the web
+service's Shell tab:
+
+```sh
+python manage.py prune_stored_files --dry-run   # list orphans
+python manage.py prune_stored_files             # delete those older than a day
+```
+
+Stored files are listed, with a preview, under *Uploaded files* in the admin.
+
+If the catalogue ever outgrows this — thousands of images, or files that are
+not images — the S3 path is still there: set `S3_BUCKET` and friends on the web
+service (the commented block in `render.yaml`) and the storage switches over.
+Existing rows stay served by the database until re-uploaded.
 
 ### 8. WhatsApp
 
@@ -288,9 +308,11 @@ pg_restore --no-owner --no-privileges --clean --if-exists \
 ```
 
 Do this after the first Render deploy has run the migrations (so the schema
-exists) and before parents are pointed at the new host. Copy the media bucket
-only if you are changing storage provider; if you keep Scaleway Object Storage,
-set the same `S3_*` values on the web service and nothing moves.
+exists) and before parents are pointed at the new host. Class images on the
+Scaleway bucket do not come across with the rows: either re-upload them from
+the admin (the `image` field simply points at a name that no longer resolves
+until then), or keep the bucket for now by setting the `S3_*` variables on the
+web service and move to database storage later, image by image.
 
 Then: flip the DNS record, watch the Render logs for a day, and tear the
 Scaleway estate down. `deploy/provision.sh` and
@@ -300,8 +322,12 @@ Scaleway estate down. `deploy/provision.sh` and
 
 - **Pre-deploy commands need a paid instance.** So does the Shell tab.
 - **Cron schedules are UTC** and a cron job has no `free` plan.
-- **No object storage on Render.** Persistent disks exist but pin a service
-  to one instance and block zero-downtime deploys; a bucket is the right tool.
+- **No object storage on Render.** Uploads live in the database (step 7);
+  persistent disks exist but pin a service to one instance, block
+  zero-downtime deploys, and are invisible to the pre-deploy command.
+- **Database plan storage.** `basic-256mb` comes with a small SSD allowance
+  that images count against; the dashboard shows usage, and disk size can be
+  raised in `render.yaml` without downtime.
 - **Blueprint sync deploys.** A push that changes `render.yaml` (a new env
   var, a plan change) redeploys the affected service on its own, outside the
   CI gate. Keep such commits separate from code changes.
