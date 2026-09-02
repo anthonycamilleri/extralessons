@@ -1,8 +1,20 @@
-from django.shortcuts import get_object_or_404, render
+from urllib.parse import urlencode
+
+from django.http import QueryDict
+from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.models import Child, User
 
 from .models import ActivityClass
+
+FILTER_KEYS = ("day", "location", "age")
+
+# Parents come back to the catalogue week after week, so their last selection
+# is kept in a plain cookie: no server-side session row per anonymous visitor,
+# and it outlives the browser session. The value is the filters' own query
+# string; it is re-validated against the live catalogue on every request.
+FILTER_COOKIE = "catalogue_filters"
+FILTER_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 
 
 def _int_or_none(raw):
@@ -18,6 +30,19 @@ def _int_or_none(raw):
 
 
 def catalogue(request):
+    if "clear" in request.GET:
+        response = redirect("catalogue")
+        response.delete_cookie(FILTER_COOKIE, samesite="Lax")
+        return response
+
+    # Any filter key in the URL — even empty, as the form submits "Any day" —
+    # is an explicit choice. A bare URL (the nav link, a bookmark) picks up the
+    # remembered one instead.
+    filters_remembered = not any(key in request.GET for key in FILTER_KEYS)
+    params = (
+        QueryDict(request.COOKIES.get(FILTER_COOKIE, "")) if filters_remembered else request.GET
+    )
+
     base = ActivityClass.objects.published().select_related("provider", "term")
 
     # One query gives us every filter option and the unfiltered total. The
@@ -40,13 +65,13 @@ def catalogue(request):
         ages = range(0)
 
     # Monday is weekday 0, so every check below has to be `is not None`.
-    selected_day = _int_or_none(request.GET.get("day"))
+    selected_day = _int_or_none(params.get("day"))
     if selected_day is not None and selected_day not in weekdays_present:
         selected_day = None
-    selected_age = _int_or_none(request.GET.get("age"))
+    selected_age = _int_or_none(params.get("age"))
     if selected_age is not None and selected_age not in ages:
         selected_age = None
-    selected_location = request.GET.get("location", "").strip()
+    selected_location = params.get("location", "").strip()
     if selected_location not in locations:
         selected_location = ""
 
@@ -59,7 +84,14 @@ def catalogue(request):
         classes = classes.filter(age_min__lte=selected_age, age_max__gte=selected_age)
     classes = classes.order_by("weekday", "start_time", "title")
 
-    return render(
+    selected = {
+        "day": selected_day,
+        "location": selected_location,
+        "age": selected_age,
+    }
+    filters_active = any(value not in (None, "") for value in selected.values())
+
+    response = render(
         request,
         "catalog/catalogue.html",
         {
@@ -71,11 +103,25 @@ def catalogue(request):
             "selected_day": selected_day,
             "selected_location": selected_location,
             "selected_age": selected_age,
-            "filters_active": (
-                selected_day is not None or selected_age is not None or bool(selected_location)
-            ),
+            "filters_active": filters_active,
+            "filters_remembered": filters_remembered and filters_active,
         },
     )
+
+    # Only the validated selection is remembered, so a stale or hand-edited
+    # value can never keep coming back; an explicit "show everything" forgets.
+    if filters_active:
+        response.set_cookie(
+            FILTER_COOKIE,
+            urlencode({key: value for key, value in selected.items() if value not in (None, "")}),
+            max_age=FILTER_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure(),
+        )
+    elif FILTER_COOKIE in request.COOKIES:
+        response.delete_cookie(FILTER_COOKIE, samesite="Lax")
+    return response
 
 
 def class_detail(request, term_id, slug):
