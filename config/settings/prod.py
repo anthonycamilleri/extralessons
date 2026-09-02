@@ -1,32 +1,47 @@
-"""Production settings for Scaleway Serverless.
+"""Production settings.
 
-The same module serves all three runtimes — the Serverless Container (web), the
-migration Job, and the notifier Job — because they are the same image with a
-different start command. Everything that differs between them is an argument,
-not a setting.
+Written for a managed container platform (Render today, Scaleway Serverless
+before it) and deliberately neutral between them: the platform is described by
+environment variables, not by code. The same module serves all three roles —
+web, migrate, notifier — because they are the same image with a different
+start command. Everything that differs between them is an argument, not a
+setting.
 
-Three things here exist specifically because of Serverless SQL Database's
-built-in connection pooler; see docs/scaleway-setup.md for the reasoning.
+The database section is shaped by managed PostgreSQL offerings that front or
+cap connections; see docs/render-setup.md for the reasoning.
 """
 from .base import *  # noqa: F401,F403
-from .base import DATABASES, STORAGES, env, is_postgres
+from .base import ALLOWED_HOSTS, DATABASES, MEDIA_MAX_AGE, STORAGES, env, is_postgres
 
 DEBUG = False
 
 # --- Hosts ---
-# Must list the generated container endpoint (…functions.fnc.fr-par.scw.cloud)
-# as well as any custom domain, otherwise Django 400s the platform's traffic.
+# Django 400s any Host it was not told about, so the platform's generated
+# hostname has to be listed alongside any custom domain. Render passes its
+# generated hostname in as RENDER_EXTERNAL_HOSTNAME; picking it up here means a
+# fresh service answers on *.onrender.com before anyone has configured DNS,
+# and keeps answering there after they have.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+_platform_host = env("RENDER_EXTERNAL_HOSTNAME", default="")
+if _platform_host:
+    if _platform_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_platform_host)
+    if f"https://{_platform_host}" not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(f"https://{_platform_host}")
+    # Notification links need an absolute base URL. The generated hostname is
+    # the right default until SITE_URL is set to the custom domain.
+    if not env("SITE_URL", default=""):
+        SITE_URL = f"https://{_platform_host}"
 
 # --- Database ---
 if is_postgres():
-    # Serverless SQL Database fronts every connection with a pooler. Django's
-    # own psycopg pool is the right client-side match for it:
+    # Django's own psycopg pool is the right client-side shape for a managed
+    # database whose connection ceiling is a plan limit:
     #   * it caps how many connections one instance can hold, which matters
-    #     when the platform is free to run 50 of them;
+    #     when the platform is free to run many of them;
     #   * with a pool configured, Django applies session setup (timezone, role)
     #     through the pool's connect hook instead of per-checkout, so it does
-    #     not depend on session state a transaction-mode pooler may recycle.
+    #     not depend on session state a server-side pooler may recycle.
     # Django refuses to combine pooling with persistent connections, so
     # CONN_MAX_AGE stays 0 whenever the pool is on.
     if env.bool("DB_POOL", default=True):
@@ -41,22 +56,29 @@ if is_postgres():
         DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=0)
 
     # Named server-side cursors (QuerySet.iterator()) outlive a single
-    # statement, and Scaleway documents that cursor handling is not guaranteed
-    # across pooled connections. Fetch client-side instead.
+    # statement, which a transaction-mode pooler in front of the database does
+    # not guarantee. Fetch client-side instead; harmless where there is none.
     DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
-    # Serverless SQL Database only accepts TLS. Default it on so a DATABASE_URL
-    # that forgot ?sslmode=require still connects rather than failing at boot.
+    # Encrypt the connection unless told otherwise, so a DATABASE_URL that
+    # forgot ?sslmode=require still connects securely rather than in the
+    # clear. DB_SSLMODE=prefer is the escape hatch for a private network
+    # whose database does not offer TLS.
     DATABASES["default"].setdefault("OPTIONS", {})
-    DATABASES["default"]["OPTIONS"].setdefault("sslmode", "require")
+    DATABASES["default"]["OPTIONS"].setdefault("sslmode", env("DB_SSLMODE", default="require"))
 
-# --- Media files on Object Storage ---
+# --- Media files ---
 # Container filesystems are ephemeral and per-instance: an upload written by one
-# instance does not exist for the next request. Without a bucket configured the
-# app still boots on local disk, so a first deploy is not blocked on it — but
-# uploads will not survive.
+# instance does not exist for the next request. By default uploads therefore go
+# into the database (apps.media): no second provider, no disk pinning the
+# service to one instance, backed up with everything else, and the only uploads
+# are class images already shrunk to a small JPEG. Set S3_BUCKET to use an
+# S3-compatible bucket instead (S3_ENDPOINT_URL and S3_REGION for your provider;
+# the defaults are Scaleway's).
 S3_BUCKET = env("S3_BUCKET", default="")
-if S3_BUCKET:
+if not S3_BUCKET:
+    STORAGES["default"] = {"BACKEND": "apps.media.storage.DatabaseStorage"}
+else:
     STORAGES["default"] = {
         "BACKEND": "storages.backends.s3.S3Storage",
         "OPTIONS": {
@@ -75,16 +97,26 @@ if S3_BUCKET:
             # is never replaced under the same URL and can be cached forever.
             "file_overwrite": False,
             "object_parameters": {
-                "CacheControl": "public, max-age=%d, immutable"
-                % env.int("MEDIA_MAX_AGE", default=60 * 60 * 24 * 365),
+                "CacheControl": "public, max-age=%d, immutable" % MEDIA_MAX_AGE,
             },
-            # Set to the Edge Services domain to serve media through the CDN.
+            # Set to a CDN hostname in front of the bucket to serve media
+            # through it.
             "custom_domain": env("S3_CUSTOM_DOMAIN", default=None),
         },
     }
 
 # --- Email ---
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+# ZeptoMail's API whenever its token is present, plain SMTP otherwise (any
+# EMAIL_HOST, including ZeptoMail's own relay). EMAIL_BACKEND set explicitly
+# wins over both.
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default=(
+        "apps.notifications.backends.zeptomail.ZeptoMailBackend"
+        if env("ZEPTOMAIL_SEND_MAIL_TOKEN", default="")
+        else "django.core.mail.backends.smtp.EmailBackend"
+    ),
+)
 
 NOTIFICATION_CHANNELS = {
     "EMAIL": "apps.notifications.channels.email.EmailAdapter",

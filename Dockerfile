@@ -1,14 +1,16 @@
 # syntax=docker/dockerfile:1
 #
-# One image, three roles. The Serverless Container runs it as a web server, the
-# migration Job and the notifier Job run it with a different start command. That
-# is deliberate: three images would be three things to keep in step, and a
-# migration that ran against code the web tier does not have is exactly the
-# failure this avoids.
+# One image, three roles. The web service runs it under gunicorn, the pre-deploy
+# step runs the migrations from it, and the notifier cron job runs it with a
+# different command. That is deliberate: three images would be three things to
+# keep in step, and a migration that ran against code the web tier does not
+# have is exactly the failure this avoids.
 #
-# Scaleway Serverless only accepts linux/amd64. Build with
-# `docker buildx build --platform linux/amd64` on an ARM machine, or the deploy
-# is rejected.
+# Render builds this file with no --target, which yields the *last* stage, so
+# `runtime` must stay last. The platform passes PORT in at run time (Render
+# uses 10000); the ENV below is only the default for local runs and CI.
+# Production is linux/amd64: build with `docker buildx build --platform
+# linux/amd64` on an ARM machine when you need a faithful local image.
 
 FROM python:3.12-slim AS base
 ENV PYTHONUNBUFFERED=1 \

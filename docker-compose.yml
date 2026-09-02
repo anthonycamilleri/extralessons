@@ -1,8 +1,8 @@
 # Local development against PostgreSQL.
 #
-# Production is Scaleway Serverless — see docs/scaleway-setup.md. There is no
-# compose file for it on purpose: the deployed topology is a Serverless
-# Container plus two Serverless Jobs, and a compose file pretending otherwise
+# Production is Render — see render.yaml and docs/render-setup.md. There is no
+# compose file for it on purpose: the deployed topology is a web service plus a
+# cron job, described by the Blueprint, and a compose file pretending otherwise
 # would drift out of date the first time someone changed the real thing.
 #
 # For the fastest loop, skip this entirely: `python manage.py runserver` uses
@@ -58,7 +58,7 @@ services:
   # The safety net, as a daemon so you can watch it. Delivery itself happens
   # inline in the request; this loop only covers what no click can trigger —
   # offer expiry, stuck-row recovery, retries due while nothing is happening.
-  # In production it is `run_notifier --drain` on a nightly cron instead.
+  # In production it is `run_notifier --drain` on a nightly cron job instead.
   notifier:
     build:
       context: .

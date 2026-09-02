@@ -1,0 +1,178 @@
+# Render Blueprint: the production estate as code.
+#
+# Created once from the dashboard (New → Blueprint → connect this repository →
+# branch `main` → Deploy Blueprint); from then on Render keeps the resources
+# below in step with this file on every push to `main`. Step-by-step in
+# docs/render-setup.md.
+#
+# Code deploys are deliberately *not* automatic here (autoDeployTrigger: off).
+# .github/workflows/deploy-render.yml triggers them through the API once CI is
+# green, and that workflow is also where rollbacks live. Prefer Render's own
+# trigger? Set autoDeployTrigger to "checksPass" on both services and delete
+# the workflow — Render will then deploy each push to main whose GitHub checks
+# pass, and rollbacks become a click in the dashboard.
+#
+# One image, three roles, as before: the web service runs gunicorn, its
+# pre-deploy command runs the migrations before the new version takes traffic,
+# and the cron job drains the notification outbox nightly.
+
+services:
+  - type: web
+    name: extralessons-web
+    runtime: docker
+    region: frankfurt
+    # The pre-deploy command needs a paid instance type; "starter" is the
+    # smallest one. Scale up in the dashboard or here, never both.
+    plan: starter
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    healthCheckPath: /_health
+    # Runs in the freshly built image, once, before the new version takes
+    # traffic. If it fails the deploy is abandoned and the old version keeps
+    # serving. This assumes additive migrations, the normal Django case; a
+    # destructive one needs the usual two-deploy dance.
+    preDeployCommand: python manage.py migrate --noinput
+    # Custom domain. Uncomment together with the three host variables below
+    # once the DNS record exists; Render issues the certificate itself.
+    # domains:
+    #   - activities.example.com
+    envVars:
+      - fromGroup: extralessons-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: extralessons-db
+          property: connectionString
+      # Until these are set, config/settings/prod.py serves the generated
+      # *.onrender.com hostname, which Render passes in as
+      # RENDER_EXTERNAL_HOSTNAME — so a fresh service works before any DNS.
+      # - key: ALLOWED_HOSTS
+      #   value: activities.example.com
+      # - key: CSRF_TRUSTED_ORIGINS
+      #   value: https://activities.example.com
+      # - key: SITE_URL
+      #   value: https://activities.example.com
+      #
+      # sync: false = a secret. Render asks for the value when the Blueprint
+      # is first created and never overwrites what is in the dashboard.
+      # ZeptoMail: the Mail Agent's "Send Mail Token".
+      - key: ZEPTOMAIL_SEND_MAIL_TOKEN
+        sync: false
+      # Uploaded class images live in the database (apps/media) — nothing to
+      # configure. To use an S3-compatible bucket instead (Scaleway Object
+      # Storage, Cloudflare R2, AWS S3...), set these; S3_BUCKET being present
+      # is what switches the storage over.
+      # - key: S3_BUCKET
+      #   value: extralessons-media
+      # - key: S3_ENDPOINT_URL
+      #   value: https://s3.fr-par.scw.cloud
+      # - key: S3_REGION
+      #   value: fr-par
+      # - key: S3_ACCESS_KEY_ID
+      #   sync: false
+      # - key: S3_SECRET_ACCESS_KEY
+      #   sync: false
+      #
+      # WhatsApp (Meta Cloud API). Also flip WHATSAPP_ENABLED in the group.
+      # - key: WHATSAPP_ACCESS_TOKEN
+      #   sync: false
+      # - key: WHATSAPP_PHONE_NUMBER_ID
+      #   value: ""
+
+  # The safety net for anything no click can trigger: offer expiry, stuck-row
+  # recovery, retries due while nothing is happening. Delivery itself happens
+  # inline in the request that queued it.
+  - type: cron
+    name: extralessons-notifier
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    # Render cron schedules are UTC: 02:00 UTC is 03:00 in Malta in winter and
+    # 04:00 in summer. Nightly on purpose — it lets the database idle and the
+    # inline delivery path handles everything time-sensitive.
+    schedule: "0 2 * * *"
+    dockerCommand: python manage.py run_notifier --drain --max-seconds 240
+    envVars:
+      - fromGroup: extralessons-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: extralessons-db
+          property: connectionString
+      - key: ZEPTOMAIL_SEND_MAIL_TOKEN
+        sync: false
+      # - key: WHATSAPP_ACCESS_TOKEN
+      #   sync: false
+      # - key: WHATSAPP_PHONE_NUMBER_ID
+      #   value: ""
+
+databases:
+  - name: extralessons-db
+    region: frankfurt
+    # The free plan expires after 30 days; basic-256mb is the smallest one
+    # that does not. name, databaseName, user, region and major version
+    # cannot change after creation.
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    databaseName: extralessons
+    user: app
+    # Empty list = reachable from the two services over Render's private
+    # network only. Add an entry (source: 1.2.3.4/32, description: ...) to
+    # restore a dump from a laptop or to point the MCP server at production;
+    # remove it again afterwards.
+    ipAllowList: []
+
+# Shared by the web service and the cron job so they cannot drift apart.
+# Groups may hold literal values and generated secrets only — anything that
+# references a database, or is entered by hand (sync: false), lives on the
+# service itself above.
+envVarGroups:
+  - name: extralessons-shared
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.prod
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TIME_ZONE
+        value: Europe/Malta
+      - key: LOG_LEVEL
+        value: INFO
+      # Each instance holds at most this many database connections. Raise it
+      # together with the number of instances, and keep the product well
+      # under the plan's connection limit.
+      - key: DB_POOL_MAX_SIZE
+        value: "4"
+      # --- Email: Zoho ZeptoMail over its API ---
+      # The From address must be on a domain verified in the Mail Agent.
+      # Accounts on the EU data centre (zeptomail.zoho.eu) use api.zeptomail.eu;
+      # a .com account needs https://api.zeptomail.com/v1.1/email instead.
+      - key: DEFAULT_FROM_EMAIL
+        value: School Activities <notifications@example.com>
+      - key: ZEPTOMAIL_API_URL
+        value: https://api.zeptomail.eu/v1.1/email
+      # Optional: a bounce address set up on the Mail Agent.
+      # - key: ZEPTOMAIL_BOUNCE_ADDRESS
+      #   value: bounce@bounce.example.com
+      #
+      # Plain SMTP instead (any relay, ZeptoMail's included): drop the token
+      # from both services and set these; EMAIL_HOST_PASSWORD goes on each
+      # service as a sync: false secret.
+      # - key: EMAIL_HOST
+      #   value: smtp.zeptomail.eu
+      # - key: EMAIL_PORT
+      #   value: "587"
+      # - key: EMAIL_USE_TLS
+      #   value: "true"
+      # - key: EMAIL_HOST_USER
+      #   value: emailapikey
+      # --- WhatsApp ---
+      - key: WHATSAPP_ENABLED
+        value: "false"
+      # --- Notifier ---
+      # Time budget for the nightly drain; must exceed --max-seconds above.
+      - key: NOTIFIER_DRAIN_MAX_SECONDS
+        value: "300"

@@ -1,13 +1,18 @@
-name: Deploy to Scaleway
+name: Deploy to Scaleway (legacy, manual)
 
+# LEGACY. Production moved to Render — see render.yaml, deploy-render.yml and
+# docs/render-setup.md. This workflow is kept so the Scaleway estate can still
+# be rolled forward or back by hand while it exists, but it no longer runs on
+# push: trigger it from Actions → Run workflow, on whichever ref you choose.
+# Delete it, deploy/provision.sh and docs/scaleway-setup.md together once the
+# Scaleway project has been torn down.
+#
 # Build once, migrate, then roll the container. The image is tagged with the
 # commit SHA rather than a moving `latest`: Serverless Containers redeploy on a
 # changed image reference, so an immutable tag is what makes a deploy
 # deterministic and a rollback a one-line change.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       image_tag:

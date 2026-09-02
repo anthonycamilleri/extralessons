@@ -1,9 +1,9 @@
 """Base settings shared by all environments.
 
 Everything here is environment-driven so the same image runs unchanged as a
-Serverless Container (web), as a Serverless Job (migrations, notifier), and on
+web service, as a pre-deploy migration step, as a nightly cron job, and on
 a laptop against SQLite. Environment-specific modules layer on top:
-`dev` (local), `prod` (Scaleway), `test` (pytest).
+`dev` (local), `prod` (Render), `test` (pytest).
 """
 from pathlib import Path
 
@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 env = environ.Env()
 # Read .env from the project root when present (local development only —
-# on Scaleway the values arrive as container/job environment variables).
+# in production the values arrive as service environment variables).
 environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="insecure-dev-key-change-me")
@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "apps.enrollments",
     "apps.notifications",
     "apps.dashboards",
+    "apps.media",
 ]
 
 MIDDLEWARE = [
@@ -113,8 +114,9 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 WHITENOISE_MAX_AGE = env.int("WHITENOISE_MAX_AGE", default=60 * 60 * 24 * 365)
 
 # --- Media files ---
-# Overridden to S3-compatible Object Storage in prod: container filesystems are
-# ephemeral and per-instance, so uploads must not live on local disk.
+# Local disk here; overridden in prod, where container filesystems are
+# ephemeral and per-instance, so uploads live in the database
+# (apps.media.storage.DatabaseStorage) or in an S3 bucket if one is configured.
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
@@ -122,6 +124,9 @@ STORAGES = {
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = env("MEDIA_ROOT", default=str(BASE_DIR / "media"))
+# How long served uploads may be cached. Stored names are never reused, so
+# "forever" is safe.
+MEDIA_MAX_AGE = env.int("MEDIA_MAX_AGE", default=60 * 60 * 24 * 365)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -133,6 +138,14 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=15)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@example.com")
+
+# Zoho ZeptoMail, via its sending API rather than SMTP; see
+# apps/notifications/backends/zeptomail.py. Production selects that backend
+# whenever the token is set. Accounts on the EU data centre (zeptomail.zoho.eu)
+# use api.zeptomail.eu; others api.zeptomail.com.
+ZEPTOMAIL_SEND_MAIL_TOKEN = env("ZEPTOMAIL_SEND_MAIL_TOKEN", default="")
+ZEPTOMAIL_API_URL = env("ZEPTOMAIL_API_URL", default="https://api.zeptomail.eu/v1.1/email")
+ZEPTOMAIL_BOUNCE_ADDRESS = env("ZEPTOMAIL_BOUNCE_ADDRESS", default="")
 
 # --- Notifications ---
 # Channel adapters are configurable per environment; see apps.notifications.channels.
@@ -148,7 +161,7 @@ WHATSAPP_API_VERSION = env("WHATSAPP_API_VERSION", default="v20.0")
 NOTIFIER_BATCH_SIZE = env.int("NOTIFIER_BATCH_SIZE", default=20)
 NOTIFIER_MAX_ATTEMPTS = env.int("NOTIFIER_MAX_ATTEMPTS", default=5)
 NOTIFIER_IDLE_SLEEP_SECONDS = env.int("NOTIFIER_IDLE_SLEEP_SECONDS", default=5)
-# Time budget for `run_notifier --drain`, the mode a scheduled Serverless Job
+# Time budget for `run_notifier --drain`, the mode the scheduled cron job
 # uses. Keep it comfortably under the job timeout.
 NOTIFIER_DRAIN_MAX_SECONDS = env.int("NOTIFIER_DRAIN_MAX_SECONDS", default=300)
 
@@ -167,8 +180,8 @@ NOTIFIER_INLINE_MAX_SECONDS = env.int("NOTIFIER_INLINE_MAX_SECONDS", default=20)
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 
 # --- Logging ---
-# Serverless has no `docker compose logs`: stdout is the only channel, and it is
-# what Scaleway Cockpit collects. Django's default console handler is gated
+# A managed platform has no `docker compose logs`: stdout is the only channel,
+# and it is what Render collects. Django's default console handler is gated
 # behind DEBUG, so without this every logger.info in the notifier disappears in
 # production.
 LOG_LEVEL = env("LOG_LEVEL", default="INFO").upper()

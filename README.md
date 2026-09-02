@@ -30,23 +30,28 @@ A booking system for school extra-curricular activities. The school publishes a 
 ## Architecture at a glance
 
 Django 5 + PostgreSQL, server-rendered templates progressively enhanced with
-HTMX (vendored, no JS build step). Static files via WhiteNoise, uploaded images
-on S3-compatible object storage.
+HTMX (vendored, no JS build step). Static files via WhiteNoise, uploaded class
+images in the database (`apps/media`, served at `/media/` with immutable
+caching; an S3 bucket is a one-variable switch), email through Zoho
+ZeptoMail's API.
 
-The whole thing runs serverless on Scaleway, as one image in three roles:
+The whole thing runs on Render, as one image in three roles, all declared in
+[`render.yaml`](render.yaml):
 
 | Role | Runs as | Command |
 |------|---------|---------|
-| `web` | Serverless Container | `gunicorn --config deploy/gunicorn.conf.py config.wsgi` |
-| `migrate` | Serverless Job, once per deploy | `manage.py migrate --noinput` |
-| `notifier` | Serverless Job, nightly | `manage.py run_notifier --drain` |
+| `web` | Web service (Docker) | `gunicorn --config deploy/gunicorn.conf.py config.wsgi` |
+| `migrate` | The web service's pre-deploy command, once per deploy | `manage.py migrate --noinput` |
+| `notifier` | Cron job, nightly | `manage.py run_notifier --drain` |
 
 Three roles rather than three images: a migration that ran against code the web
 tier does not have is exactly the failure that arrangement avoids. Locally the
 same code runs from `docker-compose.yml`, or with no services at all against
 SQLite.
 
-Full deployment instructions: [docs/scaleway-setup.md](docs/scaleway-setup.md).
+Full deployment instructions: [docs/render-setup.md](docs/render-setup.md).
+(The previous Scaleway Serverless setup is kept, un-triggered, under
+[docs/scaleway-setup.md](docs/scaleway-setup.md).)
 
 **Transactional outbox.** State changes never talk to SMTP or the WhatsApp API
 directly. Instead, `Notification` rows are queued inside the same database
@@ -244,8 +249,9 @@ know about your shell or virtualenv:
 Restart Claude Desktop and the tools appear under the hammer icon.
 
 **Pointing at production.** The server is just Django in-process, so set
-`DATABASE_URL` in the `env` block to the Scaleway PostgreSQL URL (the same
-value the container uses) and Claude edits the live catalogue. Treat this
+`DATABASE_URL` in the `env` block to the database's *external* URL from the
+Render dashboard (and add your IP to its allow list) and Claude edits the live
+catalogue. Treat this
 exactly like `manage.py shell` against production: writes take effect
 immediately and parents see published classes at once. Keep the URL in your
 local config, never in the repo, and prefer creating classes as drafts and
@@ -291,26 +297,32 @@ there and to `TOOLS` to expose something new.
 ### Environment variables
 
 Copy `.env.example` to `.env` for local development. In production these are
-set on the Serverless Container and Jobs instead of in a file — see
-[docs/scaleway-setup.md](docs/scaleway-setup.md).
+set on the Render services instead of in a file, most of them from
+`render.yaml` — see [docs/render-setup.md](docs/render-setup.md).
 
 | Variable | Purpose |
 |---|---|
 | `DJANGO_SETTINGS_MODULE` | `config.settings.prod` in production, `config.settings.dev` locally |
 | `SECRET_KEY` | Django secret key — set to a long random string |
 | `DEBUG` | Keep `false` outside development |
-| `ALLOWED_HOSTS` | Comma-separated hostnames the app serves |
-| `CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. `https://activities.example.com` |
-| `SITE_URL` | Absolute base URL used in notification links |
+| `ALLOWED_HOSTS` | Comma-separated hostnames the app serves. On Render the generated `*.onrender.com` hostname is added automatically |
+| `CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. `https://activities.example.com` (the Render hostname is added automatically) |
+| `SITE_URL` | Absolute base URL used in notification links. Defaults to the Render URL until a custom domain is set |
 | `TIME_ZONE` | Default `Europe/Malta` |
 | `LOG_LEVEL` | Root log level; everything goes to stdout |
-| `DATABASE_URL` | Unset = SQLite. On Scaleway the username is an IAM application ID and the password its API secret key |
-| `DB_POOL` / `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | Client-side connection pool (PostgreSQL only). Raise `DB_POOL_MAX_SIZE` and the container's max-scale together |
-| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT_URL` | Object storage for uploaded class images. Unset = local disk, which is ephemeral on serverless |
+| `DATABASE_URL` | Unset = SQLite. On Render, wired from the database by `render.yaml` |
+| `DB_SSLMODE` | Default `require`; `prefer` if the database offers no TLS on the private network |
+| `DB_POOL` / `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | Client-side connection pool (PostgreSQL only). Raise `DB_POOL_MAX_SIZE` and the instance count together |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT_URL` | Optional S3-compatible bucket for uploaded class images. Unset = stored in the database (production) or on local disk (development) |
+| `MEDIA_MAX_AGE` | Cache lifetime for served uploads (default one year; names are never reused) |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Object storage credentials |
 | `S3_CUSTOM_DOMAIN` | Optional CDN hostname for media URLs |
-| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS` | SMTP. Ports 25 and 465 are blocked outbound on Scaleway Serverless; use 587 |
-| `DEFAULT_FROM_EMAIL` | From address, e.g. `School Activities <notifications@example.com>` |
+| `ZEPTOMAIL_SEND_MAIL_TOKEN` | Zoho ZeptoMail Mail Agent token. When set, production sends through ZeptoMail's API (`apps/notifications/backends/zeptomail.py`) |
+| `ZEPTOMAIL_API_URL` | Default `https://api.zeptomail.eu/v1.1/email` (EU data centre); `.com` accounts use `https://api.zeptomail.com/v1.1/email` |
+| `ZEPTOMAIL_BOUNCE_ADDRESS` | Optional bounce address configured on the Mail Agent |
+| `EMAIL_BACKEND` | Override the automatic choice (ZeptoMail API when the token is set, SMTP otherwise) |
+| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS` | SMTP, when not using the ZeptoMail API. Use 587 with STARTTLS |
+| `DEFAULT_FROM_EMAIL` | From address, e.g. `School Activities <notifications@example.com>`. Must be on a ZeptoMail-verified domain |
 | `WHATSAPP_ENABLED` | `false` = log WhatsApp messages instead of sending (stub) |
 | `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_API_VERSION` | Meta WhatsApp Cloud API credentials |
 | `NOTIFIER_BATCH_SIZE` | Notifications delivered per worker cycle (default 20) |
@@ -340,21 +352,22 @@ With `WHATSAPP_ENABLED=false` (the default, and always in dev settings) a stub a
 
 ## Deployment
 
-Production runs on Scaleway Serverless. Push to `main` and
-`.github/workflows/deploy.yml` builds the image for `linux/amd64`, pushes it to
-Scaleway Container Registry, runs migrations as a Serverless Job and waits for
-them, repoints the notifier job, redeploys the container, then smoke-tests
-`/_health`.
+Production runs on Render, described end to end by `render.yaml`. Push to
+`main`; once `CI` is green, `.github/workflows/deploy-render.yml` asks Render
+to deploy that commit: Render builds the image from the `Dockerfile`, runs
+`manage.py migrate` as the web service's pre-deploy command, switches traffic
+only when the new version answers `/_health`, then does the same build for the
+notifier cron job. The workflow finishes by smoke-testing `/_health` itself.
 
-Images are tagged by commit SHA, so a rollback is *Actions → Deploy to Scaleway
-→ Run workflow* with `image_tag` set to an earlier SHA.
+A rollback is *Actions → Deploy to Render → Run workflow* with `commit_sha` set
+to an earlier commit (or *Rollback* on the deploy in the Render dashboard).
 
-One-time provisioning — the database, bucket, registry, container, jobs, domain
-and GitHub secrets — is in
-**[docs/scaleway-setup.md](docs/scaleway-setup.md)**. That document also covers
-the two settings that decide the bill (the notifier cron interval and
-`min-scale`), backups, and the platform limits worth knowing before you hit
-them.
+One-time setup — connecting the GitHub repo, creating the Blueprint, secrets,
+domain, object storage, the first admin — is in
+**[docs/render-setup.md](docs/render-setup.md)**, along with backups, costs and
+how to move the data over from Scaleway. The old Scaleway pipeline
+(`deploy.yml`, `deploy/provision.sh`, `docs/scaleway-setup.md`) is kept but
+only runs by hand.
 
 ## Project layout
 
@@ -363,14 +376,19 @@ config/
   settings/
     base.py           # shared settings (env-driven); SQLite unless DATABASE_URL is set
     dev.py            # DEBUG, console email, stub WhatsApp, SQLite pragmas
-    prod.py           # Scaleway: S3 media, connection pooling, SMTP, security headers
+    prod.py           # production: S3 media, connection pooling, SMTP, security headers
     test.py           # pytest settings (SQLite or Postgres via DATABASE_URL)
   health.py           # /_health middleware, ahead of ALLOWED_HOSTS and the HTTPS redirect
   urls.py             # /admin/, /accounts/, /me/, /provider/, /admin-tools/, catalogue at /
+render.yaml           # Render Blueprint: web service, notifier cron job, Postgres, shared env
 deploy/
-  gunicorn.conf.py    # tuned for a Serverless Container (1 process, threads, preload)
+  gunicorn.conf.py    # tuned for a small, horizontally scaled container (1 process, threads, preload)
+  render-deploy.sh    # deploy one commit to one Render service via the API and wait for it
+  render-github-config.sh  # write the Render API key and service IDs into GitHub Actions
+  provision.sh, github-config.sh, scaleway.env.example   # legacy Scaleway provisioning
 docs/
-  scaleway-setup.md   # one-time provisioning: database, bucket, container, jobs, domain
+  render-setup.md     # one-time setup: GitHub connection, Blueprint, secrets, domain, storage
+  scaleway-setup.md   # legacy: the previous Scaleway Serverless estate
 apps/
   accounts/           # custom email-login User (roles: ADMIN/PROVIDER/PARENT),
                       # Child, Guardian, GuardianInvite, SiteConfig singleton,
@@ -387,8 +405,11 @@ apps/
                       # services.py = queueing/rendering (call inside the state-change
                       # transaction); worker.py = delivery loop (claim, send, retry,
                       # expire offers); channels/ = email + WhatsApp adapters (stub & Meta);
+                      # backends/zeptomail.py = Django email backend for ZeptoMail's API;
                       # management/commands/run_notifier.py (--once/--drain/daemon)
   dashboards/         # parent, provider and admin-tools views/urls
+  media/              # StoredFile + DatabaseStorage: uploads kept in Postgres, served at
+                      # /media/<name> immutably; prune_stored_files removes orphans
 templates/            # server-rendered HTML (HTMX-enhanced)
 static/               # main.css (the whole design system), vendored htmx.min.js,
                       # img/ (PTA logo + generated favicons), fonts/ (self-hosted
@@ -401,5 +422,6 @@ tests/                # pytest suite (services, capacity race, notifications, vi
 .mcp.json             # Claude Code picks up the MCP server from here
 .github/workflows/
   ci.yml              # tests on SQLite + Postgres, deploy checks, image build
-  deploy.yml          # build → migrate job → container redeploy → smoke test
+  deploy-render.yml   # after CI: deploy web (migrates first) → deploy notifier → smoke test
+  deploy.yml          # legacy Scaleway deploy, manual trigger only
 ```
