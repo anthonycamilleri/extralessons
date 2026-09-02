@@ -164,21 +164,24 @@ generated hostname in as `RENDER_EXTERNAL_HOSTNAME` and
 
 ### 4. Hand the pipeline to GitHub Actions
 
-`render.yaml` sets `autoDeployTrigger: "off"` on both services, so Render does
-**not** deploy on its own when `main` moves. `.github/workflows/deploy-render.yml`
-does, after `CI` has passed on the commit. It needs one secret:
+`render.yaml` sets `autoDeployTrigger: "off"` on the web service, so Render
+does **not** deploy it on its own when `main` moves.
+`.github/workflows/deploy-render.yml` does, after `CI` has passed on the
+commit. (The cron job is different: Render's API cannot deploy cron jobs, so
+it carries `autoDeployTrigger: checksPass` and Render rebuilds it itself once
+CI is green. It runs nothing until 02:00, so it never meets an unmigrated
+schema.) The workflow needs one secret:
 
 | Kind | Name | Where from |
 |---|---|---|
 | secret | `RENDER_API_KEY` | Dashboard → avatar → *Account settings → API Keys → Create*. Scope it to the workspace |
 
 Add it under *Settings → Secrets and variables → Actions*. The workflow finds
-the two services by their `render.yaml` names through the API
-(`deploy/render-service-id.sh`) and reads the site URL from the web service, so
-nothing else has to be copied. Three optional variables override that lookup:
-`RENDER_WEB_SERVICE_ID`, `RENDER_CRON_SERVICE_ID` and `APP_URL`.
-`deploy/render-github-config.sh` writes all four with the `gh` CLI if you
-prefer:
+the web service by its `render.yaml` name through the API
+(`deploy/render-service-id.sh`) and reads the site URL from it, so nothing else
+has to be copied. Two optional variables override that lookup:
+`RENDER_WEB_SERVICE_ID` and `APP_URL`. `deploy/render-github-config.sh` writes
+all three with the `gh` CLI if you prefer:
 
 ```sh
 gh auth login
@@ -190,13 +193,19 @@ under *Settings → Environments* if it does not exist (adding required reviewer
 there is how you get a manual approval step in front of production deploys, if
 you ever want one).
 
-**The alternative.** Render's own trigger can do the same gating with no
-workflow: set `autoDeployTrigger: "checksPass"` on both services and Render
-deploys each push to `main` whose GitHub checks are green, with rollback as a
-button on the deploy. You lose the web-before-notifier ordering, the smoke
-test and the GitHub environment gate, and gain one less moving part. Both are
-defensible; the workflow is the default here because it is the shape the team
-already knows.
+**The alternative.** Render's own trigger can do the same gating for the web
+service with no workflow at all, as it already does for the cron job: set
+`autoDeployTrigger: checksPass` on it too and Render deploys each push to
+`main` whose GitHub checks are green, with rollback as a button on the deploy.
+You lose the smoke test, the GitHub environment gate and rollback-by-commit
+from Actions, and gain one less moving part. Both are defensible; the workflow
+is the default here because it is the shape the team already knows.
+
+**Rolling back the web service** through the workflow leaves the cron job on
+the head of `main`. That is fine: the nightly drain only reads and writes
+notification rows, and migrations are additive, so newer notifier code runs
+against an older web tier without trouble. Roll the cron job back by hand in
+its dashboard if a change to the notifier itself is the problem.
 
 ### 5. The first admin user
 
@@ -297,9 +306,10 @@ services, commit.
 ## Operating it
 
 **Deploying.** Push to `main`. *Actions → CI* runs; on green, *Deploy to
-Render* runs and shows Render's deploy status as it moves through
-`build_in_progress → pre_deploy_in_progress → update_in_progress → live`.
-Render's own **Events** and **Logs** tabs show the build and migration output.
+Render* deploys the web service and shows Render's deploy status as it moves
+through `build_in_progress → pre_deploy_in_progress → update_in_progress →
+live`, while Render rebuilds the cron job on its own. Render's **Events** and
+**Logs** tabs show the build and migration output.
 
 **Rolling back.** *Actions → Deploy to Render → Run workflow → `commit_sha`*
 with an earlier commit: Render rebuilds it (usually from cache) and the same

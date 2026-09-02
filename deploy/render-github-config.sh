@@ -3,9 +3,9 @@
 # Push the Render API key, and optionally the service ids and site URL, into
 # the GitHub repository for .github/workflows/deploy-render.yml.
 #
-# Only the RENDER_API_KEY secret is required: the workflow looks the services
-# up by name at run time. The variables written here are overrides that save
-# it two API calls, and APP_URL pins the smoke test to a custom domain.
+# Only the RENDER_API_KEY secret is required: the workflow looks the web
+# service up by name at run time. The variables written here are overrides
+# that save it an API call, and APP_URL pins the smoke test to a custom domain.
 #
 # Run after the Blueprint has been created (docs/render-setup.md). Requires the
 # gh CLI, authenticated, and a Render API key:
@@ -14,15 +14,14 @@
 #   RENDER_API_KEY=rnd_... ./deploy/render-github-config.sh              # current repo
 #   RENDER_API_KEY=rnd_... ./deploy/render-github-config.sh owner/repo   # or a named one
 #
-# Service names default to the ones in render.yaml; override with
-# WEB_SERVICE_NAME / CRON_SERVICE_NAME if you renamed them.
+# The service name defaults to the one in render.yaml; override with
+# WEB_SERVICE_NAME if you renamed it.
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${RENDER_API_KEY:?set RENDER_API_KEY (Account settings → API Keys)}"
 WEB_SERVICE_NAME="${WEB_SERVICE_NAME:-extralessons-web}"
-CRON_SERVICE_NAME="${CRON_SERVICE_NAME:-extralessons-notifier}"
 
 command -v gh >/dev/null || { echo "gh not found: https://cli.github.com/" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq not found" >&2; exit 1; }
@@ -31,7 +30,6 @@ REPO_ARG=()
 [ $# -ge 1 ] && REPO_ARG=(--repo "$1")
 
 WEB_ID=$("$HERE/render-service-id.sh" "$WEB_SERVICE_NAME")
-CRON_ID=$("$HERE/render-service-id.sh" "$CRON_SERVICE_NAME")
 # The URL the service actually answers on: the custom domain once one is
 # attached, the generated *.onrender.com one until then.
 APP_URL=$("$HERE/render-service-id.sh" --url "$WEB_SERVICE_NAME")
@@ -50,8 +48,7 @@ set_var() {
 
 echo "Writing GitHub configuration..."
 set_secret RENDER_API_KEY "$RENDER_API_KEY"
-set_var RENDER_WEB_SERVICE_ID  "$WEB_ID"
-set_var RENDER_CRON_SERVICE_ID "$CRON_ID"
+set_var RENDER_WEB_SERVICE_ID "$WEB_ID"
 [ -n "$APP_URL" ] && set_var APP_URL "$APP_URL"
 
 cat <<'EOF'

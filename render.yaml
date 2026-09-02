@@ -5,12 +5,13 @@
 # below in step with this file on every push to `main`. Step-by-step in
 # docs/render-setup.md.
 #
-# Code deploys are deliberately *not* automatic here (autoDeployTrigger: off).
-# .github/workflows/deploy-render.yml triggers them through the API once CI is
-# green, and that workflow is also where rollbacks live. Prefer Render's own
-# trigger? Set autoDeployTrigger to "checksPass" on both services and delete
-# the workflow — Render will then deploy each push to main whose GitHub checks
-# pass, and rollbacks become a click in the dashboard.
+# The web service's code deploys are deliberately *not* automatic
+# (autoDeployTrigger: off): .github/workflows/deploy-render.yml triggers them
+# through the API once CI is green, and that workflow is also where rollbacks
+# live. The cron job uses Render's own "checksPass" trigger instead, because
+# the API cannot deploy cron jobs. Prefer Render's trigger for the web service
+# too? Set it to checksPass there as well and delete the workflow; rollbacks
+# then become a click in the dashboard.
 #
 # One image, three roles, as before: the web service runs gunicorn, its
 # pre-deploy command runs the migrations before the new version takes traffic,
@@ -100,7 +101,12 @@ services:
     branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    autoDeployTrigger: "off"
+    # Unlike the web service, Render deploys this one itself, whenever a push
+    # to main passes its GitHub checks: the API has no deploy trigger for cron
+    # jobs (only "run now"), so the workflow cannot. Nothing runs until the
+    # 02:00 tick, so the few minutes between this build finishing and the
+    # web service's migrations landing are of no consequence.
+    autoDeployTrigger: checksPass
     # Render cron schedules are UTC: 02:00 UTC is 03:00 in Malta in winter and
     # 04:00 in summer. Nightly on purpose — it lets the database idle and the
     # inline delivery path handles everything time-sensitive.

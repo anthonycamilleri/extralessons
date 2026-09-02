@@ -385,9 +385,10 @@ Production runs on Render, described end to end by `render.yaml`. Push to
 `main`; once `CI` is green, `.github/workflows/deploy-render.yml` asks Render
 to deploy that commit: Render builds the image from the `Dockerfile`, runs
 `manage.py migrate` and `manage.py ensure_admin` as the web service's
-pre-deploy command, switches traffic
-only when the new version answers `/_health`, then does the same build for the
-notifier cron job. The workflow finishes by smoke-testing `/_health` itself.
+pre-deploy command, and switches traffic only when the new version answers
+`/_health`. The workflow finishes by smoke-testing `/_health` itself. The
+notifier cron job is rebuilt by Render on its own once CI is green, because
+Render's API cannot deploy cron jobs.
 
 A rollback is *Actions → Deploy to Render → Run workflow* with `commit_sha` set
 to an earlier commit (or *Rollback* on the deploy in the Render dashboard).

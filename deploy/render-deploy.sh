@@ -4,11 +4,15 @@
 #
 #   RENDER_API_KEY=rnd_... deploy/render-deploy.sh <service-id> [commit-sha]
 #
-# Used by .github/workflows/deploy-render.yml for the web service and the
-# notifier cron job in turn; works just as well from a laptop. Without a commit
-# Render deploys the head of the service's linked branch. Passing an older
-# commit is how you roll back — Render rebuilds it (or reuses its build cache)
-# and the same health check gates the switch.
+# Used by .github/workflows/deploy-render.yml for the web service; works just
+# as well from a laptop. Without a commit Render deploys the head of the
+# service's linked branch. Passing an older commit is how you roll back —
+# Render rebuilds it (or reuses its build cache) and the same health check
+# gates the switch.
+#
+# Web services, private services, workers and static sites only: Render's API
+# has no deploy trigger for cron jobs (it answers 400), which is why the
+# notifier deploys itself via autoDeployTrigger in render.yaml.
 #
 # Exit status is the deploy's: 0 only once Render reports it live.
 
