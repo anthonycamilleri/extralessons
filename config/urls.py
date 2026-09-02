@@ -3,10 +3,15 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.catalog.mcp_http import mcp_endpoint
 from apps.media.views import serve_stored_file
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Remote MCP for Claude Desktop / Cowork / claude.ai custom connectors.
+    # Both spellings, so a URL pasted with a trailing slash is not a 404.
+    path("mcp", mcp_endpoint, name="mcp"),
+    path("mcp/", mcp_endpoint),
     path("accounts/", include("apps.accounts.urls")),
     path("me/", include("apps.dashboards.parent_urls")),
     path("provider/", include("apps.dashboards.provider_urls")),

@@ -252,7 +252,30 @@ not images — the S3 path is still there: set `S3_BUCKET` and friends on the we
 service (the commented block in `render.yaml`) and the storage switches over.
 Existing rows stay served by the database until re-uploaded.
 
-### 8. WhatsApp
+### 8. Connect Claude to the catalogue
+
+The web service exposes the catalogue tools as a remote MCP server at `/mcp`,
+so Claude Desktop, Cowork and claude.ai can populate school years, terms,
+providers and classes directly against the hosted app. Render generated the
+token when the Blueprint was created.
+
+1. Web service → **Environment** → copy the value of `MCP_API_TOKEN`.
+2. In Claude: **Settings → Connectors → Add custom connector**. Name
+   `Extralessons`; URL `https://extralessons-web.onrender.com/mcp` (the custom
+   domain, once attached). Under **Request headers** add `Authorization:
+   Bearer <token>`. No OAuth fields. Add.
+3. In a chat or Cowork task, enable the connector and ask for the school
+   overview.
+
+The endpoint is a plain Django view speaking MCP's stateless Streamable HTTP
+(`apps/catalog/mcp_http.py`); the tools are the same ones the stdio server
+offers. The token grants everything they can do, including publishing classes
+to parents. To rotate it: clear the value in the dashboard, trigger a Blueprint
+sync (any push to `main` that touches `render.yaml`), then update the
+connector. The README's *Connecting Claude* section has the local, stdio
+alternative for development.
+
+### 9. WhatsApp
 
 Set `WHATSAPP_ENABLED` to `"true"` in the shared group, uncomment
 `WHATSAPP_ACCESS_TOKEN` (secret) and `WHATSAPP_PHONE_NUMBER_ID` on both

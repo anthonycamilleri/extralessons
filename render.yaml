@@ -44,6 +44,13 @@ services:
         fromDatabase:
           name: extralessons-db
           property: connectionString
+      # Bearer token for the remote MCP endpoint at /mcp, which lets Claude
+      # Desktop, Cowork and claude.ai populate the catalogue as a custom
+      # connector. Render generates it; read it under Environment to set up
+      # the connector. It grants school-office powers: rotate it by deleting
+      # the value in the dashboard and re-syncing the Blueprint.
+      - key: MCP_API_TOKEN
+        generateValue: true
       # Until these are set, config/settings/prod.py serves the generated
       # *.onrender.com hostname, which Render passes in as
       # RENDER_EXTERNAL_HOSTNAME — so a fresh service works before any DNS.
