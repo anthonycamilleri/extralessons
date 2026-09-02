@@ -148,7 +148,7 @@ class TestSignupAndFamily:
         client.force_login(parent)
         response = client.post(
             reverse("child_add"),
-            {"first_name": "Ada", "last_name": "Test", "date_of_birth": "2018-04-01", "notes": ""},
+            {"first_name": "Ada", "last_name": "Test", "school_class": "P2E", "date_of_birth": "2018-04-01", "notes": ""},
         )
         assert response.status_code == 302
         assert parent.children.filter(first_name="Ada").exists()
@@ -269,7 +269,7 @@ class TestRegisterFlowWhenNotLoggedIn:
 
         response = client.post(
             reverse("child_add") + f"?next={cls.get_absolute_url()}%23register",
-            {"first_name": "Ada", "last_name": "Test", "date_of_birth": "2018-04-01", "notes": ""},
+            {"first_name": "Ada", "last_name": "Test", "school_class": "P2E", "date_of_birth": "2018-04-01", "notes": ""},
         )
         assert response.status_code == 302
         assert response.url == cls.get_absolute_url() + "#register"
@@ -282,7 +282,7 @@ class TestRegisterFlowWhenNotLoggedIn:
         client.force_login(UserFactory())
         response = client.post(
             reverse("child_add"),
-            {"first_name": "Ada", "last_name": "Test", "date_of_birth": "2018-04-01", "notes": ""},
+            {"first_name": "Ada", "last_name": "Test", "school_class": "P2E", "date_of_birth": "2018-04-01", "notes": ""},
         )
         assert response.url == reverse("parent_home")
 
@@ -294,7 +294,9 @@ class TestEnrollmentViews:
         cls = ActivityClassFactory()
         client.force_login(parent)
 
-        response = client.post(reverse("enroll", args=[cls.pk]), {"child": child.pk})
+        response = client.post(
+            reverse("enroll", args=[cls.pk]), {"child": child.pk, "terms_accepted": "1"}
+        )
 
         assert response.status_code == 302
         assert Enrollment.objects.filter(
@@ -318,7 +320,9 @@ class TestEnrollmentViews:
         stranger = UserFactory()
         client.force_login(stranger)
 
-        response = client.post(reverse("enroll", args=[cls.pk]), {"child": other_child.pk})
+        response = client.post(
+            reverse("enroll", args=[cls.pk]), {"child": other_child.pk, "terms_accepted": "1"}
+        )
 
         assert response.status_code == 404
         assert not Enrollment.objects.filter(child=other_child).exists()

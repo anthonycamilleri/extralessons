@@ -1,6 +1,7 @@
+from django.http import Http404
 from django.shortcuts import get_object_or_404, render
 
-from apps.accounts.models import Child, User
+from apps.accounts.models import Child, SiteConfig, User
 
 from .models import ActivityClass
 
@@ -50,7 +51,7 @@ def catalogue(request):
     if selected_location not in locations:
         selected_location = ""
 
-    classes = base.with_counts()
+    classes = base.with_counts().with_next_session()
     if selected_day is not None:
         classes = classes.filter(weekday=selected_day)
     if selected_location:
@@ -82,6 +83,7 @@ def class_detail(request, term_id, slug):
     cls = get_object_or_404(
         ActivityClass.objects.published()
         .with_counts()
+        .with_next_session()
         .select_related("provider", "term", "term__school_year"),
         term_id=term_id,
         slug=slug,
@@ -94,3 +96,11 @@ def class_detail(request, term_id, slug):
         "catalog/class_detail.html",
         {"cls": cls, "children": children, "holidays": cls.skipped_holidays()},
     )
+
+
+def terms(request):
+    """The PTA's terms and conditions, written in Markdown in the admin."""
+    config = SiteConfig.get()
+    if not config.has_terms:
+        raise Http404("No terms and conditions have been published.")
+    return render(request, "catalog/terms.html", {"terms_html": config.terms_html})

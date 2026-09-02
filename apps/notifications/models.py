@@ -26,8 +26,9 @@ class NotificationTemplate(models.Model):
     """Admin-editable content for each notification event.
 
     Email subject/body are Django template strings rendered with a context
-    that includes: school_name, parent_name, child_name, class_title,
-    provider_name, schedule, term_name, subject, body, action_url,
+    that includes: school_name, sender_name, contact_email, site_url,
+    parent_name, parent_first_name, child_name, child_first_name, class_title,
+    provider_name, schedule, term_name, location, subject, body, action_url,
     offer_expires_at (where applicable).
 
     WhatsApp business-initiated messages must use templates pre-approved in

@@ -16,11 +16,16 @@
 <h2>Enrolled children</h2>
 {% if roster %}
 <div class="table-wrap"><table class="list stacked">
-  <tr><th>Child</th><th>Date of birth</th><th>Notes for you</th><th>Guardians</th></tr>
+  <tr><th>Child</th><th>Class</th><th>Going home</th><th>Notes for you</th><th>Guardians</th></tr>
   {% for e in roster %}
   <tr>
-    <td data-label="Child">{{ e.child.full_name }}</td>
-    <td data-label="Date of birth">{{ e.child.date_of_birth|date:"j M Y" }}</td>
+    <td data-label="Child">{{ e.child.full_name }}
+      <div class="muted small">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
+    <td data-label="Class">{{ e.child.school_class|default:"—" }}</td>
+    <td data-label="Going home">
+      {% if e.child.may_leave_alone %}<span class="badge badge-ok">May leave alone</span>
+      {% else %}<span class="badge badge-warn">Must be collected</span>{% endif %}
+    </td>
     <td class="small" data-label="Notes for you">{{ e.child.notes|default:"—" }}</td>
     <td class="small" data-label="Guardians">
       {% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
@@ -39,7 +44,7 @@
   {% for e in waitlisted %}
   <tr>
     <td data-label="Position">{{ forloop.counter }}</td>
-    <td data-label="Child">{{ e.child.full_name }}</td>
+    <td data-label="Child">{{ e.child.display_name }}</td>
     <td class="small muted" data-label="Waiting since">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
   </tr>
   {% endfor %}

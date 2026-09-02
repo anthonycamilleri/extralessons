@@ -131,9 +131,9 @@ class Command(BaseCommand):
             if created:
                 generate_sessions(cls)
 
-        self._child(parent1, "Lena", "Parent", 8)
-        self._child(parent1, "Marco", "Parent", 6)
-        self._child(parent2, "Sofia", "Parent", 10)
+        self._child(parent1, "Lena", "Parent", 8, "P3E")
+        self._child(parent1, "Marco", "Parent", 6, "P1E")
+        self._child(parent2, "Sofia", "Parent", 10, "P5S", may_leave_alone=True)
 
         self.stdout.write(self.style.SUCCESS(
             "Demo data ready. Accounts (password 'demo1234'):\n"
@@ -154,11 +154,14 @@ class Command(BaseCommand):
             user.save()
         return user
 
-    def _child(self, parent, first, last, age):
+    def _child(self, parent, first, last, age, school_class, may_leave_alone=False):
         today = timezone.localdate()
         dob = today.replace(year=today.year - age)
         child, created = Child.objects.get_or_create(
-            first_name=first, last_name=last, date_of_birth=dob
+            first_name=first,
+            last_name=last,
+            date_of_birth=dob,
+            defaults={"school_class": school_class, "may_leave_alone": may_leave_alone},
         )
         if created or not child.guardian_links.filter(user=parent).exists():
             Guardian.objects.get_or_create(child=child, user=parent,

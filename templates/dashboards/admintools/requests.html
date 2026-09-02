@@ -16,7 +16,7 @@
   <tr>
     <td class="small muted" data-label="Requested">{{ e.created_at|date:"j M, H:i" }}</td>
     <td data-label="Child">{{ e.child.full_name }}
-      <div class="muted small">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
+      <div class="muted small">{% if e.child.school_class %}{{ e.child.school_class }} · {% endif %}{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
     <td class="small" data-label="Guardians">
       {% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
     </td>

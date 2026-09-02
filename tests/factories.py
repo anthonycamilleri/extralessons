@@ -40,6 +40,7 @@ class ChildFactory(factory.django.DjangoModelFactory):
 
     first_name = factory.Sequence(lambda n: f"Kid{n}")
     last_name = "Tester"
+    school_class = "P3E"
     date_of_birth = factory.LazyFunction(
         lambda: timezone.localdate() - datetime.timedelta(days=365 * 8)
     )

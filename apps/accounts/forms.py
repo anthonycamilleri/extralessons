@@ -1,7 +1,7 @@
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
 
-from .models import Child, GuardianInvite, User
+from .models import SCHOOL_CLASS_CHOICES, Child, GuardianInvite, User
 
 
 class SignupForm(UserCreationForm):
@@ -39,8 +39,23 @@ class ProfileForm(forms.ModelForm):
 class ChildForm(forms.ModelForm):
     class Meta:
         model = Child
-        fields = ["first_name", "last_name", "date_of_birth", "notes"]
+        fields = [
+            "first_name",
+            "last_name",
+            "school_class",
+            "date_of_birth",
+            "may_leave_alone",
+            "notes",
+        ]
         widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Optional on the model so existing rows migrate cleanly; parents
+        # always have to tell us the class.
+        field = self.fields["school_class"]
+        field.required = True
+        field.choices = [("", "Choose a class…")] + list(SCHOOL_CLASS_CHOICES)
 
 
 class GuardianInviteForm(forms.ModelForm):
@@ -48,3 +63,19 @@ class GuardianInviteForm(forms.ModelForm):
         model = GuardianInvite
         fields = ["email"]
         labels = {"email": "Co-parent's email address"}
+
+
+class PasswordChangeForm(SetPasswordForm):
+    """Change password for a logged-in user, without asking for the old one.
+
+    Being logged in is the proof of identity here — parents rarely remember the
+    password a browser filled in for them, and the "forgotten password" email
+    flow already lets anyone with the inbox set a new one anyway. Django's
+    SetPasswordForm is exactly this form; the subclass only exists so templates
+    and tests have a stable name and the labels read as a change, not a reset.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["new_password1"].label = "New password"
+        self.fields["new_password2"].label = "New password again"

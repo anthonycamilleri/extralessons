@@ -5,10 +5,12 @@ A booking system for school extra-curricular activities. The school publishes a 
 ## Features
 
 **Public**
-- Browse the catalogue of published classes for the active term (age range, schedule, provider, seats) without an account.
+- Browse the catalogue of published classes for the active term (age range, schedule, provider, seats, first or next class date) without an account.
 
 **Parents**
-- Self-service signup (can be switched off by the school), add children with date of birth and notes for providers.
+- Self-service signup (can be switched off by the school), add children with their class (P1–P5, S1–S7, English or Slovenian section), date of birth, whether they may go home on their own, and notes for providers.
+- Read the programme's terms and conditions (Markdown, edited in the admin, linked from every page) and confirm them on each registration; the confirmation is stamped on the enrolment.
+- Change their password while logged in without retyping the current one.
 - Multi-guardian support: invite a co-parent by email to share access to a child.
 - Request a place in a class; age and duplicate checks are enforced automatically.
 - Confirm or decline waiting-list offers before they expire; withdraw from a class at any time.
@@ -367,9 +369,9 @@ set on the Render services instead of in a file, most of them from
 
 Most day-to-day settings are editable in the admin without redeploying, and both are seeded with sensible defaults:
 
-- **Site configuration** (singleton): school name, contact email, catalogue intro text, whether parent self-signup is open, waiting-list offer expiry in hours, and toggles for the admin alert emails (new request, seat freed).
+- **Site configuration** (singleton): school name, the sender name that signs every email (default "European School PTA"), contact email, catalogue intro text, whether parent self-signup is open, waiting-list offer expiry in hours, toggles for the admin alert emails (new request, seat freed), and the terms and conditions in Markdown (served at `/terms/`, linked from the navigation and footer, and required as a tick on the registration form; empty hides all three).
 - **School years and holidays**: a `SchoolYear` holds the calendar; its `School holiday` rows (half-terms, Christmas, public holidays — inclusive date ranges) are the system-level default. Terms point at a school year and inherit them. "Copy holidays into another school year…" sets next year up from this one, shifted by whole weeks so periods keep their weekdays.
-- **Notification templates** (one row per event): email subject/body as Django template strings (context includes `school_name`, `parent_name`, `child_name`, `class_title`, `schedule`, `action_url`, `offer_expires_at`, ...), an enabled flag, plus the WhatsApp mapping — approved template name, language, and which context keys fill the `{{1}}..{{n}}` placeholders. Leave the WhatsApp template name empty to skip WhatsApp for that event.
+- **Notification templates** (one row per event): email subject/body as Django template strings (context includes `school_name`, `sender_name`, `contact_email`, `site_url`, `parent_name`, `parent_first_name`, `child_name`, `child_first_name`, `class_title`, `provider_name`, `schedule`, `location`, `term_name`, `action_url`, `offer_expires_at`, ...), an enabled flag, plus the WhatsApp mapping — approved template name, language, and which context keys fill the `{{1}}..{{n}}` placeholders. Leave the WhatsApp template name empty to skip WhatsApp for that event. The defaults are written as a parent volunteer would write to another parent and signed by `sender_name`; the data migration that seeds them only rewrites rows still carrying the previous default wording, so edits made in the admin survive deploys.
 
 ## WhatsApp setup
 

@@ -22,7 +22,9 @@
     <li class="meta-chip meta-chip-day"><span class="ico" aria-hidden="true">📅</span> <b>{{ cls.get_weekday_display }}s</b> {{ cls.start_time|time:"H:i" }}–{{ cls.end_time|time:"H:i" }}</li>
     {% if cls.location %}<li class="meta-chip"><span class="ico" aria-hidden="true">📍</span> {{ cls.location }}</li>{% endif %}
     <li class="meta-chip"><span class="ico" aria-hidden="true">🎒</span> Ages {{ cls.age_min }}–{{ cls.age_max }}</li>
-    <li class="meta-chip"><span class="ico" aria-hidden="true">🗓️</span> {{ cls.term.name }} · {{ cls.term.start_date|date:"j M" }} – {{ cls.term.end_date|date:"j M Y" }}</li>
+    {% with next=cls.next_session_label %}{% if next %}
+      <li class="meta-chip"><span class="ico" aria-hidden="true">🗓️</span> {{ next.0 }} <b>{{ next.1|date:"l j F" }}</b></li>
+    {% endif %}{% endwith %}
     <li>
       {% if cls.places_free > 0 %}
         <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
@@ -68,13 +70,19 @@
           <p>
             <label for="child">Which child?</label>
             <select name="child" id="child" required>
-              {% for child in children %}<option value="{{ child.pk }}">{{ child.full_name }}</option>{% endfor %}
+              {% for child in children %}<option value="{{ child.pk }}">{{ child.display_name }}</option>{% endfor %}
             </select>
           </p>
+          {% if site_config.has_terms %}
+          <p class="check-row">
+            <input type="checkbox" name="terms_accepted" id="terms_accepted" value="1" required>
+            <label for="terms_accepted">I have read and agree to the <a href="{% url 'terms' %}" target="_blank" rel="noopener">terms and conditions</a>.</label>
+          </p>
+          {% endif %}
           <button type="submit" class="btn btn-cta">
             {% if cls.places_free > 0 %}Request a place{% else %}Join the waiting list{% endif %}
           </button>
-          <p class="small muted">Places are confirmed by the school office — you'll be notified.</p>
+          <p class="small muted">Places are confirmed by the PTA — you'll hear from us by email.</p>
         </form>
       {% else %}
         {# Straight back here once the child is saved; see child_add. #}

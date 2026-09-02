@@ -95,13 +95,20 @@ def _validate_registration(cls, child):
         )
 
 
-def register(child, activity_class):
-    """Parent requests a place. Creates a REQUESTED enrollment for admin review."""
+def register(child, activity_class, *, terms_accepted=False):
+    """Parent requests a place. Creates a REQUESTED enrollment for admin review.
+
+    `terms_accepted` stamps the moment the parent confirmed the terms and
+    conditions; the view enforces the tick, this only records it.
+    """
     with transaction.atomic():
         cls = _locked_class(activity_class.pk)
         _validate_registration(cls, child)
         enrollment = Enrollment.objects.create(
-            child=child, activity_class=cls, status=Enrollment.Status.REQUESTED
+            child=child,
+            activity_class=cls,
+            status=Enrollment.Status.REQUESTED,
+            terms_accepted_at=timezone.now() if terms_accepted else None,
         )
         notifications.queue_event(Event.ENROLLMENT_REQUESTED, enrollment)
         notifications.queue_admin_event(Event.ADMIN_NEW_REQUEST, enrollment)

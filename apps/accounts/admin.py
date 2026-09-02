@@ -30,7 +30,15 @@ class GuardianInline(admin.TabularInline):
 
 @admin.register(Child)
 class ChildAdmin(admin.ModelAdmin):
-    list_display = ["first_name", "last_name", "date_of_birth", "guardian_list"]
+    list_display = [
+        "first_name",
+        "last_name",
+        "school_class",
+        "date_of_birth",
+        "may_leave_alone",
+        "guardian_list",
+    ]
+    list_filter = ["school_class", "may_leave_alone"]
     search_fields = ["first_name", "last_name", "guardians__email"]
     inlines = [GuardianInline]
 
@@ -47,6 +55,20 @@ class GuardianInviteAdmin(admin.ModelAdmin):
 
 @admin.register(SiteConfig)
 class SiteConfigAdmin(admin.ModelAdmin):
+    fieldsets = (
+        ("School", {"fields": ("school_name", "sender_name", "contact_email", "catalogue_intro")}),
+        ("Registrations", {"fields": ("signup_open", "offer_ttl_hours")}),
+        ("Admin alerts", {"fields": ("notify_admins_new_request", "notify_admins_seat_freed")}),
+        (
+            "Terms and conditions",
+            {
+                "fields": ("terms_markdown",),
+                "description": "Markdown: use # for the title, ## for section headings, "
+                "blank lines between paragraphs.",
+            },
+        ),
+    )
+
     def has_add_permission(self, request):
         # Singleton: only editable, never added (the row is auto-created).
         return not SiteConfig.objects.exists()

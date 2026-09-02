@@ -3,11 +3,12 @@ import datetime
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import PasswordChangeView as DjangoPasswordChangeView
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 
-from .forms import SignupForm
+from .forms import PasswordChangeForm, SignupForm
 from .models import Guardian, GuardianInvite, SiteConfig, User
 from .redirects import safe_next
 
@@ -39,6 +40,24 @@ def signup(request):
         "registration/signup.html",
         {"form": form, "next": next_url or ""},
     )
+
+
+class PasswordChangeView(DjangoPasswordChangeView):
+    """Set a new password while logged in; no current password required.
+
+    Also mounted at /admin/password_change/ (config.urls) so the admin's
+    "Change password" link behaves the same way. The parent view keeps the
+    session valid after the change (update_session_auth_hash).
+    """
+
+    form_class = PasswordChangeForm
+    template_name = "registration/password_change.html"
+    success_url = reverse_lazy("post_login")
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, "Your password has been changed.")
+        return response
 
 
 @login_required

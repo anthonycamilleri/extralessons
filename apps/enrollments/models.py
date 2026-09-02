@@ -71,6 +71,11 @@ class Enrollment(models.Model):
         max_length=20, choices=CancelReason.choices, blank=True, default=""
     )
     promoted_from_waitlist = models.BooleanField(default=False)
+    terms_accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the parent ticked the terms-and-conditions box on the registration form.",
+    )
 
     objects = EnrollmentQuerySet.as_manager()
 

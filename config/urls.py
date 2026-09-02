@@ -3,10 +3,14 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.accounts.views import PasswordChangeView
 from apps.catalog.mcp_http import mcp_endpoint
 from apps.media.views import serve_stored_file
 
 urlpatterns = [
+    # Ahead of the admin so its "Change password" link lands on our view, which
+    # does not ask for the current password (the admin's own form does).
+    path("admin/password_change/", PasswordChangeView.as_view(), name="admin_password_change"),
     path("admin/", admin.site.urls),
     # Remote MCP for Claude Desktop / Cowork / claude.ai custom connectors.
     # Both spellings, so a URL pasted with a trailing slash is not a 404.

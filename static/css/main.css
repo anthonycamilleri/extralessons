@@ -318,6 +318,19 @@ textarea { min-height: 6.5rem; }
 .errorlist { color: var(--bad); list-style: none; padding: 0; margin: 0 0 .3rem; font-size: .9rem; font-weight: 600; }
 fieldset { border: none; padding: 0; margin: 0 0 1rem; }
 legend { font-weight: 600; padding: 0; }
+/* A checkbox and its label on one line, label not bold: consent and yes/no
+   questions read as a sentence, not as a field heading. Django renders a
+   BooleanField as <label><input></label>-less siblings, hence both shapes. */
+.check-row, form p:has(> input[type=checkbox]) {
+  display: flex; align-items: flex-start; gap: .6rem;
+}
+.check-row label, form p:has(> input[type=checkbox]) label { font-weight: 500; margin: 0; }
+.check-row input[type=checkbox], form p:has(> input[type=checkbox]) input[type=checkbox] {
+  width: 1.35rem; height: 1.35rem; flex: none; margin: .15rem 0 0; accent-color: var(--accent);
+  order: -1; /* Django's as_p puts the label first; the box reads better in front. */
+}
+form p:has(> input[type=checkbox]) .helptext { flex-basis: 100%; }
+form p:has(> input[type=checkbox]) { flex-wrap: wrap; }
 
 /* --- Panels ------------------------------------------------------------- */
 .panel {
@@ -519,6 +532,14 @@ legend { font-weight: 600; padding: 0; }
 
 .prose { max-width: 42rem; }
 .prose p { margin: 0 0 1rem; }
+.next-class { margin-top: .15rem; color: var(--day-ink); }
+
+/* Terms & conditions: rendered Markdown, reading width, generous rhythm. */
+.terms-page { max-width: 46rem; margin: 1rem auto 2rem; padding: 2rem 2.25rem; }
+.terms-page h1 { font-size: 1.8rem; margin-bottom: 1.25rem; }
+.terms-page h2 { font-size: 1.2rem; margin: 1.75rem 0 .5rem; color: var(--accent-dark); }
+.terms-page p, .terms-page li { line-height: 1.65; }
+.terms-page ul, .terms-page ol { padding-left: 1.4rem; }
 
 .register-card {
   background: linear-gradient(135deg, #fff 0%, var(--brand-orange-soft) 100%);
@@ -641,6 +662,7 @@ table.list tbody tr:hover td { background: #fafcfe; }
   .detail-hero { aspect-ratio: 4/3; }
   .detail-title { margin: -1.75rem .5rem 1.25rem; padding: 1rem 1.1rem; }
   .register-card { padding: 1.15rem; border-radius: var(--radius); }
+  .terms-page { padding: 1.25rem 1.1rem; }
   form > button.btn, .auth-box .btn, .register-card button.btn, .auth-choice .btn { width: 100%; }
   .actions form > button.btn, .actions .btn { width: auto; }
   input[type=text], input[type=email], input[type=password], input[type=date],

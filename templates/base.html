@@ -25,11 +25,13 @@
     </a>
     <div class="nav-links">
       <a href="{% url 'catalogue' %}"{% if request.resolver_match.url_name == "catalogue" %} aria-current="page"{% endif %}>Catalogue</a>
+      {% if site_config.has_terms %}<a href="{% url 'terms' %}"{% if request.resolver_match.url_name == "terms" %} aria-current="page"{% endif %}>T&amp;Cs</a>{% endif %}
       {% if user.is_authenticated %}
         {% if user.role == "PARENT" %}
           <a href="{% url 'parent_home' %}">My family</a>
         {% elif user.role == "PROVIDER" %}
           <a href="{% url 'provider_home' %}">My classes</a>
+          <a href="{% url 'password_change' %}">Password</a>
         {% elif user.role == "ADMIN" %}
           <a href="{% url 'admintools_requests' %}">Requests</a>
           <a href="{% url 'admin:index' %}">Admin</a>
@@ -65,6 +67,9 @@
       <strong>{{ site_config.school_name }}</strong>
       {% if site_config.contact_email %}
         · <a href="mailto:{{ site_config.contact_email }}">{{ site_config.contact_email }}</a>
+      {% endif %}
+      {% if site_config.has_terms %}
+        · <a href="{% url 'terms' %}">Terms &amp; conditions</a>
       {% endif %}
     </div>
     <span class="footer-dots" aria-hidden="true"><i></i><i></i><i></i></span>

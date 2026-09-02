@@ -6,9 +6,10 @@
   <p class="muted">Add the child you want to register, and we'll take you straight back to the activity.</p>
 {% endif %}
 <div class="panel">
-  <form method="post">
+  <form method="post" class="child-form">
     {% csrf_token %}
     {{ form.as_p }}
+    <p class="small muted">Providers see the class and the going-home arrangement on their roster — please keep them up to date.</p>
     {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     <button type="submit" class="btn">Save</button>
     <a class="btn btn-secondary" href="{% if next %}{{ next }}{% else %}{% url 'parent_home' %}{% endif %}">Cancel</a>

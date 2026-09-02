@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.accounts.forms import ChildForm, GuardianInviteForm, ProfileForm
-from apps.accounts.models import Child, Guardian
+from apps.accounts.models import Child, Guardian, SiteConfig
 from apps.accounts.permissions import parent_required
 from apps.accounts.redirects import safe_next
 from apps.catalog.models import ActivityClass
@@ -94,15 +94,22 @@ def _own_enrollments(user):
 def enroll(request, class_id):
     cls = get_object_or_404(ActivityClass.objects.published(), pk=class_id)
     child = get_object_or_404(_own_children(request.user), pk=request.POST.get("child"))
+    terms_accepted = bool(request.POST.get("terms_accepted"))
+    # The checkbox is `required` in the browser; this is the check that counts.
+    if SiteConfig.get().has_terms and not terms_accepted:
+        messages.error(
+            request, "Please confirm that you have read the terms and conditions."
+        )
+        return redirect(f"{cls.get_absolute_url()}#register")
     try:
-        enrollment = enrollment_services.register(child, cls)
+        enrollment = enrollment_services.register(child, cls, terms_accepted=terms_accepted)
     except EnrollmentError as exc:
         messages.error(request, str(exc))
         return redirect(cls.get_absolute_url())
     messages.success(
         request,
-        f"Request received! The school office will confirm {child.first_name}'s "
-        f"place in {cls.title} shortly.",
+        f"Request received! We'll confirm {child.first_name}'s place in "
+        f"{cls.title} as soon as we can — keep an eye on your inbox.",
     )
     return redirect("parent_home")
 

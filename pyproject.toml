@@ -11,6 +11,8 @@ dependencies = [
     "Pillow~=11.0",
     "django-environ~=0.12",
     "requests~=2.32",
+    # Renders the admin-edited Terms & Conditions (apps.accounts.SiteConfig).
+    "markdown~=3.7",
     "django-storages[s3]~=1.14",
     # The MCP SDK ships in the runtime image: the web service serves the
     # catalogue tools at /mcp (apps.catalog.mcp_http) as well as over stdio.

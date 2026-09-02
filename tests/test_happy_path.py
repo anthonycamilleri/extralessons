@@ -34,14 +34,21 @@ def test_full_lifecycle(client):
     )
     client.post(
         reverse("child_add"),
-        {"first_name": "Ann", "last_name": "Family", "date_of_birth": "2018-01-15", "notes": ""},
+        {
+            "first_name": "Ann",
+            "last_name": "Family",
+            "school_class": "P2E",
+            "date_of_birth": "2018-01-15",
+            "notes": "",
+        },
     )
     from apps.accounts.models import Child, User
 
     ann = Child.objects.get(first_name="Ann")
-    client.post(reverse("enroll", args=[cls.pk]), {"child": ann.pk})
+    client.post(reverse("enroll", args=[cls.pk]), {"child": ann.pk, "terms_accepted": "1"})
     request_a = Enrollment.objects.get(child=ann)
     assert request_a.status == Enrollment.Status.REQUESTED
+    assert request_a.terms_accepted_at is not None
     client.post(reverse("logout"))
 
     # --- Admin approves: Ann takes the only seat ----------------------------
@@ -65,10 +72,17 @@ def test_full_lifecycle(client):
     )
     client.post(
         reverse("child_add"),
-        {"first_name": "Ben", "last_name": "Family", "date_of_birth": "2017-06-01", "notes": ""},
+        {
+            "first_name": "Ben",
+            "last_name": "Family",
+            "school_class": "P3S",
+            "date_of_birth": "2017-06-01",
+            "may_leave_alone": "on",
+            "notes": "",
+        },
     )
     ben = Child.objects.get(first_name="Ben")
-    client.post(reverse("enroll", args=[cls.pk]), {"child": ben.pk})
+    client.post(reverse("enroll", args=[cls.pk]), {"child": ben.pk, "terms_accepted": "1"})
     request_b = Enrollment.objects.get(child=ben)
     client.post(reverse("logout"))
 
@@ -101,8 +115,10 @@ def test_full_lifecycle(client):
 
     # --- Provider sees Ben on the roster and takes attendance ---------------
     client.force_login(provider_user)
-    roster_page = client.get(reverse("provider_class", args=[cls.pk]))
-    assert "Ben Family" in roster_page.content.decode()
+    roster_page = client.get(reverse("provider_class", args=[cls.pk])).content.decode()
+    assert "Ben Family" in roster_page
+    assert "P3S" in roster_page
+    assert "May leave alone" in roster_page
 
     session = cls.sessions.first()
     client.post(

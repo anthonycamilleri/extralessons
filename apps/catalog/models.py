@@ -4,11 +4,12 @@ from typing import NamedTuple
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Count, F, Q, Value
+from django.db.models import Count, F, Min, Q, Value
 from django.db.models.functions import Greatest, Now
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.urls import reverse
+from django.utils import timezone
 
 
 class Provider(models.Model):
@@ -192,6 +193,20 @@ class ActivityClassQuerySet(models.QuerySet):
     def published(self):
         return self.filter(status=ActivityClass.Status.PUBLISHED, term__is_active=True)
 
+    def with_next_session(self):
+        """Annotate the first and the next (from today) non-cancelled lesson date.
+
+        Parents care about when the class actually meets next, not about the
+        term's paperwork dates; `next_session_label` turns these two into the
+        wording ("First class" before it starts, "Next class" afterwards).
+        """
+        today = timezone.localdate()
+        live = Q(sessions__cancelled=False)
+        return self.annotate(
+            first_session_date=Min("sessions__date", filter=live),
+            next_session_date=Min("sessions__date", filter=live & Q(sessions__date__gte=today)),
+        )
+
 
 class ActivityClass(models.Model):
     class Status(models.TextChoices):
@@ -296,6 +311,24 @@ class ActivityClass(models.Model):
             f"{self.get_weekday_display()}s "
             f"{self.start_time:%H:%M}–{self.end_time:%H:%M}"
         )
+
+    @property
+    def next_session_label(self):
+        """("First class" | "Next class", date) for the catalogue, or None.
+
+        Needs the `with_next_session()` annotations; falls back to querying
+        for a single instance so a template can never crash on a plain object.
+        """
+        if not hasattr(self, "next_session_date"):
+            today = timezone.localdate()
+            live = self.sessions.filter(cancelled=False)
+            self.first_session_date = live.aggregate(d=Min("date"))["d"]
+            self.next_session_date = live.filter(date__gte=today).aggregate(d=Min("date"))["d"]
+        if self.next_session_date is None:
+            return None
+        if self.next_session_date == self.first_session_date:
+            return ("First class", self.next_session_date)
+        return ("Next class", self.next_session_date)
 
     def skipped_holidays(self):
         """School holidays that interrupt this class (empty if it runs through)."""

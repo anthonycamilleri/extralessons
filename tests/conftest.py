@@ -6,7 +6,7 @@ import pytest
 
 @pytest.fixture
 def default_notification_templates(db):
-    """Restore the templates the 0002 data migration seeds.
+    """Restore the default templates the data migrations seed (0002, reworded in 0005).
 
     Tests marked `django_db(transaction=True)` truncate every table between
     tests, which takes the seeded NotificationTemplate rows with it — and
@@ -17,7 +17,7 @@ def default_notification_templates(db):
     from apps.notifications.models import NotificationTemplate
 
     migration = importlib.import_module(
-        "apps.notifications.migrations.0002_default_templates"
+        "apps.notifications.migrations.0005_friendly_templates"
     )
     for event, (subject, body) in migration.TEMPLATES.items():
         NotificationTemplate.objects.get_or_create(

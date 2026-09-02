@@ -1,8 +1,12 @@
 import secrets
 
+import markdown
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+from django.utils.safestring import mark_safe
+
+from . import defaults
 
 
 class UserManager(BaseUserManager):
@@ -70,13 +74,51 @@ class ChildQuerySet(models.QuerySet):
         return self.filter(guardians=user)
 
 
+def school_class_choices():
+    """P1–P5 and S1–S7, each with an English and a Slovenian section.
+
+    Grouped so the form shows two <optgroup>s; the stored value is the short
+    code parents and providers use every day (P3E, S5S).
+    """
+    sections = [("E", "English"), ("S", "Slovenian")]
+
+    def cycle(prefix, years):
+        return [
+            (f"{prefix}{year}{code}", f"{prefix}{year}{code} · {label} section")
+            for year in years
+            for code, label in sections
+        ]
+
+    return [
+        ("Primary", cycle("P", range(1, 6))),
+        ("Secondary", cycle("S", range(1, 8))),
+    ]
+
+
+SCHOOL_CLASS_CHOICES = school_class_choices()
+SCHOOL_CLASS_CODES = [code for _group, options in SCHOOL_CLASS_CHOICES for code, _ in options]
+
+
 class Child(models.Model):
     guardians = models.ManyToManyField(
         settings.AUTH_USER_MODEL, through="Guardian", related_name="children"
     )
     first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
+    last_name = models.CharField("surname", max_length=100)
     date_of_birth = models.DateField()
+    school_class = models.CharField(
+        "class",
+        max_length=4,
+        choices=SCHOOL_CLASS_CHOICES,
+        blank=True,
+        help_text="The child's class this school year, e.g. P3E or S2S.",
+    )
+    may_leave_alone = models.BooleanField(
+        "may go home on their own",
+        default=False,
+        help_text="Tick if this child is authorised to leave an activity unaccompanied. "
+        "Providers only act on what is recorded here, never on verbal instructions.",
+    )
     notes = models.TextField(
         blank=True,
         help_text="Anything providers should know (allergies, medical needs...). "
@@ -96,6 +138,11 @@ class Child(models.Model):
     @property
     def full_name(self):
         return f"{self.first_name} {self.last_name}"
+
+    @property
+    def display_name(self):
+        """Name with the class code, for rosters and pickers: "Lena Parent (P3E)"."""
+        return f"{self.full_name} ({self.school_class})" if self.school_class else self.full_name
 
 
 class Guardian(models.Model):
@@ -148,6 +195,11 @@ class SiteConfig(models.Model):
     """Singleton with school-wide settings, editable in the admin."""
 
     school_name = models.CharField(max_length=200, default="Our School")
+    sender_name = models.CharField(
+        max_length=200,
+        default=defaults.SENDER_NAME,
+        help_text="Who signs the emails parents receive, e.g. “European School PTA”.",
+    )
     contact_email = models.EmailField(
         blank=True, help_text="Shown to parents as the school contact address."
     )
@@ -170,6 +222,13 @@ class SiteConfig(models.Model):
         default=True,
         help_text="Email school admins when a seat frees up in a class with a waiting list.",
     )
+    terms_markdown = models.TextField(
+        "terms and conditions",
+        blank=True,
+        default=defaults.TERMS_MARKDOWN,
+        help_text="Markdown. Shown at /terms/ and linked from the navigation; parents must "
+        "confirm they have read it before registering. Leave empty to hide it.",
+    )
 
     class Meta:
         verbose_name = "site configuration"
@@ -181,6 +240,17 @@ class SiteConfig(models.Model):
     def save(self, *args, **kwargs):
         self.pk = 1  # enforce singleton
         super().save(*args, **kwargs)
+
+    @property
+    def has_terms(self):
+        return bool(self.terms_markdown.strip())
+
+    @property
+    def terms_html(self):
+        """The terms rendered to HTML. Admin-authored, so trusted as-is."""
+        return mark_safe(
+            markdown.markdown(self.terms_markdown, extensions=["extra", "sane_lists"])
+        )
 
     @classmethod
     def get(cls):

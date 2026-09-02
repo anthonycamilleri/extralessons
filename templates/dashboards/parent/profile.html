@@ -10,6 +10,6 @@
     <a class="btn btn-secondary" href="{% url 'parent_home' %}">Back</a>
   </form>
 </div>
-<p class="muted small">Account email: {{ user.email }}.
-   Contact the school office to change your login email.</p>
+<p class="muted small">Account email: {{ user.email }} · <a href="{% url 'password_change' %}">Change password</a>.
+   Contact us to change your login email.</p>
 {% endblock %}

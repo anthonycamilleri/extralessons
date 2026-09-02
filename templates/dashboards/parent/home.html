@@ -40,7 +40,8 @@
 {% for family in families %}
 <div class="panel">
   <div class="panel-title">
-    <h2>{{ family.child.full_name }} <span class="muted small">({{ family.child.date_of_birth|date:"j M Y" }})</span></h2>
+    <h2>{{ family.child.full_name }}
+      <span class="muted small">{% if family.child.school_class %}{{ family.child.school_class }} · {% endif %}{{ family.child.date_of_birth|date:"j M Y" }}{% if family.child.may_leave_alone %} · may go home alone{% endif %}</span></h2>
     <div class="actions small">
       <a href="{% url 'child_edit' family.child.pk %}">Edit details</a>
       <a href="{% url 'child_invite_guardian' family.child.pk %}">Invite co-parent</a>

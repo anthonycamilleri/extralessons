@@ -98,7 +98,13 @@ def _get_template(event):
 
 
 def base_context(**extra):
-    context = {"school_name": SiteConfig.get().school_name}
+    config = SiteConfig.get()
+    context = {
+        "school_name": config.school_name,
+        "sender_name": config.sender_name,
+        "contact_email": config.contact_email,
+        "site_url": settings.SITE_URL,
+    }
     context.update(extra)
     return context
 
@@ -107,6 +113,7 @@ def enrollment_context(enrollment, parent=None, **extra):
     cls = enrollment.activity_class
     context = base_context(
         child_name=enrollment.child.full_name,
+        child_first_name=enrollment.child.first_name,
         class_title=cls.title,
         provider_name=cls.provider.name,
         schedule=cls.schedule_display,
@@ -116,6 +123,7 @@ def enrollment_context(enrollment, parent=None, **extra):
     )
     if parent is not None:
         context["parent_name"] = parent.get_full_name() or parent.email
+        context["parent_first_name"] = parent.first_name or context["parent_name"]
     if enrollment.offer_expires_at:
         local = timezone.localtime(enrollment.offer_expires_at)
         context["offer_expires_at"] = local.strftime("%A %d %B, %H:%M")
@@ -229,6 +237,7 @@ def queue_guardian_invite(invite):
     context = base_context(
         parent_name=invite.invited_by.get_full_name() or invite.invited_by.email,
         child_name=invite.child.full_name,
+        child_first_name=invite.child.first_name,
         action_url=_absolute(reverse("invite_landing", kwargs={"token": invite.token})),
     )
     _email_row(
@@ -288,6 +297,7 @@ def queue_broadcast(broadcast):
     for guardian in recipients.values():
         context = base_context(
             parent_name=guardian.get_full_name() or guardian.email,
+            parent_first_name=guardian.first_name or guardian.email,
             subject=broadcast.subject,
             body=broadcast.body,
             action_url=_absolute(reverse("parent_home")),

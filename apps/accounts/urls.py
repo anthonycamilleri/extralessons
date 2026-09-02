@@ -8,6 +8,7 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("signup/", views.signup, name="signup"),
     path("post-login/", views.post_login, name="post_login"),
+    path("password/", views.PasswordChangeView.as_view(), name="password_change"),
     path("invite/<str:token>/", views.invite_landing, name="invite_landing"),
     path("invite/<str:token>/accept/", views.accept_guardian_invite, name="accept_guardian_invite"),
     path(
