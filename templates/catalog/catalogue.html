@@ -96,8 +96,8 @@
         {% else %}
           <span class="badge badge-warn">Full — waiting list{% if cls.waitlist_count %} ({{ cls.waitlist_count }}){% endif %}</span>
         {% endif %}
-        {# Always present, logged in or not: the class page's register card
-           knows what to do next (the form, or the log-in / sign-up choice). #}
+        {% comment %}Always present, logged in or not: the class page's register
+           card knows what to do next (the form, or the log-in / sign-up choice).{% endcomment %}
         <a class="btn btn-small btn-cta card-cta" href="{{ cls.get_absolute_url }}#register">
           {% if cls.places_free > 0 %}Register{% else %}Join waiting list{% endif %}
         </a>

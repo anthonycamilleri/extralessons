@@ -174,6 +174,14 @@ class TestRegisterFlowWhenNotLoggedIn:
         assert content.count("#register") == 2
         assert "Join waiting list" in content
 
+    def test_no_template_comment_leaks_into_the_pages(self, client):
+        # A {# #} comment that spans two lines is rendered as text by Django.
+        cls = ActivityClassFactory()
+        for url in (reverse("catalogue"), cls.get_absolute_url()):
+            content = client.get(url).content.decode()
+            assert "{#" not in content and "#}" not in content, url
+            assert "{%" not in content, url
+
     def test_class_page_offers_login_and_signup_that_return_here(self, client):
         cls = ActivityClassFactory()
         content = client.get(cls.get_absolute_url()).content.decode()
