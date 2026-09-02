@@ -14,7 +14,7 @@ Budget about half an hour for the first run; most of it is waiting for builds.
    paste the ZeptoMail token when asked → **Deploy Blueprint**.
 4. Create an API key, then `RENDER_API_KEY=… ./deploy/render-github-config.sh`
    to hand the service IDs to GitHub Actions.
-5. Create the first admin from the web service's **Shell** tab.
+5. Open the set-password email the first deploy sends to `ADMIN_EMAIL`.
 
 From then on every push to `main` that passes CI deploys itself.
 
@@ -196,13 +196,20 @@ already knows.
 
 ### 5. The first admin user
 
-Web service → **Shell** tab (paid instances have one), then:
+Nothing to run. The pre-deploy command is `migrate` followed by
+`manage.py ensure_admin`, which creates the account named by `ADMIN_EMAIL` in
+the shared group (a superuser with a random, unknown password) the first time
+it runs, and emails that address the same set-password link the login page's
+*Forgotten your password?* produces. Check the inbox after the first deploy,
+follow the link, choose a password, log in at `/admin/` and fill in *Site
+configuration*.
 
-```sh
-python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); U.objects.create_superuser(email='you@example.com', password='CHANGE-ME')"
-```
-
-Log in at `/admin/`, change the password, then fill in *Site configuration*.
+If no email arrived (the ZeptoMail token was not in place yet, say), the
+account still exists: use *Forgotten your password?* on the login page once
+email works, or resend from the web service's **Shell** tab with
+`python manage.py ensure_admin --send-reset`. The command is idempotent and
+runs on every deploy; changing `ADMIN_EMAIL` later creates a second admin
+rather than renaming the first. Add further administrators from the admin.
 
 ### 6. A custom domain
 

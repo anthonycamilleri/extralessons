@@ -179,6 +179,12 @@ NOTIFIER_INLINE_MAX_SECONDS = env.int("NOTIFIER_INLINE_MAX_SECONDS", default=20)
 # Absolute base URL used in notification links (no trailing slash).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 
+# --- Bootstrap admin ---
+# `manage.py ensure_admin` (part of the pre-deploy command) creates this
+# account as a superuser if it does not exist and emails it a set-password
+# link. Empty = the command does nothing.
+ADMIN_EMAIL = env("ADMIN_EMAIL", default="")
+
 # --- Remote MCP (apps.catalog.mcp_http) ---
 # Bearer token for the /mcp endpoint that lets Claude Desktop, Cowork and
 # claude.ai populate the catalogue as a custom connector. Empty = endpoint off.
