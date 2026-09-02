@@ -56,7 +56,8 @@ services:
       #
       # sync: false = a secret. Render asks for the value when the Blueprint
       # is first created and never overwrites what is in the dashboard.
-      # ZeptoMail: the Mail Agent's "Send Mail Token".
+      # ZeptoMail: the Mail Agent's "Send Mail Token" (SMTP/API tab). The copy
+      # button there copies it as "Zoho-enczapikey <token>"; either form works.
       - key: ZEPTOMAIL_SEND_MAIL_TOKEN
         sync: false
       # Uploaded class images live in the database (apps/media) — nothing to
@@ -151,7 +152,7 @@ envVarGroups:
       # Accounts on the EU data centre (zeptomail.zoho.eu) use api.zeptomail.eu;
       # a .com account needs https://api.zeptomail.com/v1.1/email instead.
       - key: DEFAULT_FROM_EMAIL
-        value: School Activities <notifications@example.com>
+        value: School Activities <anthony@knowledgeinnovation.eu>
       - key: ZEPTOMAIL_API_URL
         value: https://api.zeptomail.eu/v1.1/email
       # Optional: a bounce address set up on the Mail Agent.
