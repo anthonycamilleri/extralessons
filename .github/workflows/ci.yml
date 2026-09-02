@@ -27,6 +27,8 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: python manage.py check
       - run: pytest -q
+      # The MCP server must start and answer over stdio, not just import.
+      - run: python scripts/mcp_smoke.py
 
   # The authoritative run. The capacity mutex is a row lock, so the concurrency
   # tests in tests/test_capacity_race.py only mean anything here — they skip

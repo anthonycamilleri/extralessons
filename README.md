@@ -25,6 +25,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48).
 - Optional email alerts on new requests and freed seats.
 - Manage terms, classes, providers, notification templates, and site-wide settings in the Django admin; admin tools dashboard at `/admin-tools/`.
+- Let Claude do the data entry: a built-in MCP server (`manage.py mcp_server`) lets Claude Code or Claude Desktop set up school years, holidays, terms, providers and classes from a conversation — see [Connecting Claude](#connecting-claude-mcp).
 
 ## Architecture at a glance
 
@@ -184,6 +185,107 @@ DATABASE_URL=postgres://app:app@localhost:5432/extralessons pytest   # full
 
 CI runs both. The PostgreSQL run is the authoritative one.
 
+## Connecting Claude (MCP)
+
+The fastest way to populate a term is to hand the paperwork to Claude. The app
+ships a [Model Context Protocol](https://modelcontextprotocol.io) server that
+Claude Code and Claude Desktop can launch locally. Paste in the PTA's club
+list, a provider's PDF or last year's timetable and ask Claude to set it up;
+it calls the tools below and the results appear in the Django admin.
+
+What Claude can do through it:
+
+- Read: the school overview, every class with seat counts, a class's session dates.
+- Write: school years and their holidays, terms, providers, classes; publish
+  (which generates the session calendar), regenerate sessions, archive, cancel.
+
+What it deliberately cannot do: see or change parents, children or individual
+enrolments, approve requests, or send messages. Enrolment figures are
+aggregates only. Every write uses the same validation and service functions
+as the admin, so a class Claude creates skips the school holidays like any
+other.
+
+### Setup
+
+```sh
+pip install -e ".[dev,mcp]"      # adds the MCP SDK to your existing install
+python manage.py migrate           # the server talks to whatever DATABASE_URL points at
+python scripts/mcp_smoke.py        # optional: starts the server and calls get_overview
+```
+
+**Claude Code.** The repo contains a project-scoped `.mcp.json`, so open the
+project directory in Claude Code (with the virtualenv activated so `python` is
+the right one) and approve the `extralessons` server when prompted. To register
+it by hand instead:
+
+```sh
+claude mcp add extralessons -- /path/to/extralessons/.venv/bin/python /path/to/extralessons/manage.py mcp_server
+```
+
+**Claude Desktop.** Add the server to `claude_desktop_config.json`
+(Settings → Developer → Edit Config). Use absolute paths; Desktop does not
+know about your shell or virtualenv:
+
+```json
+{
+  "mcpServers": {
+    "extralessons": {
+      "command": "/path/to/extralessons/.venv/bin/python",
+      "args": ["/path/to/extralessons/manage.py", "mcp_server"],
+      "env": {
+        "DJANGO_SETTINGS_MODULE": "config.settings.dev",
+        "DATABASE_URL": "sqlite:////path/to/extralessons/db.sqlite3"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop and the tools appear under the hammer icon.
+
+**Pointing at production.** The server is just Django in-process, so set
+`DATABASE_URL` in the `env` block to the Scaleway PostgreSQL URL (the same
+value the container uses) and Claude edits the live catalogue. Treat this
+exactly like `manage.py shell` against production: writes take effect
+immediately and parents see published classes at once. Keep the URL in your
+local config, never in the repo, and prefer creating classes as drafts and
+publishing them from the admin once you have looked them over.
+
+### What to ask it
+
+- "Create the 2026/27 school year, 1 September to 30 June, with these holidays: …"
+- "Add an Autumn term from 7 September to 18 December and make it the active one."
+- "Here is AllStars' club list for autumn. Add each class under the AllStars provider, ages and times as listed, capacity 16, as drafts."
+- "Which published classes still have free places, and how many sessions does each have?"
+- "Move Chess Club to Thursdays at 15:45 and regenerate its sessions."
+
+### Tools
+
+| Tool | Does |
+| --- | --- |
+| `get_overview` | School name and settings, school years with holidays, terms, providers, class counts by status. Claude calls this first. |
+| `list_classes(term?, status?)` | Classes with `enrolled_count`, `waitlist_count`, `requested_count`, `places_free`, `session_count` and their numeric ids. |
+| `get_class(class_id)` | One class in full: description, practical details, session dates, skipped holidays. |
+| `upsert_school_year(name, start_date, end_date)` | Create or update by name. |
+| `upsert_holiday(school_year, name, start_date, end_date)` | Inclusive dates; existing calendars are re-reconciled immediately. |
+| `upsert_term(name, start_date, end_date, school_year?, is_active?)` | Create or update; `is_active` left out keeps the current flag. |
+| `upsert_provider(name, description?, contact_email?, contact_phone?)` | Create or update by name. Linking user accounts stays in the admin. |
+| `upsert_class(term, provider, title, description, age_min, age_max, weekday, start_time, end_time, capacity?, location?, extra_details?, runs_during_holidays?, slug?)` | Create as DRAFT or update; matched by slug within the term. Updating a class that has sessions regenerates them. |
+| `publish_class(class_id)` | Set PUBLISHED and generate sessions around the school holidays. |
+| `regenerate_sessions(class_id)` | Re-run the calendar reconciliation only. |
+| `archive_class(class_id)` | Archive a finished class; refused while enrolments are active. |
+| `cancel_class(class_id)` | Cancel the class and every family's place, notifying them. Claude is told to confirm with you first. |
+
+Dates are `YYYY-MM-DD`, times `HH:MM`, weekdays `0` (Monday) to `6` (Sunday).
+Upserts are idempotent, so re-running a conversation updates rather than
+duplicates. Errors come back as plain sentences ("No provider named 'Allstars'.
+Known providers: AllStars Sports, Bright Minds.") so Claude can correct itself.
+
+The transport is stdio only: Claude starts the process and talks to it over
+its own stdin/stdout, nothing listens on the network, and there is no token to
+manage. The tool code lives in `apps/catalog/mcp_server.py`; add a function
+there and to `TOOLS` to expose something new.
+
 ## Configuration
 
 ### Environment variables
@@ -276,7 +378,8 @@ apps/
   catalog/            # SchoolYear + Holiday (the school calendar), Provider, Term,
                       # ActivityClass, ClassSession; generate_sessions() reconciles a
                       # class's dates against the schedule and the year's holidays;
-                      # public catalogue views
+                      # public catalogue views; mcp_server.py = the tools Claude uses,
+                      # served by management/commands/mcp_server.py over stdio
   enrollments/        # Enrollment + Attendance models;
                       # services.py = ALL state transitions (register/approve/reject/
                       # offer/confirm/decline/expire/cancel) under a per-class row lock
@@ -290,9 +393,12 @@ templates/            # server-rendered HTML (HTMX-enhanced)
 static/               # main.css (the whole design system), vendored htmx.min.js,
                       # img/ (PTA logo + generated favicons), fonts/ (self-hosted
                       # Fredoka woff2 + OFL licence — no third-party font requests)
-scripts/              # make_icons.py: regenerate the favicons from the logo
+scripts/              # make_icons.py: regenerate the favicons from the logo;
+                      # mcp_smoke.py: start the MCP server over stdio and call a tool
 tests/                # pytest suite (services, capacity race, notifications, views,
-                      # school holidays, health probe, inline delivery, notifier job modes)
+                      # school holidays, health probe, inline delivery, notifier job modes,
+                      # MCP tools)
+.mcp.json             # Claude Code picks up the MCP server from here
 .github/workflows/
   ci.yml              # tests on SQLite + Postgres, deploy checks, image build
   deploy.yml          # build → migrate job → container redeploy → smoke test

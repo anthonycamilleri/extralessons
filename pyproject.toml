@@ -18,6 +18,11 @@ dependencies = [
 dev = [
     "pytest-django~=4.9",
     "factory-boy~=3.3",
+    "mcp>=1.29,<2",
+]
+# `manage.py mcp_server`: lets Claude Code / Claude Desktop populate the catalogue.
+mcp = [
+    "mcp>=1.29,<2",
 ]
 
 [build-system]

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "extralessons": {
+      "command": "python",
+      "args": ["manage.py", "mcp_server"]
+    }
+  }
+}
