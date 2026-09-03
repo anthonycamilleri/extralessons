@@ -1,5 +1,6 @@
-"""Classes assigned to specific administrators: scoping of the dashboard, the
-alert emails and the Django admin; and the registration-based counts."""
+"""Classes assigned to administrators: super admins see everything, other
+admins only their classes; alerts follow the same rule; and the
+registration-based counts."""
 import pytest
 from django.contrib.auth.models import Permission
 from django.urls import reverse
@@ -20,51 +21,56 @@ def _assign(cls, *admins):
     return cls
 
 
+def _super():
+    return AdminFactory(is_superuser=True)
+
+
 class TestResponsibleAdmins:
-    def test_general_admins_see_everything_and_scoped_admins_only_their_classes(self):
-        general, scoped = AdminFactory(), AdminFactory()
+    def test_super_admin_sees_everything_and_admins_only_their_classes(self):
+        boss, admin, idle = _super(), AdminFactory(), AdminFactory()
         mine, theirs = ActivityClassFactory(), ActivityClassFactory()
-        _assign(mine, scoped)
+        _assign(mine, admin)
 
-        assert set(ActivityClass.objects.managed_by(general)) == {mine, theirs}
-        assert set(ActivityClass.objects.managed_by(scoped)) == {mine}
-        assert scoped.is_scoped_admin and not general.is_scoped_admin
+        assert set(ActivityClass.objects.managed_by(boss)) == {mine, theirs}
+        assert set(ActivityClass.objects.managed_by(admin)) == {mine}
+        assert not ActivityClass.objects.managed_by(idle).exists()
+        assert boss.is_super_admin and not admin.is_super_admin
 
-    def test_assigned_class_alerts_its_admins_and_the_general_ones(self):
-        general, scoped, other = AdminFactory(), AdminFactory(), AdminFactory()
-        mine = _assign(ActivityClassFactory(), scoped)
-        _assign(ActivityClassFactory(), other)  # `other` has a portfolio: not general
+    def test_assigned_class_alerts_its_admins_only(self):
+        boss, admin, other = _super(), AdminFactory(), AdminFactory()
+        mine = _assign(ActivityClassFactory(), admin)
+        _assign(ActivityClassFactory(), other)
 
-        assert set(User.objects.responsible_admins(mine)) == {general, scoped}
+        assert set(User.objects.responsible_admins(mine)) == {admin}
+        assert boss not in User.objects.responsible_admins(mine)
 
-    def test_unassigned_class_goes_to_general_admins_only(self):
-        general, scoped = AdminFactory(), AdminFactory()
-        _assign(ActivityClassFactory(), scoped)
+    def test_unassigned_class_alerts_the_super_admins(self):
+        boss, admin = _super(), AdminFactory()
+        _assign(ActivityClassFactory(), admin)
         unassigned = ActivityClassFactory()
 
-        assert set(User.objects.responsible_admins(unassigned)) == {general}
+        assert set(User.objects.responsible_admins(unassigned)) == {boss}
 
-    def test_falls_back_to_every_admin_when_nobody_is_responsible(self):
+    def test_falls_back_to_every_admin_when_there_is_no_super_admin(self):
         a, b = AdminFactory(), AdminFactory()
         _assign(ActivityClassFactory(), a)
-        _assign(ActivityClassFactory(), b)
         orphan = ActivityClassFactory()
 
         assert set(User.objects.responsible_admins(orphan)) == {a, b}
 
     def test_inactive_and_non_admin_accounts_are_never_alerted(self):
-        general = AdminFactory()
-        AdminFactory(is_active=False)
-        UserFactory()  # a parent
+        boss = _super()
+        AdminFactory(is_active=False, is_superuser=True)
+        UserFactory(is_superuser=True)  # a superuser parent is still a parent
         cls = ActivityClassFactory()
 
-        assert list(User.objects.responsible_admins(cls)) == [general]
+        assert list(User.objects.responsible_admins(cls)) == [boss]
 
 
 class TestScopedAlerts:
     def test_new_request_emails_only_the_responsible_admins(self):
-        general, scoped, other = AdminFactory(), AdminFactory(), AdminFactory()
-        mine = _assign(ActivityClassFactory(), scoped)
+        boss, admin, other = _super(), AdminFactory(), AdminFactory()
+        mine = _assign(ActivityClassFactory(), admin)
         _assign(ActivityClassFactory(), other)
 
         services.register(ChildFactory(), mine)
@@ -74,14 +80,14 @@ class TestScopedAlerts:
                 "recipient", flat=True
             )
         )
-        assert recipients == {general.pk, scoped.pk}
+        assert recipients == {admin.pk}
 
     def test_seat_freed_alert_follows_the_same_rule(self):
-        scoped, other = AdminFactory(), AdminFactory()
-        mine = _assign(ActivityClassFactory(capacity=1), scoped)
+        admin, other = AdminFactory(), AdminFactory()
+        mine = _assign(ActivityClassFactory(capacity=1), admin)
         _assign(ActivityClassFactory(), other)
-        enrolled = services.approve_request(services.register(ChildFactory(), mine), scoped)
-        services.approve_request(services.register(ChildFactory(), mine), scoped)
+        enrolled = services.approve_request(services.register(ChildFactory(), mine), admin)
+        services.approve_request(services.register(ChildFactory(), mine), admin)
 
         services.cancel(enrolled, Enrollment.CancelReason.PARENT)
 
@@ -90,37 +96,45 @@ class TestScopedAlerts:
                 "recipient", flat=True
             )
         )
-        assert recipients == {scoped.pk}
+        assert recipients == {admin.pk}
 
 
-class TestScopedDashboard:
+class TestAdminDashboard:
     def setup_method(self):
-        self.general, self.scoped = AdminFactory(), AdminFactory()
-        self.mine = _assign(ActivityClassFactory(title="Chess"), self.scoped)
+        self.boss, self.admin = _super(), AdminFactory()
+        self.mine = _assign(ActivityClassFactory(title="Chess"), self.admin)
         self.theirs = ActivityClassFactory(title="Drama")
         self.my_request = services.register(ChildFactory(), self.mine)
         self.their_request = services.register(ChildFactory(), self.theirs)
 
-    def test_scoped_admin_sees_only_their_requests_and_classes(self, client):
-        client.force_login(self.scoped)
+    def test_admin_sees_only_their_requests_and_classes(self, client):
+        client.force_login(self.admin)
         content = client.get(reverse("admintools_requests")).content.decode()
 
         assert self.my_request.child.full_name in content
         assert self.their_request.child.full_name not in content
         assert "Chess" in content and "Drama" not in content
         assert "You look after" in content
+        assert "scope=mine" not in content  # no switch: there is nothing to switch to
 
-    def test_general_admin_sees_everything_and_who_looks_after_what(self, client):
-        client.force_login(self.general)
+    def test_admin_with_no_classes_is_told_so(self, client):
+        client.force_login(AdminFactory())
+        content = client.get(reverse("admintools_requests")).content.decode()
+
+        assert "No classes are assigned to you yet" in content
+        assert "Chess" not in content and "Drama" not in content
+
+    def test_super_admin_sees_everything_and_who_looks_after_what(self, client):
+        client.force_login(self.boss)
         content = client.get(reverse("admintools_requests")).content.decode()
 
         assert self.my_request.child.full_name in content
         assert self.their_request.child.full_name in content
         assert "Looked after by" in content
-        assert "You look after" not in content
+        assert "scope=mine" not in content  # no classes of their own: no switch
 
-    def test_scoped_admin_cannot_act_on_another_class(self, client):
-        client.force_login(self.scoped)
+    def test_admin_cannot_act_on_another_class(self, client):
+        client.force_login(self.admin)
 
         approve = client.post(
             reverse("admintools_request_approve", args=[self.their_request.pk])
@@ -132,8 +146,8 @@ class TestScopedDashboard:
         self.their_request.refresh_from_db()
         assert self.their_request.status == Enrollment.Status.REQUESTED
 
-    def test_scoped_admin_can_act_on_their_own_class(self, client):
-        client.force_login(self.scoped)
+    def test_admin_can_act_on_their_own_class(self, client):
+        client.force_login(self.admin)
 
         response = client.post(
             reverse("admintools_request_approve", args=[self.my_request.pk])
@@ -144,12 +158,23 @@ class TestScopedDashboard:
         assert self.my_request.status == Enrollment.Status.ENROLLED
         assert client.get(reverse("admintools_waitlist", args=[self.mine.pk])).status_code == 200
 
-    def test_scoped_admin_cannot_offer_a_seat_in_another_class(self, client):
+    def test_super_admin_can_act_on_any_class(self, client):
+        client.force_login(self.boss)
+
+        response = client.post(
+            reverse("admintools_request_approve", args=[self.my_request.pk])
+        )
+
+        assert response.status_code == 302
+        self.my_request.refresh_from_db()
+        assert self.my_request.status == Enrollment.Status.ENROLLED
+
+    def test_admin_cannot_offer_a_seat_in_another_class(self, client):
         full = ActivityClassFactory(capacity=0)
-        waiting = services.approve_request(services.register(ChildFactory(), full), self.general)
+        waiting = services.approve_request(services.register(ChildFactory(), full), self.boss)
         full.capacity = 1
         full.save()
-        client.force_login(self.scoped)
+        client.force_login(self.admin)
 
         response = client.post(reverse("admintools_waitlist_offer", args=[waiting.pk]))
 
@@ -157,13 +182,75 @@ class TestScopedDashboard:
         waiting.refresh_from_db()
         assert waiting.status == Enrollment.Status.WAITLISTED
 
-    def test_scoped_broadcast_to_all_reaches_only_their_families(self, client):
-        my_parent = self.my_request.child.guardians.first()
-        their_parent = self.their_request.child.guardians.first()
-        client.force_login(self.scoped)
+
+class TestOnlyMineSwitch:
+    """A super admin who also looks after classes can narrow the dashboard."""
+
+    def setup_method(self):
+        self.boss = _super()
+        self.mine = _assign(ActivityClassFactory(title="Chess"), self.boss)
+        self.theirs = _assign(ActivityClassFactory(title="Drama"), AdminFactory())
+        self.my_request = services.register(ChildFactory(), self.mine)
+        self.their_request = services.register(ChildFactory(), self.theirs)
+
+    def test_defaults_to_all_with_the_switch_shown(self, client):
+        client.force_login(self.boss)
+        content = client.get(reverse("admintools_requests")).content.decode()
+
+        assert 'href="?scope=mine"' in content and 'href="?scope=all"' in content
+        assert "Chess" in content and "Drama" in content
+        assert self.their_request.child.full_name in content
+
+    def test_only_mine_narrows_and_is_remembered(self, client):
+        client.force_login(self.boss)
+
+        narrowed = client.get(reverse("admintools_requests") + "?scope=mine")
+        content = narrowed.content.decode()
+        assert "Chess" in content and "Drama" not in content
+        assert self.their_request.child.full_name not in content
+        assert narrowed.cookies["admin_scope"].value == "mine"
+
+        remembered = client.get(reverse("admintools_requests")).content.decode()
+        assert "Drama" not in remembered
+        assert "Showing only the classes you look after yourself" in remembered
+
+        widened = client.get(reverse("admintools_requests") + "?scope=all").content.decode()
+        assert "Drama" in widened
+
+    def test_switch_is_not_offered_to_plain_admins(self, client):
+        plain = AdminFactory()
+        _assign(self.theirs, plain)
+        client.force_login(plain)
+
+        response = client.get(reverse("admintools_requests") + "?scope=all")
+
+        content = response.content.decode()
+        assert "Chess" not in content and "Drama" in content
+        assert "admin_scope" not in response.cookies
+
+    def test_only_mine_still_allows_acting_on_any_class(self, client):
+        client.force_login(self.boss)
+        client.get(reverse("admintools_requests") + "?scope=mine")
 
         response = client.post(
-            reverse("admintools_broadcast"),
+            reverse("admintools_request_approve", args=[self.their_request.pk])
+        )
+
+        assert response.status_code == 302
+        self.their_request.refresh_from_db()
+        assert self.their_request.status == Enrollment.Status.ENROLLED
+
+    def test_broadcast_all_classes_follows_the_switch(self, client):
+        my_parent = self.my_request.child.guardians.first()
+        their_parent = self.their_request.child.guardians.first()
+        client.force_login(self.boss)
+
+        content = client.get(reverse("admintools_broadcast") + "?scope=mine").content.decode()
+        assert "All my classes" in content
+        assert "Chess" in content and "Drama" not in content
+
+        response = client.post(
+            reverse("admintools_broadcast") + "?scope=mine",
             {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Chess news."},
         )
 
@@ -176,33 +263,65 @@ class TestScopedDashboard:
         assert broadcast.scope == Broadcast.Scope.SELECTED_CLASSES
         assert list(broadcast.classes.all()) == [self.mine]
 
-    def test_scoped_broadcast_form_offers_only_their_classes(self, client):
-        client.force_login(self.scoped)
-        content = client.get(reverse("admintools_broadcast")).content.decode()
+    def test_broadcast_to_all_when_viewing_all(self, client):
+        client.force_login(self.boss)
+        content = client.get(reverse("admintools_broadcast") + "?scope=all").content.decode()
+        assert "All published classes" in content
 
+        client.post(
+            reverse("admintools_broadcast") + "?scope=all",
+            {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Everyone."},
+        )
+
+        assert Broadcast.objects.get().scope == Broadcast.Scope.ALL_CLASSES
+        assert Notification.objects.filter(event=Event.BROADCAST).count() >= 2
+
+
+class TestAdminBroadcastScope:
+    def test_admin_broadcast_to_all_reaches_only_their_families(self, client):
+        admin = AdminFactory()
+        mine = _assign(ActivityClassFactory(title="Chess"), admin)
+        theirs = ActivityClassFactory(title="Drama")
+        my_parent = services.register(ChildFactory(), mine).child.guardians.first()
+        their_parent = services.register(ChildFactory(), theirs).child.guardians.first()
+        client.force_login(admin)
+
+        content = client.get(reverse("admintools_broadcast")).content.decode()
         assert "Chess" in content and "Drama" not in content
         assert "All my classes" in content
 
         response = client.post(
             reverse("admintools_broadcast"),
-            {
-                "scope": "SELECTED_CLASSES",
-                "classes": [self.theirs.pk],
-                "subject": "x",
-                "body": "y",
-            },
+            {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Chess news."},
         )
+
+        assert response.status_code == 302
+        sent_to = set(
+            Notification.objects.filter(event=Event.BROADCAST).values_list("recipient", flat=True)
+        )
+        assert my_parent.pk in sent_to and their_parent.pk not in sent_to
+        assert list(Broadcast.objects.get().classes.all()) == [mine]
+
+    def test_admin_cannot_pick_another_class(self, client):
+        admin = AdminFactory()
+        _assign(ActivityClassFactory(), admin)
+        theirs = ActivityClassFactory()
+        client.force_login(admin)
+
+        response = client.post(
+            reverse("admintools_broadcast"),
+            {"scope": "SELECTED_CLASSES", "classes": [theirs.pk], "subject": "x", "body": "y"},
+        )
+
         assert response.status_code == 200  # rejected by the form, not sent
         assert not Notification.objects.filter(event=Event.BROADCAST).exists()
 
 
 class TestDjangoAdminScoping:
-    def test_staff_admin_with_classes_sees_only_those_in_the_admin(self, client):
+    def test_staff_admin_sees_only_their_classes_in_the_admin(self, client):
         staff = AdminFactory(is_staff=True)
         staff.user_permissions.set(
-            Permission.objects.filter(
-                codename__in=["view_activityclass", "view_enrollment"]
-            )
+            Permission.objects.filter(codename__in=["view_activityclass", "view_enrollment"])
         )
         mine = _assign(ActivityClassFactory(title="Chess"), staff)
         ActivityClassFactory(title="Drama")
@@ -215,7 +334,7 @@ class TestDjangoAdminScoping:
         assert "Chess" in classes and "Drama" not in classes
         assert "Chessa" in enrollments
 
-    def test_superuser_always_sees_everything(self, admin_client, admin_user):
+    def test_super_admin_always_sees_everything(self, admin_client, admin_user):
         _assign(ActivityClassFactory(title="Chess"), admin_user)
         ActivityClassFactory(title="Drama")
 
@@ -267,7 +386,7 @@ class TestDjangoAdminScoping:
 
 class TestRegistrationCounts:
     def test_registrations_count_every_live_request(self):
-        admin = AdminFactory()
+        admin = _super()
         cls = ActivityClassFactory(capacity=3)
         services.register(ChildFactory(), cls)  # pending
         services.approve_request(services.register(ChildFactory(), cls), admin)  # enrolled
@@ -282,7 +401,7 @@ class TestRegistrationCounts:
         assert cls.places_available_now() == 1
 
     def test_waiting_list_and_offers_count_as_registrations(self):
-        admin = AdminFactory()
+        admin = _super()
         cls = ActivityClassFactory(capacity=1)
         enrolled = services.approve_request(services.register(ChildFactory(), cls), admin)
         waiting = services.approve_request(services.register(ChildFactory(), cls), admin)
@@ -298,7 +417,7 @@ class TestRegistrationCounts:
     def test_counts_survive_the_sessions_join(self):
         """Regression: the catalogue chains with_next_session() onto
         with_counts(); the sessions join used to multiply every count."""
-        admin = AdminFactory()
+        admin = _super()
         cls = ActivityClassFactory(capacity=5)
         generate_sessions(cls)
         assert cls.sessions.count() > 1
@@ -332,7 +451,7 @@ class TestRegistrationCounts:
         assert "Full — join the waiting list" in detail
 
     def test_dashboard_shows_registrations_confirmed_and_available(self, client):
-        admin = AdminFactory()
+        admin = _super()
         cls = ActivityClassFactory(title="Chess", capacity=3)
         services.register(ChildFactory(), cls)
         services.approve_request(services.register(ChildFactory(), cls), admin)

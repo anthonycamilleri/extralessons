@@ -9,13 +9,7 @@
   </div>
 </div>
 
-{% if scoped %}
-<p class="scope-note small muted">
-  You look after
-  {% for cls in scope_classes %}<b>{{ cls.title }}</b>{% if not forloop.last %}, {% endif %}{% empty %}no classes this term{% endfor %}.
-  Requests and alerts for other classes go to their own administrators.
-</p>
-{% endif %}
+{% include "dashboards/admintools/_scope.html" %}
 
 {% if pending %}
 <div class="table-wrap"><table class="list stacked">
@@ -84,7 +78,7 @@
     <td><a href="{% url 'admintools_waitlist' cls.pk %}">Waiting list</a></td>
   </tr>
   {% empty %}
-  <tr><td colspan="7" class="muted">No classes in the active term{% if scoped %} are assigned to you{% endif %}.</td></tr>
+  <tr><td colspan="7" class="muted">No classes in the active term{% if not is_super_admin or scope == "mine" %} are assigned to you{% endif %}.</td></tr>
   {% endfor %}
 </table></div>
 {% endblock %}

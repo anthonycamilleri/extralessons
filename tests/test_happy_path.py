@@ -8,13 +8,13 @@ from apps.enrollments.models import Attendance, Enrollment
 from apps.notifications import worker
 from apps.notifications.models import Event, Notification
 
-from .factories import ActivityClassFactory, AdminFactory, ProviderUserFactory
+from .factories import ActivityClassFactory, ProviderUserFactory, SuperAdminFactory
 
 pytestmark = pytest.mark.django_db
 
 
 def test_full_lifecycle(client):
-    admin = AdminFactory()
+    admin = SuperAdminFactory()
     provider_user = ProviderUserFactory()
     cls = ActivityClassFactory(title="Chess Club", capacity=1)
     cls.provider.members.add(provider_user)

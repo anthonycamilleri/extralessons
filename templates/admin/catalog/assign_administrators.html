@@ -3,8 +3,8 @@
 {% block content %}
 <h1>Assign administrators</h1>
 <p>The administrators you pick will look after these classes: they see their requests and
-   waiting lists on the dashboard and receive their alert emails. Admins with no classes of
-   their own remain general administrators and keep seeing everything.</p>
+   waiting lists on the dashboard and receive their alert emails. Super admins (superusers)
+   keep seeing every class regardless.</p>
 <ul>
   {% for cls in classes %}<li>{{ cls }}</li>{% endfor %}
 </ul>

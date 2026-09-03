@@ -214,12 +214,11 @@ class ActivityClassQuerySet(models.QuerySet):
 
         Single source of admin scoping, the counterpart of
         Child.objects.for_guardian(): the dashboard, the alert emails and the
-        Django admin all ask this one question. An admin with classes
-        assigned sees exactly those; an admin with none is a general
-        administrator and sees everything, so a class nobody has claimed
-        still lands on someone's desk.
+        Django admin all ask this one question. A super admin (superuser) is
+        responsible for everything; any other admin only for the classes
+        assigned to them, and for nothing at all until someone assigns one.
         """
-        if not user.managed_classes.exists():
+        if user.is_superuser:
             return self
         return self.filter(administrators=user)
 
@@ -265,9 +264,9 @@ class ActivityClass(models.Model):
         blank=True,
         limit_choices_to={"role": "ADMIN", "is_active": True},
         related_name="managed_classes",
-        help_text="School admins responsible for this class: they alone see its "
-        "requests and receive its alerts. Leave empty to leave it with the "
-        "general administrators (admins with no classes of their own).",
+        help_text="Admins responsible for this class: they see and act on its "
+        "requests and receive its alerts. Super admins (superusers) always see "
+        "every class; a class with nobody assigned alerts them.",
     )
     title = models.CharField(max_length=200)
     slug = models.SlugField(max_length=220)

@@ -11,6 +11,7 @@ from apps.enrollments.models import Enrollment
 from .factories import (
     ActivityClassFactory,
     AdminFactory,
+    SuperAdminFactory,
     ChildFactory,
     UserFactory,
 )
@@ -465,7 +466,7 @@ class TestAdminTools:
         assert client.get(reverse("admintools_requests")).status_code == 403
 
     def test_admin_can_approve_from_queue(self, client):
-        admin = AdminFactory()
+        admin = SuperAdminFactory()
         enrollment = services.register(ChildFactory(), ActivityClassFactory())
         client.force_login(admin)
 
@@ -478,7 +479,7 @@ class TestAdminTools:
         assert enrollment.status == Enrollment.Status.ENROLLED
 
     def test_admin_can_offer_seat_from_waitlist_page(self, client):
-        admin = AdminFactory()
+        admin = SuperAdminFactory()
         cls = ActivityClassFactory(capacity=1)
         enrolled = services.approve_request(services.register(ChildFactory(), cls), admin)
         waitlisted = services.approve_request(services.register(ChildFactory(), cls), admin)

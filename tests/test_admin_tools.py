@@ -9,6 +9,7 @@ from apps.notifications.models import Event, Notification
 from .factories import (
     ActivityClassFactory,
     AdminFactory,
+    SuperAdminFactory,
     ChildFactory,
     TermFactory,
     UserFactory,
@@ -19,7 +20,7 @@ pytestmark = pytest.mark.django_db
 
 class TestAdminBroadcast:
     def test_broadcast_to_all_classes(self, client):
-        admin = AdminFactory()
+        admin = SuperAdminFactory()
         parent = UserFactory()
         cls = ActivityClassFactory()
         services.register(ChildFactory(parent=parent), cls)

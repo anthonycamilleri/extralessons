@@ -26,8 +26,16 @@ class UserFactory(factory.django.DjangoModelFactory):
 
 
 class AdminFactory(UserFactory):
+    """An admin who sees only the classes assigned to them."""
+
     role = User.Role.ADMIN
     is_staff = True
+
+
+class SuperAdminFactory(AdminFactory):
+    """A super admin: sees and acts on every class."""
+
+    is_superuser = True
 
 
 class ProviderUserFactory(UserFactory):

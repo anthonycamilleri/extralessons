@@ -4,7 +4,6 @@ import markdown
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
-from django.db.models import Q
 from django.utils.safestring import mark_safe
 
 from . import defaults
@@ -36,22 +35,25 @@ class UserManager(BaseUserManager):
     def active_admins(self):
         return self.filter(role=User.Role.ADMIN, is_active=True)
 
+    def super_admins(self):
+        return self.active_admins().filter(is_superuser=True)
+
     def responsible_admins(self, activity_class):
         """The admins who look after a class: the mirror image of
         ActivityClass.objects.managed_by(), so an alert only ever reaches
         people who can also act on it from their dashboard.
 
-        That is the class's assigned administrators plus the general
-        administrators (admins with no classes of their own). If that leaves
-        nobody — every admin has a portfolio and this class is in none of
-        them — the alert goes to every admin rather than to no one: an
-        unwanted email is cheaper than a request nobody sees.
+        The class's assigned administrators, when it has any. A class nobody
+        has claimed alerts the super admins instead, so it still lands on a
+        desk; and if there are no super admins either, every admin is told
+        rather than no one: an unwanted email is cheaper than a request nobody
+        sees.
         """
-        admins = self.active_admins()
-        responsible = admins.filter(
-            Q(managed_classes=activity_class) | Q(managed_classes__isnull=True)
-        ).distinct()
-        return responsible if responsible.exists() else admins
+        assigned = self.active_admins().filter(managed_classes=activity_class)
+        if assigned.exists():
+            return assigned
+        supers = self.super_admins()
+        return supers if supers.exists() else self.active_admins()
 
 
 class User(AbstractUser):
@@ -88,10 +90,11 @@ class User(AbstractUser):
         return f"{full_name} <{self.email}>" if full_name else self.email
 
     @property
-    def is_scoped_admin(self):
-        """True for an admin who looks after specific classes rather than all
-        of them (see ActivityClass.objects.managed_by)."""
-        return self.role == self.Role.ADMIN and self.managed_classes.exists()
+    def is_super_admin(self):
+        """An admin who sees every class, not just the ones assigned to them:
+        the superuser flag doubles as the school's "head of admin" switch (see
+        ActivityClass.objects.managed_by)."""
+        return self.role == self.Role.ADMIN and self.is_superuser
 
 
 class ChildQuerySet(models.QuerySet):

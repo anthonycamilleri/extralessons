@@ -27,7 +27,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48).
 - Optional email alerts on new requests and freed seats.
-- Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin with classes assigned sees and is alerted about only those; an admin with none is a general administrator and sees everything. See *Who sees what* under Architecture.
+- Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) sees everything, with an *Only mine / All* switch when they have classes of their own. See *Who sees what* under Architecture.
 - Manage terms, classes, providers, notification templates, and site-wide settings in the Django admin; admin tools dashboard at `/admin-tools/`.
 - Let Claude do the data entry: a built-in MCP server (`manage.py mcp_server`) lets Claude Code or Claude Desktop set up school years, holidays, terms, providers and classes from a conversation — see [Connecting Claude](#connecting-claude-mcp).
 
@@ -125,16 +125,20 @@ use the first, and the admin dashboard shows both side by side.
 more admin accounts (`ActivityClass.administrators`). The rule is one
 question asked in one place, `ActivityClass.objects.managed_by(user)`:
 
-| Admin | Sees on the dashboard, can act on, is emailed about |
-|-------|------------------------------------------------------|
-| Has classes assigned | Only those classes. Other classes' requests 404, the announcement composer offers only their classes, and "all classes" means all of theirs. |
-| Has none assigned | Everything: a general administrator. Unassigned classes land here, so nothing falls through. |
-| Superuser in the Django admin | Everything, whatever the assignments: they hand classes out and must see a class to reassign it. |
+| Account | Sees on the dashboard, can act on |
+|---------|-----------------------------------|
+| Admin | Only the classes assigned to them. Other classes' requests 404, the announcement composer offers only their classes, and "all classes" means all of theirs. Nothing assigned yet means an empty dashboard that says so. |
+| Super admin (admin role + superuser status) | Everything. If they also have classes of their own, the dashboard and the announcement composer get an *Only mine / All* switch, remembered in a cookie; "all classes" in an announcement follows it. They act on any class in either view. |
 
-Alerts are the mirror image (`User.objects.responsible_admins(cls)`): the
-class's administrators plus the general administrators. If that would leave
-nobody, because every admin has a portfolio and the class is in none of them,
-every admin is emailed rather than no one.
+The Django admin follows the same split: non-superuser staff see only their
+classes' rows (classes, sessions, enrolments, attendance); superusers see
+everything, which they must, since they are the ones who hand classes out.
+
+Alerts are the mirror image (`User.objects.responsible_admins(cls)`): a class
+with administrators alerts exactly them, super admins included only if they
+are among them. A class nobody has claimed alerts the super admins, so it
+still lands on a desk; with no super admins at all, every admin is emailed
+rather than no one.
 
 **The school calendar is a default, not a cage.** Holidays live once, on the
 `SchoolYear`, and every term in that year inherits them

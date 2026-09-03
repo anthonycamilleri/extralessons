@@ -14,7 +14,16 @@ class UserAdmin(DjangoUserAdmin):
         (None, {"fields": ("email", "password")}),
         ("Personal info", {"fields": ("first_name", "last_name", "phone_e164")}),
         ("Role & notifications", {"fields": ("role", "notify_email", "notify_whatsapp")}),
-        ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser", "groups")}),
+        (
+            "Permissions",
+            {
+                "fields": ("is_active", "is_staff", "is_superuser", "groups"),
+                "description": "Superuser status makes a school admin a <b>super admin</b>: "
+                "they see and act on every class, and are alerted about classes nobody "
+                "else looks after. Other admins see only the classes assigned to them "
+                "(set on each class, or with the class list's “Assign administrators” action).",
+            },
+        ),
         ("Important dates", {"fields": ("last_login", "date_joined")}),
     )
     add_fieldsets = (

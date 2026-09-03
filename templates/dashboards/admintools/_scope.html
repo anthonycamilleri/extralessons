@@ -1,0 +1,20 @@
+{% comment %}Whose desk this is. A super admin with classes of their own gets the
+   Only mine / All switch; everyone else is told what they look after.{% endcomment %}
+{% if scope %}
+<nav class="scope-toggle chip-row" aria-label="Which classes to show">
+  <a class="chip chip-any" href="?scope=mine"{% if scope == "mine" %} aria-current="true"{% endif %}>Only my classes</a>
+  <a class="chip chip-any" href="?scope=all"{% if scope == "all" %} aria-current="true"{% endif %}>All classes</a>
+</nav>
+{% endif %}
+{% if not is_super_admin %}
+<p class="scope-note small muted">
+  {% if my_classes %}
+    You look after {% for cls in my_classes %}<b>{{ cls.title }}</b>{% if not forloop.last %}, {% endif %}{% endfor %}.
+    Other classes are handled by their own administrators.
+  {% else %}
+    No classes are assigned to you yet — a super admin assigns them from the class list in the Django admin.
+  {% endif %}
+</p>
+{% elif scope == "mine" %}
+<p class="scope-note small muted">Showing only the classes you look after yourself.</p>
+{% endif %}
