@@ -120,6 +120,30 @@ class TestCapacityGuards:
         cls.refresh_from_db()
         assert cls.capacity == 3
 
+    def test_zero_capacity_class_takes_the_waiting_list_only(self):
+        """capacity=0 is legal: parents register, everyone waits for a place."""
+        admin = AdminFactory()
+        cls = ActivityClassFactory(capacity=0)
+
+        enrollment = services.approve_request(
+            services.register(ChildFactory(), cls), admin
+        )
+
+        assert enrollment.status == Enrollment.Status.WAITLISTED
+        assert cls.places_free_now() == 0
+        with pytest.raises(services.EnrollmentError, match="No free seats"):
+            services.offer_seat(enrollment, admin)
+
+    def test_raising_capacity_from_zero_alerts_admins(self):
+        admin = AdminFactory()
+        cls = ActivityClassFactory(capacity=0)
+        services.approve_request(services.register(ChildFactory(), cls), admin)
+
+        cls.capacity = 1
+        cls.save()
+
+        assert Notification.objects.filter(event=Event.ADMIN_SEAT_FREED).exists()
+
     def test_capacity_raise_via_plain_save_alerts_admins(self):
         admin = AdminFactory()
         cls = ActivityClassFactory(capacity=1)

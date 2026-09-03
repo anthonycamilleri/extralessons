@@ -28,6 +28,8 @@
     <li>
       {% if cls.places_free > 0 %}
         <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
+      {% elif cls.capacity == 0 %}
+        <span class="badge badge-warn">Waiting list only — no places released yet</span>
       {% else %}
         <span class="badge badge-warn">Full — join the waiting list</span>
       {% endif %}

@@ -31,6 +31,17 @@ class TestPublicCatalogue:
         assert "5 of 5 places available" in content
         assert "Hidden Draft" not in content
 
+    def test_zero_capacity_class_reads_as_waiting_list_only(self, client):
+        cls = ActivityClassFactory(title="Chess Club", capacity=0)
+
+        catalogue = client.get(reverse("catalogue")).content.decode()
+        detail = client.get(cls.get_absolute_url()).content.decode()
+
+        assert "Waiting list only" in catalogue
+        assert "Full —" not in catalogue
+        assert "Waiting list only" in detail
+        assert "Join the waiting list" in detail
+
     def test_class_detail_shows_description(self, client):
         cls = ActivityClassFactory(description="Learn openings and tactics.")
         response = client.get(cls.get_absolute_url())

@@ -112,6 +112,16 @@ def test_upsert_class_validation_errors(calendar):
         _chess(provider="Nobody")
     with pytest.raises(ValueError, match="HH:MM"):
         _chess(start_time="half three")
+    with pytest.raises(ValueError, match="capacity cannot be negative"):
+        _chess(capacity=-1)
+
+
+def test_upsert_class_accepts_zero_capacity(calendar):
+    """A waiting-list-only class: no places on offer, registrations still open."""
+    created = _chess(capacity=0)
+
+    assert created["capacity"] == 0
+    assert ActivityClass.objects.get(pk=created["id"]).capacity == 0
 
 
 def test_publish_generates_sessions_and_skips_holidays(calendar):

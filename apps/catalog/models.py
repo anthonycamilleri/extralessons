@@ -249,7 +249,12 @@ class ActivityClass(models.Model):
         help_text="Oldest age this class is recommended for. Parents can still "
         "register a child outside the range after confirming a warning.",
     )
-    capacity = models.PositiveSmallIntegerField(default=15)
+    capacity = models.PositiveSmallIntegerField(
+        default=15,
+        help_text="Places offered. Set 0 for a waiting-list-only class: parents "
+        "can still register, but nobody is given a place until the capacity is "
+        "raised.",
+    )
     weekday = models.SmallIntegerField(choices=WEEKDAYS)
     start_time = models.TimeField()
     end_time = models.TimeField()
@@ -271,7 +276,7 @@ class ActivityClass(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["term", "slug"], name="uniq_slug_per_term"),
             models.CheckConstraint(condition=Q(age_max__gte=models.F("age_min")), name="age_range_valid"),
-            models.CheckConstraint(condition=Q(capacity__gte=1), name="capacity_positive"),
+            models.CheckConstraint(condition=Q(capacity__gte=0), name="capacity_not_negative"),
             models.CheckConstraint(
                 condition=Q(end_time__gt=models.F("start_time")), name="class_times_valid"
             ),

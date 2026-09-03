@@ -460,6 +460,8 @@ def upsert_class(
     with the same title apart. Set runs_during_holidays for holiday camps.
     age_min/age_max are a recommendation shown to parents, not a hard limit: a
     parent can register a child outside the range after confirming a warning.
+    A capacity of 0 opens the class for the waiting list only: parents can
+    register, but no place is given out until the capacity is raised.
     Cancelled or archived classes cannot be edited.
     """
     term_obj = _term(term, school_year)
@@ -485,8 +487,8 @@ def upsert_class(
         raise ValueError("end_time must be after start_time.")
     if age_max < age_min:
         raise ValueError("age_max must be at least age_min.")
-    if capacity < 1:
-        raise ValueError("capacity must be at least 1.")
+    if capacity < 0:
+        raise ValueError("capacity cannot be negative.")
 
     # The fields the session calendar is derived from. Compared before the
     # save so the caller can be told when the dates no longer match.
