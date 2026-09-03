@@ -132,7 +132,7 @@ In ZeptoMail (`zeptomail.zoho.eu` for an EU account):
 
 Then in `render.yaml`, in the `extralessons-shared` group, set
 `DEFAULT_FROM_EMAIL` to the verified sender address (currently
-`anthony@knowledgeinnovation.eu`; the agent's *Domain / Sender Address* field
+`info@esljparents.eu`; the agent's *Domain / Sender Address* field
 shows what is allowed). `ZEPTOMAIL_API_URL` defaults to the EU endpoint, which
 matches the `api.zeptomail.eu` host the agent shows; a `.com` account needs
 `https://api.zeptomail.com/v1.1/email`. Commit. Leave the custom domain and

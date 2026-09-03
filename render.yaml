@@ -171,7 +171,7 @@ envVarGroups:
       # Accounts on the EU data centre (zeptomail.zoho.eu) use api.zeptomail.eu;
       # a .com account needs https://api.zeptomail.com/v1.1/email instead.
       - key: DEFAULT_FROM_EMAIL
-        value: School Activities <anthony@knowledgeinnovation.eu>
+        value: ESLJ Parents <info@esljparents.eu>
       - key: ZEPTOMAIL_API_URL
         value: https://api.zeptomail.eu/v1.1/email
       # Optional: a bounce address set up on the Mail Agent.
