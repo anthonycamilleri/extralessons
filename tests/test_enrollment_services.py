@@ -74,13 +74,26 @@ class TestRegister:
         assert second.pk != first.pk
         assert child.enrollments.count() == 2
 
-    def test_age_range_enforced(self):
+    def test_age_range_is_advice_not_a_ban(self):
+        """The range is a recommendation: registration still goes through, and
+        the row carries the mismatch for the school to see on review."""
         child = ChildFactory(
             date_of_birth=timezone.localdate() - datetime.timedelta(days=365 * 3)
         )
         cls = ActivityClassFactory(age_min=5, age_max=8)
-        with pytest.raises(EnrollmentError, match="ages 5–8"):
-            services.register(child, cls)
+
+        enrollment = services.register(child, cls)
+
+        assert enrollment.status == Enrollment.Status.REQUESTED
+        assert enrollment.age_outside_range is not None
+
+    def test_age_within_range_flags_nothing(self):
+        child = ChildFactory(
+            date_of_birth=timezone.localdate() - datetime.timedelta(days=365 * 7)
+        )
+        cls = ActivityClassFactory(age_min=5, age_max=8)
+
+        assert services.register(child, cls).age_outside_range is None
 
     def test_draft_class_not_registrable(self):
         cls = ActivityClassFactory(status="DRAFT")

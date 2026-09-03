@@ -21,7 +21,7 @@
   <ul class="meta-chips">
     <li class="meta-chip meta-chip-day"><span class="ico" aria-hidden="true">📅</span> <b>{{ cls.get_weekday_display }}s</b> {{ cls.start_time|time:"H:i" }}–{{ cls.end_time|time:"H:i" }}</li>
     {% if cls.location %}<li class="meta-chip"><span class="ico" aria-hidden="true">📍</span> {{ cls.location }}</li>{% endif %}
-    <li class="meta-chip"><span class="ico" aria-hidden="true">🎒</span> Ages {{ cls.age_min }}–{{ cls.age_max }}</li>
+    <li class="meta-chip"><span class="ico" aria-hidden="true">🎒</span> Recommended ages {{ cls.age_min }}–{{ cls.age_max }}</li>
     {% with next=cls.next_session_label %}{% if next %}
       <li class="meta-chip"><span class="ico" aria-hidden="true">🗓️</span> {{ next.0 }} <b>{{ next.1|date:"l j F" }}</b></li>
     {% endif %}{% endwith %}

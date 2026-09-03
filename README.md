@@ -5,14 +5,14 @@ A booking system for school extra-curricular activities. The school publishes a 
 ## Features
 
 **Public**
-- Browse the catalogue of published classes for the active term (age range, schedule, provider, seats, first or next class date) without an account.
+- Browse the catalogue of published classes for the active term (recommended age range, schedule, provider, seats, first or next class date) without an account.
 
 **Parents**
 - Self-service signup (can be switched off by the school), add children with their class (P1–P5, S1–S7, English or Slovenian section), date of birth, whether they may go home on their own, and notes for providers.
 - Read the programme's terms and conditions (Markdown, edited in the admin, linked from every page) and confirm them on each registration; the confirmation is stamped on the enrolment.
 - Change their password while logged in without retyping the current one.
 - Multi-guardian support: invite a co-parent by email to share access to a child.
-- Request a place in a class; age and duplicate checks are enforced automatically.
+- Request a place in a class; duplicates are blocked automatically, and a child outside the class's recommended age range gets a "this is recommended for ages X–Y — continue?" step rather than a refusal (the mismatch is flagged to the office on the review queue).
 - Confirm or decline waiting-list offers before they expire; withdraw from a class at any time.
 - Per-user notification preferences (email and/or WhatsApp).
 

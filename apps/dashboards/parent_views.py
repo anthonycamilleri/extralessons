@@ -9,6 +9,7 @@ from apps.accounts.models import Child, Guardian, SiteConfig
 from apps.accounts.permissions import parent_required
 from apps.accounts.redirects import safe_next
 from apps.catalog.models import ActivityClass
+from apps.enrollments import ages
 from apps.enrollments import services as enrollment_services
 from apps.enrollments.models import Attendance, Enrollment
 from apps.enrollments.services import EnrollmentError
@@ -101,6 +102,22 @@ def enroll(request, class_id):
             request, "Please confirm that you have read the terms and conditions."
         )
         return redirect(f"{cls.get_absolute_url()}#register")
+    # The class's age range is advice, not a gate: if the child falls outside
+    # it, say so once and let the parent decide. The tick comes back as
+    # `age_confirmed`, so a direct POST cannot skip the warning by accident.
+    age = ages.outside_recommended_range(cls, child)
+    if age is not None and not request.POST.get("age_confirmed"):
+        return render(
+            request,
+            "dashboards/parent/enroll_age_confirm.html",
+            {
+                "cls": cls,
+                "child": child,
+                "age": age,
+                "terms_accepted": terms_accepted,
+                "places_free": cls.places_free_now(),
+            },
+        )
     try:
         enrollment = enrollment_services.register(child, cls, terms_accepted=terms_accepted)
     except EnrollmentError as exc:

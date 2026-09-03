@@ -240,8 +240,15 @@ class ActivityClass(models.Model):
         blank=True,
         help_text="Cover image shown in the catalogue.",
     )
-    age_min = models.PositiveSmallIntegerField()
-    age_max = models.PositiveSmallIntegerField()
+    # Advice, not a gate: a parent who registers a child outside the range
+    # confirms a warning first, and the office sees the mismatch on review.
+    age_min = models.PositiveSmallIntegerField(
+        help_text="Youngest age this class is recommended for.",
+    )
+    age_max = models.PositiveSmallIntegerField(
+        help_text="Oldest age this class is recommended for. Parents can still "
+        "register a child outside the range after confirming a warning.",
+    )
     capacity = models.PositiveSmallIntegerField(default=15)
     weekday = models.SmallIntegerField(choices=WEEKDAYS)
     start_time = models.TimeField()

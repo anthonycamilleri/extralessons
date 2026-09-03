@@ -92,7 +92,7 @@
         {% if cls.location %}<span class="badge">{{ cls.location }}</span>{% endif %}
       </div>
       <h3><a href="{{ cls.get_absolute_url }}">{{ cls.title }}</a></h3>
-      <div class="meta">{{ cls.provider.name }} · ages {{ cls.age_min }}–{{ cls.age_max }}</div>
+      <div class="meta">{{ cls.provider.name }} · recommended ages {{ cls.age_min }}–{{ cls.age_max }}</div>
       {% with next=cls.next_session_label %}{% if next %}
         <div class="meta next-class">{{ next.0 }}: <b>{{ next.1|date:"D j M" }}</b></div>
       {% endif %}{% endwith %}

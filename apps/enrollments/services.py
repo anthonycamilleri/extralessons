@@ -68,25 +68,14 @@ def _expire_stale_offers_locked(cls):
         )
 
 
-def _age_at(date_of_birth, on_date):
-    years = on_date.year - date_of_birth.year
-    if (on_date.month, on_date.day) < (date_of_birth.month, date_of_birth.day):
-        years -= 1
-    return years
-
-
 def _validate_registration(cls, child):
     if cls.status != ActivityClass.Status.PUBLISHED:
         raise EnrollmentError("This class is not open for registration.")
     if not cls.term.is_active:
         raise EnrollmentError("Registration for this term is closed.")
-    age = _age_at(child.date_of_birth, cls.term.start_date)
-    if not (cls.age_min <= age <= cls.age_max):
-        raise EnrollmentError(
-            f"{child.full_name} is {age} at the start of term; this class is for "
-            f"ages {cls.age_min}–{cls.age_max}. Contact the school if you believe "
-            "an exception applies."
-        )
+    # The age range is deliberately not enforced here: it is a recommendation
+    # the parent confirms past (see apps.enrollments.ages) and the school
+    # weighs when it approves the request.
     if Enrollment.objects.filter(
         child=child, activity_class=cls, status__in=Enrollment.ACTIVE_STATUSES
     ).exists():

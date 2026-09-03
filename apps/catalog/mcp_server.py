@@ -458,6 +458,8 @@ def upsert_class(
     the result says so; call regenerate_sessions, or pass rebuild_sessions,
     when the dates should follow. Pass an explicit slug to keep two classes
     with the same title apart. Set runs_during_holidays for holiday camps.
+    age_min/age_max are a recommendation shown to parents, not a hard limit: a
+    parent can register a child outside the range after confirming a warning.
     Cancelled or archived classes cannot be edited.
     """
     term_obj = _term(term, school_year)

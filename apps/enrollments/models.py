@@ -2,6 +2,8 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
+from .ages import outside_recommended_range
+
 
 class EnrollmentQuerySet(models.QuerySet):
     def waitlist_fifo(self):
@@ -94,6 +96,13 @@ class Enrollment(models.Model):
 
     def __str__(self):
         return f"{self.child} → {self.activity_class} [{self.status}]"
+
+    @property
+    def age_outside_range(self):
+        """The child's age at term start when it sits outside the class's
+        recommended range, else None. The parent confirmed the warning at
+        registration; this is how the school sees it on review."""
+        return outside_recommended_range(self.activity_class, self.child)
 
     def waitlist_position(self):
         """1-based FIFO position among waitlisted enrollments (guidance only)."""

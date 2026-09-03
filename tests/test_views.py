@@ -1,5 +1,8 @@
+import datetime
+
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import SiteConfig
 from apps.enrollments import services
@@ -366,6 +369,34 @@ class TestEnrollmentViews:
 
         response = client.post(
             reverse("enroll", args=[cls.pk]), {"child": child.pk, "terms_accepted": "1"}
+        )
+
+        assert response.status_code == 302
+        assert Enrollment.objects.filter(
+            child=child, activity_class=cls, status=Enrollment.Status.REQUESTED
+        ).exists()
+
+    def test_out_of_range_age_asks_before_registering(self, client):
+        parent = UserFactory()
+        child = ChildFactory(
+            parent=parent, date_of_birth=timezone.localdate() - datetime.timedelta(days=365 * 3)
+        )
+        cls = ActivityClassFactory(title="Chess Club", age_min=6, age_max=10)
+        client.force_login(parent)
+
+        response = client.post(
+            reverse("enroll", args=[cls.pk]), {"child": child.pk, "terms_accepted": "1"}
+        )
+
+        content = response.content.decode()
+        assert response.status_code == 200
+        assert "recommended for ages 6–10" in content
+        assert not Enrollment.objects.filter(child=child).exists()
+
+        # Confirming the warning registers as normal.
+        response = client.post(
+            reverse("enroll", args=[cls.pk]),
+            {"child": child.pk, "terms_accepted": "1", "age_confirmed": "1"},
         )
 
         assert response.status_code == 302

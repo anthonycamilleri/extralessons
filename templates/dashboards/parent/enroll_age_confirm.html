@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Check the age for {{ cls.title }}{% endblock %}
+{% block content %}
+{# Shown only when the child sits outside the class's recommended ages: a
+   warning to read, not a door that is closed. #}
+<h1>Just checking</h1>
+<div class="panel panel-accent">
+  <p>
+    <b>{{ cls.title }}</b> is recommended for ages {{ cls.age_min }}–{{ cls.age_max }}.
+    {{ child.first_name }} is {{ age }} at the start of {{ cls.term.name }}.
+  </p>
+  <p>You can still register {{ child.first_name }} — the school will confirm the place as usual.</p>
+  <form method="post" action="{% url 'enroll' cls.pk %}" class="actions">
+    {% csrf_token %}
+    <input type="hidden" name="child" value="{{ child.pk }}">
+    {% if terms_accepted %}<input type="hidden" name="terms_accepted" value="1">{% endif %}
+    <input type="hidden" name="age_confirmed" value="1">
+    <button type="submit" class="btn btn-cta">
+      {% if places_free > 0 %}Yes, register {{ child.first_name }}{% else %}Yes, join the waiting list{% endif %}
+    </button>
+    <a class="btn btn-secondary" href="{{ cls.get_absolute_url }}#register">Go back</a>
+  </form>
+</div>
+{% endblock %}
