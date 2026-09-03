@@ -4,6 +4,7 @@ import markdown
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+from django.db.models import Q
 from django.utils.safestring import mark_safe
 
 from . import defaults
@@ -31,6 +32,26 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("role", User.Role.ADMIN)
         return self._create_user(email, password, **extra_fields)
+
+    def active_admins(self):
+        return self.filter(role=User.Role.ADMIN, is_active=True)
+
+    def responsible_admins(self, activity_class):
+        """The admins who look after a class: the mirror image of
+        ActivityClass.objects.managed_by(), so an alert only ever reaches
+        people who can also act on it from their dashboard.
+
+        That is the class's assigned administrators plus the general
+        administrators (admins with no classes of their own). If that leaves
+        nobody — every admin has a portfolio and this class is in none of
+        them — the alert goes to every admin rather than to no one: an
+        unwanted email is cheaper than a request nobody sees.
+        """
+        admins = self.active_admins()
+        responsible = admins.filter(
+            Q(managed_classes=activity_class) | Q(managed_classes__isnull=True)
+        ).distinct()
+        return responsible if responsible.exists() else admins
 
 
 class User(AbstractUser):
@@ -65,6 +86,12 @@ class User(AbstractUser):
     def __str__(self):
         full_name = self.get_full_name()
         return f"{full_name} <{self.email}>" if full_name else self.email
+
+    @property
+    def is_scoped_admin(self):
+        """True for an admin who looks after specific classes rather than all
+        of them (see ActivityClass.objects.managed_by)."""
+        return self.role == self.Role.ADMIN and self.managed_classes.exists()
 
 
 class ChildQuerySet(models.QuerySet):

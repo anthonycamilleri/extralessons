@@ -9,6 +9,14 @@
   </div>
 </div>
 
+{% if scoped %}
+<p class="scope-note small muted">
+  You look after
+  {% for cls in scope_classes %}<b>{{ cls.title }}</b>{% if not forloop.last %}, {% endif %}{% empty %}no classes this term{% endfor %}.
+  Requests and alerts for other classes go to their own administrators.
+</p>
+{% endif %}
+
 {% if pending %}
 <div class="table-wrap"><table class="list stacked">
   <tr><th>Requested</th><th>Child</th><th>Guardians</th><th>Class</th><th>Availability</th><th></th></tr>
@@ -52,16 +60,31 @@
 {% endif %}
 
 <h2>Classes this term</h2>
+<p class="small muted">
+  <b>Registrations</b> is every live request (pending, confirmed, offered and waiting);
+  <b>Available</b> is what parents see: places nobody has asked for yet.
+</p>
 <div class="table-wrap"><table class="list stacked">
-  <tr><th>Class</th><th>Enrolled / capacity</th><th>Waiting list</th><th>Pending</th><th></th></tr>
+  <tr><th>Class</th><th>Registrations</th><th>Confirmed</th><th>Available</th><th>Waiting list</th><th>Pending</th><th></th></tr>
   {% for cls in classes %}
   <tr>
-    <td data-label="Class">{{ cls.title }} <div class="muted small">{{ cls.provider.name }} · {{ cls.get_status_display }}</div></td>
-    <td data-label="Enrolled / capacity">{{ cls.enrolled_count }} / {{ cls.capacity }}</td>
+    <td data-label="Class">{{ cls.title }}
+      <div class="muted small">{{ cls.provider.name }} · {{ cls.get_status_display }}</div>
+      {% with admins=cls.administrators.all %}{% if admins %}
+        <div class="muted small">Looked after by {% for a in admins %}{{ a.get_full_name|default:a.email }}{% if not forloop.last %}, {% endif %}{% endfor %}</div>
+      {% endif %}{% endwith %}</td>
+    <td data-label="Registrations"><b>{{ cls.registrations_count }}</b></td>
+    <td data-label="Confirmed">{{ cls.confirmed_count }} / {{ cls.capacity }}
+      {% if cls.offered_count %}<div class="muted small">+{{ cls.offered_count }} offered</div>{% endif %}</td>
+    <td data-label="Available">
+      {% if cls.places_available > 0 %}<span class="badge badge-ok">{{ cls.places_available }}</span>
+      {% else %}<span class="badge badge-warn">0</span>{% endif %}</td>
     <td data-label="Waiting list">{{ cls.waitlist_count }}</td>
-    <td data-label="Pending">{{ cls.requested_count }}</td>
+    <td data-label="Pending">{% if cls.requested_count %}<b>{{ cls.requested_count }}</b>{% else %}0{% endif %}</td>
     <td><a href="{% url 'admintools_waitlist' cls.pk %}">Waiting list</a></td>
   </tr>
+  {% empty %}
+  <tr><td colspan="7" class="muted">No classes in the active term{% if scoped %} are assigned to you{% endif %}.</td></tr>
   {% endfor %}
 </table></div>
 {% endblock %}

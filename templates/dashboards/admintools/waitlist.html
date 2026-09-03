@@ -3,6 +3,7 @@
 {% block content %}
 <h1>{{ cls.title }} <span class="muted">— waiting list</span></h1>
 <p>
+  <span class="badge">{{ cls.registrations_count }} registration{{ cls.registrations_count|pluralize }}</span>
   <span class="badge">{{ cls.enrolled_count }} / {{ cls.capacity }} seats taken (incl. outstanding offers)</span>
   {% if seats_free > 0 %}
     <span class="badge badge-ok">{{ seats_free }} seat{{ seats_free|pluralize }} free to offer</span>

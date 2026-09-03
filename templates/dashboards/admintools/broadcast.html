@@ -4,7 +4,8 @@
 <h1>Send an announcement</h1>
 <div class="panel">
   <p class="muted small">Delivered by email (and WhatsApp where parents opted in) to every guardian
-     of children with an active registration in the chosen classes — including waiting lists.</p>
+     of children with an active registration in the chosen classes — including waiting lists.
+     {% if scoped %}You can only write to the families of the classes you look after.{% endif %}</p>
   <form method="post">
     {% csrf_token %}
     {{ form.as_p }}

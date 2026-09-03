@@ -1,10 +1,13 @@
 from django.contrib import admin, messages
 
+from apps.catalog.admin import ScopedByClassMixin
+
 from .models import Attendance, Enrollment
 
 
 @admin.register(Enrollment)
-class EnrollmentAdmin(admin.ModelAdmin):
+class EnrollmentAdmin(ScopedByClassMixin, admin.ModelAdmin):
+    class_lookup = "activity_class"
     list_display = ["child", "activity_class", "status", "created_at", "cancel_reason"]
     list_filter = ["status", "activity_class__term", "activity_class"]
     search_fields = ["child__first_name", "child__last_name", "activity_class__title"]
@@ -44,6 +47,7 @@ class EnrollmentAdmin(admin.ModelAdmin):
 
 
 @admin.register(Attendance)
-class AttendanceAdmin(admin.ModelAdmin):
+class AttendanceAdmin(ScopedByClassMixin, admin.ModelAdmin):
+    class_lookup = "session__activity_class"
     list_display = ["session", "child", "present", "marked_by", "marked_at"]
     list_filter = ["present", "session__activity_class"]

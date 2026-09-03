@@ -167,28 +167,61 @@ class Term(models.Model):
 
 class ActivityClassQuerySet(models.QuerySet):
     def with_counts(self):
+        """Annotate the enrolment numbers every dashboard and the catalogue use.
+
+        Two different questions are answered here, and they must not be mixed:
+
+        * ``places_free`` is the *approval* number: capacity minus the seats
+          actually held (enrolled children plus unexpired offers, the same
+          rule as services._seats_taken). It decides whether approving a
+          request enrols or waitlists, and how many offers can go out.
+        * ``places_available`` is the *parent-facing* number: capacity minus
+          every live registration, pending requests and the waiting list
+          included. A class with ten places and ten requests awaiting review
+          is shown to the next family as full, rather than tempting them with
+          places that are already spoken for.
+
+        Every Count is DISTINCT so that chaining another multi-valued
+        annotation (with_next_session joins the sessions table) cannot
+        multiply the enrolment rows.
+        """
         from apps.enrollments.models import Enrollment
 
-        # Same seat semantics as services._seats_taken: enrolled children plus
-        # unexpired offers hold a seat; expired offers don't.
+        S = Enrollment.Status
+        live_offer = Q(enrollments__status=S.OFFERED, enrollments__offer_expires_at__gte=Now())
+
+        def count(condition):
+            return Count("enrollments", filter=condition, distinct=True)
+
         return self.annotate(
-            enrolled_count=Count(
-                "enrollments",
-                filter=Q(enrollments__status=Enrollment.Status.ENROLLED)
-                | Q(
-                    enrollments__status=Enrollment.Status.OFFERED,
-                    enrollments__offer_expires_at__gte=Now(),
-                ),
-            ),
-            waitlist_count=Count(
-                "enrollments", filter=Q(enrollments__status=Enrollment.Status.WAITLISTED)
-            ),
-            requested_count=Count(
-                "enrollments", filter=Q(enrollments__status=Enrollment.Status.REQUESTED)
+            confirmed_count=count(Q(enrollments__status=S.ENROLLED)),
+            offered_count=count(live_offer),
+            # Seats held, the same rule as services._seats_taken: enrolled
+            # children plus unexpired offers; expired offers hold nothing.
+            enrolled_count=count(Q(enrollments__status=S.ENROLLED) | live_offer),
+            waitlist_count=count(Q(enrollments__status=S.WAITLISTED)),
+            requested_count=count(Q(enrollments__status=S.REQUESTED)),
+            registrations_count=count(
+                Q(enrollments__status__in=[S.REQUESTED, S.ENROLLED, S.WAITLISTED]) | live_offer
             ),
         ).annotate(
-            places_free=Greatest(F("capacity") - F("enrolled_count"), Value(0))
+            places_free=Greatest(F("capacity") - F("enrolled_count"), Value(0)),
+            places_available=Greatest(F("capacity") - F("registrations_count"), Value(0)),
         )
+
+    def managed_by(self, user):
+        """The classes an administrator is responsible for.
+
+        Single source of admin scoping, the counterpart of
+        Child.objects.for_guardian(): the dashboard, the alert emails and the
+        Django admin all ask this one question. An admin with classes
+        assigned sees exactly those; an admin with none is a general
+        administrator and sees everything, so a class nobody has claimed
+        still lands on someone's desk.
+        """
+        if not user.managed_classes.exists():
+            return self
+        return self.filter(administrators=user)
 
     def published(self):
         return self.filter(status=ActivityClass.Status.PUBLISHED, term__is_active=True)
@@ -227,6 +260,15 @@ class ActivityClass(models.Model):
 
     provider = models.ForeignKey(Provider, on_delete=models.PROTECT, related_name="classes")
     term = models.ForeignKey(Term, on_delete=models.PROTECT, related_name="classes")
+    administrators = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        limit_choices_to={"role": "ADMIN", "is_active": True},
+        related_name="managed_classes",
+        help_text="School admins responsible for this class: they alone see its "
+        "requests and receive its alerts. Leave empty to leave it with the "
+        "general administrators (admins with no classes of their own).",
+    )
     title = models.CharField(max_length=200)
     slug = models.SlugField(max_length=220)
     description = models.TextField(help_text="Shown on the public catalogue page.")
@@ -349,10 +391,20 @@ class ActivityClass(models.Model):
         return self.term.holidays()
 
     def places_free_now(self):
-        """Free seats for a single instance (querysets: use with_counts())."""
+        """Seats free to fill for a single instance (querysets: with_counts()).
+
+        The approval number: see ActivityClassQuerySet.with_counts.
+        """
         from apps.enrollments.services import _seats_taken
 
         return max(0, self.capacity - _seats_taken(self))
+
+    def places_available_now(self):
+        """Places not yet asked for, for a single instance: the parent-facing
+        number, capacity minus every live registration."""
+        from apps.enrollments.services import _registrations
+
+        return max(0, self.capacity - _registrations(self))
 
 
 class ClassSession(models.Model):

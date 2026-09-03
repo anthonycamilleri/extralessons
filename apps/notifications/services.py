@@ -198,7 +198,11 @@ def queue_event(event, enrollment, **extra_context):
 
 
 def queue_admin_event(event, enrollment, **extra_context):
-    """Email school admins about workflow events, honoring SiteConfig toggles."""
+    """Email the admins responsible for the class about a workflow event.
+
+    Honours the SiteConfig toggles, and the class's administrators: an admin
+    who looks after specific classes hears only about those (see
+    User.objects.responsible_admins)."""
     config = SiteConfig.get()
     if event == Event.ADMIN_NEW_REQUEST and not config.notify_admins_new_request:
         return
@@ -223,7 +227,7 @@ def queue_admin_event(event, enrollment, **extra_context):
     rows = [
         # Admin alerts are email-only: WhatsApp templates target parents.
         _email_row(template, context, recipient=admin, event=event, enrollment=enrollment)
-        for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True)
+        for admin in User.objects.responsible_admins(enrollment.activity_class)
     ]
     Notification.objects.bulk_create(rows)
     schedule_delivery()

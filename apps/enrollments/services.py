@@ -43,6 +43,23 @@ def _seats_taken(cls):
     ).count()
 
 
+def _registrations(cls):
+    """Live registrations: every family that has asked for a place and not
+    been told no — pending requests, enrolled children, the waiting list and
+    unexpired offers. The parent-facing "places available" counts against
+    this, so a class cannot look open while its places are spoken for."""
+    return cls.enrollments.filter(
+        Q(
+            status__in=[
+                Enrollment.Status.REQUESTED,
+                Enrollment.Status.ENROLLED,
+                Enrollment.Status.WAITLISTED,
+            ]
+        )
+        | Q(status=Enrollment.Status.OFFERED, offer_expires_at__gte=timezone.now())
+    ).count()
+
+
 def _require_open(cls):
     """Admission transitions are only valid into a published, active class."""
     if cls.status != ActivityClass.Status.PUBLISHED or not cls.term.is_active:

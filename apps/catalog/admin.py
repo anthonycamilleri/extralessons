@@ -5,6 +5,8 @@ from django.contrib import admin, messages
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
+from apps.accounts.models import User
+
 from .models import (
     ActivityClass,
     ClassSession,
@@ -128,6 +130,45 @@ class TermAdmin(admin.ModelAdmin):
     list_filter = ["is_active", "school_year"]
 
 
+class ScopedByClassMixin:
+    """Show a non-superuser admin only the rows of the classes they look after.
+
+    `class_lookup` is the ORM path from the model to its ActivityClass ("" for
+    ActivityClass itself). Superusers always see everything: they are the ones
+    who hand classes out, and must be able to see a class to reassign it.
+    """
+
+    class_lookup = ""
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        scope = ActivityClass.objects.managed_by(request.user)
+        lookup = f"{self.class_lookup}__in" if self.class_lookup else "pk__in"
+        return qs.filter(**{lookup: scope})
+
+
+class AssignAdministratorsForm(forms.Form):
+    administrators = forms.ModelMultipleChoiceField(
+        queryset=User.objects.none(),
+        widget=forms.CheckboxSelectMultiple,
+        label="Administrators",
+    )
+    replace = forms.BooleanField(
+        required=False,
+        label="Replace the current administrators",
+        help_text="Unticked, the people chosen above are added to whoever already "
+        "looks after each class.",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["administrators"].queryset = User.objects.active_admins().order_by(
+            "first_name", "last_name", "email"
+        )
+
+
 class CloneIntoTermForm(forms.Form):
     target_term = forms.ModelChoiceField(
         queryset=Term.objects.all(), label="Copy the selected classes into term"
@@ -159,7 +200,7 @@ class ActivityClassForm(forms.ModelForm):
 
 
 @admin.register(ActivityClass)
-class ActivityClassAdmin(admin.ModelAdmin):
+class ActivityClassAdmin(ScopedByClassMixin, admin.ModelAdmin):
     list_display = [
         "title",
         "term",
@@ -167,19 +208,60 @@ class ActivityClassAdmin(admin.ModelAdmin):
         "schedule_display",
         "capacity",
         "status",
+        "administrator_list",
     ]
-    list_filter = ["term", "status", "provider", "runs_during_holidays"]
-    search_fields = ["title", "provider__name"]
+    list_filter = ["term", "status", "provider", "administrators", "runs_during_holidays"]
+    search_fields = ["title", "provider__name", "administrators__email"]
     prepopulated_fields = {"slug": ["title"]}
+    filter_horizontal = ["administrators"]
     inlines = [ClassSessionInline]
     form = ActivityClassForm
     actions = [
         "publish_classes",
         "regenerate_sessions",
+        "assign_administrators",
         "clone_into_term",
         "cancel_classes",
         "archive_classes",
     ]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("administrators")
+
+    @admin.display(description="administrators")
+    def administrator_list(self, obj):
+        names = [admin.get_full_name() or admin.email for admin in obj.administrators.all()]
+        return ", ".join(names) or "—"
+
+    @admin.action(description="Assign administrators…")
+    def assign_administrators(self, request, queryset):
+        """Hand a batch of classes to one or more admins in one go.
+
+        Assigning forty classes one edit form at a time is what would stop
+        anyone from using the feature; this is the bulk path.
+        """
+        if "apply" in request.POST:
+            form = AssignAdministratorsForm(request.POST)
+            if form.is_valid():
+                admins = form.cleaned_data["administrators"]
+                for cls in queryset:
+                    if form.cleaned_data["replace"]:
+                        cls.administrators.set(admins)
+                    else:
+                        cls.administrators.add(*admins)
+                names = ", ".join(a.get_full_name() or a.email for a in admins)
+                self.message_user(
+                    request,
+                    f"{queryset.count()} class(es) now looked after by {names}.",
+                )
+                return redirect(reverse("admin:catalog_activityclass_changelist"))
+        else:
+            form = AssignAdministratorsForm()
+        return render(
+            request,
+            "admin/catalog/assign_administrators.html",
+            {"classes": queryset, "form": form, "title": "Assign administrators"},
+        )
 
     def get_readonly_fields(self, request, obj=None):
         # Lifecycle changes must go through the actions (publish, cancel,
@@ -275,7 +357,8 @@ class ActivityClassAdmin(admin.ModelAdmin):
 
 
 @admin.register(ClassSession)
-class ClassSessionAdmin(admin.ModelAdmin):
+class ClassSessionAdmin(ScopedByClassMixin, admin.ModelAdmin):
+    class_lookup = "activity_class"
     list_display = ["activity_class", "date", "cancelled", "holiday_override"]
     list_filter = ["activity_class__term", "cancelled", "holiday_override"]
     date_hierarchy = "date"

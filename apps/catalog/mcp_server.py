@@ -245,10 +245,16 @@ def _class_dict(cls, counts=True):
     if counts:
         # Annotated by _annotated_classes().
         data.update(
+            # Seats held (confirmed + live offers) and what that leaves to fill.
             enrolled_count=cls.enrolled_count,
+            confirmed_count=cls.confirmed_count,
+            offered_count=cls.offered_count,
             waitlist_count=cls.waitlist_count,
             requested_count=cls.requested_count,
             places_free=cls.places_free,
+            # Every live registration, and what parents see as still available.
+            registrations_count=cls.registrations_count,
+            places_available=cls.places_available,
             session_count=cls.session_count,
         )
     return data

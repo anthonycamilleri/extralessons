@@ -26,8 +26,8 @@
       <li class="meta-chip"><span class="ico" aria-hidden="true">🗓️</span> {{ next.0 }} <b>{{ next.1|date:"l j F" }}</b></li>
     {% endif %}{% endwith %}
     <li>
-      {% if cls.places_free > 0 %}
-        <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
+      {% if cls.places_available > 0 %}
+        <span class="badge badge-ok">{{ cls.places_available }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
       {% elif cls.capacity == 0 %}
         <span class="badge badge-warn">Waiting list only — no places released yet</span>
       {% else %}
@@ -38,7 +38,7 @@
 
   <p class="sticky-cta">
     <a class="btn btn-cta" href="#register">
-      {% if cls.places_free > 0 %}Register for this activity{% else %}Join the waiting list{% endif %}
+      {% if cls.places_available > 0 %}Register for this activity{% else %}Join the waiting list{% endif %}
     </a>
   </p>
 
@@ -82,7 +82,7 @@
           </p>
           {% endif %}
           <button type="submit" class="btn btn-cta">
-            {% if cls.places_free > 0 %}Request a place{% else %}Join the waiting list{% endif %}
+            {% if cls.places_available > 0 %}Request a place{% else %}Join the waiting list{% endif %}
           </button>
           <p class="small muted">Places are confirmed by the PTA — you'll hear from us by email.</p>
         </form>
@@ -95,7 +95,7 @@
       <p class="muted small">Only parent accounts can register children.</p>
     {% else %}
       {# Anonymous: both doors lead back to this register card via ?next=. #}
-      <p>To {% if cls.places_free > 0 %}register{% else %}join the waiting list{% endif %}, log in or create a parent account. You'll come straight back here.</p>
+      <p>To {% if cls.places_available > 0 %}register{% else %}join the waiting list{% endif %}, log in or create a parent account. You'll come straight back here.</p>
       <p class="auth-choice">
         <a class="btn btn-cta" href="{% url 'login' %}?next={{ request.path|urlencode }}%23register">Log in to register</a>
         {% if site_config.signup_open %}

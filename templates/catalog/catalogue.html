@@ -99,8 +99,8 @@
       <p class="small">{{ cls.description|truncatewords:22 }}</p>
       <div class="spacer"></div>
       <div class="card-foot">
-        {% if cls.places_free > 0 %}
-          <span class="badge badge-ok">{{ cls.places_free }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
+        {% if cls.places_available > 0 %}
+          <span class="badge badge-ok">{{ cls.places_available }} of {{ cls.capacity }} place{{ cls.capacity|pluralize }} available</span>
         {% elif cls.capacity == 0 %}
           <span class="badge badge-warn">Waiting list only{% if cls.waitlist_count %} ({{ cls.waitlist_count }}){% endif %}</span>
         {% else %}
@@ -109,7 +109,7 @@
         {% comment %}Always present, logged in or not: the class page's register
            card knows what to do next (the form, or the log-in / sign-up choice).{% endcomment %}
         <a class="btn btn-small btn-cta card-cta" href="{{ cls.get_absolute_url }}#register">
-          {% if cls.places_free > 0 %}Register{% else %}Join waiting list{% endif %}
+          {% if cls.places_available > 0 %}Register{% else %}Join waiting list{% endif %}
         </a>
       </div>
     </div>

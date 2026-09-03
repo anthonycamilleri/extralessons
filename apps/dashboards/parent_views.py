@@ -115,7 +115,7 @@ def enroll(request, class_id):
                 "child": child,
                 "age": age,
                 "terms_accepted": terms_accepted,
-                "places_free": cls.places_free_now(),
+                "places_free": cls.places_available_now(),
             },
         )
     try:

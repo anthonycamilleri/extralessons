@@ -24,9 +24,10 @@ A booking system for school extra-curricular activities. The school publishes a 
 
 **School admin**
 - Set up the school year once — term dates plus every holiday period — and every class generated in it skips those days automatically.
-- Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists).
+- Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48).
 - Optional email alerts on new requests and freed seats.
+- Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin with classes assigned sees and is alerted about only those; an admin with none is a general administrator and sees everything. See *Who sees what* under Architecture.
 - Manage terms, classes, providers, notification templates, and site-wide settings in the Django admin; admin tools dashboard at `/admin-tools/`.
 - Let Claude do the data entry: a built-in MCP server (`manage.py mcp_server`) lets Claude Code or Claude Desktop set up school years, holidays, terms, providers and classes from a conversation — see [Connecting Claude](#connecting-claude-mcp).
 
@@ -107,6 +108,33 @@ any active state ── withdrawal / admin cancel / class cancelled ──► CA
 
 `ENROLLED` and `OFFERED` hold a seat; an offer reserves the seat until
 confirmed, declined, or expired.
+
+**Two ways of counting places.** `ActivityClassQuerySet.with_counts()` answers
+two different questions and keeps them apart. `places_free` is the *approval*
+number: capacity minus the seats actually held (enrolled children plus
+unexpired offers). It decides whether approving a request enrols or waitlists,
+and how many offers can go out. `places_available` is the *parent-facing*
+number: capacity minus every live registration, pending requests and the
+waiting list included, so a class with ten places and ten requests awaiting
+review is shown to the next family as full rather than tempting them with
+places already spoken for. The catalogue, the class page and the "join the
+waiting list?" step use the second; the review queue and the waiting-list page
+use the first, and the admin dashboard shows both side by side.
+
+**Who sees what (class administrators).** A class can be assigned to one or
+more admin accounts (`ActivityClass.administrators`). The rule is one
+question asked in one place, `ActivityClass.objects.managed_by(user)`:
+
+| Admin | Sees on the dashboard, can act on, is emailed about |
+|-------|------------------------------------------------------|
+| Has classes assigned | Only those classes. Other classes' requests 404, the announcement composer offers only their classes, and "all classes" means all of theirs. |
+| Has none assigned | Everything: a general administrator. Unassigned classes land here, so nothing falls through. |
+| Superuser in the Django admin | Everything, whatever the assignments: they hand classes out and must see a class to reassign it. |
+
+Alerts are the mirror image (`User.objects.responsible_admins(cls)`): the
+class's administrators plus the general administrators. If that would leave
+nobody, because every admin has a portfolio and the class is in none of them,
+every admin is emailed rather than no one.
 
 **The school calendar is a default, not a cage.** Holidays live once, on the
 `SchoolYear`, and every term in that year inherits them
@@ -298,7 +326,7 @@ once you have looked them over.
 | Tool | Does |
 | --- | --- |
 | `get_overview` | School name and settings, school years with holidays, terms, providers, class counts by status. Claude calls this first. |
-| `list_classes(term?, status?)` | Classes with `enrolled_count`, `waitlist_count`, `requested_count`, `places_free`, `session_count` and their numeric ids. |
+| `list_classes(term?, status?)` | Classes with their numeric ids and counts: `registrations_count` and `places_available` (what parents see), `confirmed_count`, `offered_count`, `enrolled_count` (seats held), `waitlist_count`, `requested_count`, `places_free` (seats the office can still fill), `session_count`. |
 | `get_class(class_id)` | One class in full: description, practical details, session dates, skipped holidays. |
 | `upsert_school_year(name, start_date, end_date)` | Create or update by name. |
 | `upsert_holiday(school_year, name, start_date, end_date)` | Inclusive dates; existing calendars are re-reconciled immediately. |
