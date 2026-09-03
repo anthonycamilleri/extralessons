@@ -201,7 +201,10 @@ class SiteConfig(models.Model):
         help_text="Who signs the emails parents receive, e.g. “European School PTA”.",
     )
     contact_email = models.EmailField(
-        blank=True, help_text="Shown to parents as the school contact address."
+        blank=True,
+        default=defaults.CONTACT_EMAIL,
+        help_text="Shown to parents as the school contact address, and where the "
+        "public contact form delivers. Empty hides the contact form.",
     )
     catalogue_intro = models.TextField(
         blank=True,

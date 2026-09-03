@@ -351,6 +351,10 @@ form p:has(> input[type=checkbox]) { flex-wrap: wrap; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .auth-box { max-width: 26rem; margin: 2rem auto; }
 .auth-box h1 { text-align: center; }
+/* Same centred card as the login box, but wide enough to write a message in:
+   the global 28rem cap on fields would leave the card half empty. */
+.form-page { max-width: 38rem; margin: 1.5rem auto; }
+.form-page input, .form-page select, .form-page textarea { max-width: 100%; }
 .stack { display: flex; flex-direction: column; gap: 1rem; }
 
 /* --- Page hero ---------------------------------------------------------- */

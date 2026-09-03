@@ -20,6 +20,7 @@ class Event(models.TextChoices):
     ADMIN_NEW_REQUEST = "ADMIN_NEW_REQUEST", "Admin: new enrollment request"
     ADMIN_SEAT_FREED = "ADMIN_SEAT_FREED", "Admin: seat freed"
     ADMIN_OFFER_LAPSED = "ADMIN_OFFER_LAPSED", "Admin: offer declined/expired"
+    CONTACT_MESSAGE = "CONTACT_MESSAGE", "Admin: message from the contact form"
 
 
 class NotificationTemplate(models.Model):
@@ -104,6 +105,11 @@ class Notification(models.Model):
     # change where a pending message goes.
     recipient_email = models.EmailField(blank=True)
     recipient_phone = models.CharField(max_length=20, blank=True)
+    reply_to = models.EmailField(
+        blank=True,
+        help_text="Reply-To for this email, when replies should not come back to "
+        "the sending address (contact-form messages reply to the writer).",
+    )
     channel = models.CharField(max_length=10, choices=Channel.choices)
     event = models.CharField(max_length=30, choices=Event.choices)
     enrollment = models.ForeignKey(

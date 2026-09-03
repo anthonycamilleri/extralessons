@@ -15,10 +15,25 @@ pytestmark = pytest.mark.django_db
 
 OLD = importlib.import_module("apps.notifications.migrations.0002_default_templates")
 NEW = importlib.import_module("apps.notifications.migrations.0005_friendly_templates")
+# Events introduced after the rewording seed their own default, in the
+# migration that added them.
+LATER = {
+    importlib.import_module(
+        "apps.notifications.migrations.0006_contact_form_messages"
+    ).EVENT,
+}
+
+
+def test_every_event_has_a_default_template_row():
+    """Whatever seeded it, no event may reach production without a template:
+    queueing one silently produces nothing at all."""
+    assert {row.event for row in NotificationTemplate.objects.all()} == {
+        e.value for e in Event
+    }
 
 
 def test_every_event_has_a_reworded_default():
-    assert set(NEW.TEMPLATES) == set(OLD.TEMPLATES) == {e.value for e in Event}
+    assert set(NEW.TEMPLATES) == set(OLD.TEMPLATES) == {e.value for e in Event} - LATER
     for event, (subject, body) in NEW.TEMPLATES.items():
         assert "Dear " not in body, event
         if not event.startswith("ADMIN_"):

@@ -1,10 +1,14 @@
 from urllib.parse import urlencode
 
+from django.contrib import messages
+from django.core.cache import cache
 from django.http import Http404, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.models import Child, SiteConfig, User
+from apps.notifications import services as notification_services
 
+from .forms import ContactForm
 from .models import ActivityClass
 
 FILTER_KEYS = ("day", "location", "age")
@@ -149,3 +153,74 @@ def terms(request):
     if not config.has_terms:
         raise Http404("No terms and conditions have been published.")
     return render(request, "catalog/terms.html", {"terms_html": config.terms_html})
+
+
+# Best-effort flood protection: enough to stop a bot hammering the form, not a
+# security control (the cache is per process, and an IP is not an identity).
+# The honeypot in ContactForm catches the ordinary drive-by spammer.
+CONTACT_MAX_PER_HOUR = 5
+CONTACT_WINDOW_SECONDS = 60 * 60
+
+
+def _client_ip(request):
+    """Best guess at the caller's address, trusting the platform's proxy.
+
+    Render terminates TLS and forwards the client address in
+    X-Forwarded-For; the leftmost entry is the one it appended.
+    """
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _contact_flooding(request):
+    """True when this caller has already sent its hourly allowance."""
+    key = f"contact_form:{_client_ip(request)}"
+    sent = cache.get(key, 0)
+    if sent >= CONTACT_MAX_PER_HOUR:
+        return True
+    # set() rather than incr(): incr needs the key to exist, and a first
+    # message and a fifth should cost the same one round trip.
+    cache.set(key, sent + 1, CONTACT_WINDOW_SECONDS)
+    return False
+
+
+def contact(request):
+    """Public contact form; messages go to SiteConfig.contact_email.
+
+    A public page rather than a mailto: link, so a parent without a mail
+    client set up can still reach the office, and so the message lands in the
+    outbox with a delivery record instead of in someone's drafts.
+    """
+    config = SiteConfig.get()
+    if not config.contact_email:
+        raise Http404("No contact address has been configured.")
+
+    initial = {}
+    if request.user.is_authenticated:
+        initial = {
+            "name": request.user.get_full_name() or "",
+            "email": request.user.email,
+        }
+    form = ContactForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        if form.looks_automated or _contact_flooding(request):
+            # Same thank-you either way: a bot gets no signal, and a parent
+            # who double-clicked is not told off for a message we did send.
+            messages.success(request, "Thanks — your message is on its way.")
+            return redirect("contact")
+        notification_services.queue_contact_message(
+            name=form.cleaned_data["name"],
+            email=form.cleaned_data["email"],
+            subject=form.cleaned_data["subject"],
+            message=form.cleaned_data["message"],
+            submitted_by=request.user.email if request.user.is_authenticated else "",
+        )
+        messages.success(
+            request,
+            "Thanks — your message is on its way. We'll reply to "
+            f"{form.cleaned_data['email']} as soon as we can.",
+        )
+        return redirect("contact")
+    return render(request, "catalog/contact.html", {"form": form, "config": config})

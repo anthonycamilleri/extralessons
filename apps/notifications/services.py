@@ -229,6 +229,42 @@ def queue_admin_event(event, enrollment, **extra_context):
     schedule_delivery()
 
 
+def queue_contact_message(*, name, email, subject, message, submitted_by=""):
+    """Public contact form -> the school's inbox, through the same outbox.
+
+    Deliberately not a plain send_mail: a message a parent typed is worth the
+    outbox's retries and its record in the admin, so a ZeptoMail wobble cannot
+    swallow an enquiry.
+
+    Nothing the writer typed decides where the mail goes. The recipient is
+    always the configured contact address and the From stays the site's own
+    verified sender; the writer's address rides as Reply-To, so the form can
+    never be used to send mail that appears to come from the school. Returns
+    the queued Notification, or None when no contact address is configured.
+    """
+    config = SiteConfig.get()
+    if not config.contact_email:
+        return None
+    template = _get_template(Event.CONTACT_MESSAGE)
+    if template is None:
+        return None
+    context = base_context(
+        from_name=name,
+        from_email=email,
+        submitted_by=submitted_by,
+        subject=subject,
+        body=message,
+        action_url=_absolute(reverse("contact")),
+    )
+    row = _email_row(
+        template, context, email=config.contact_email, event=Event.CONTACT_MESSAGE
+    )
+    row.reply_to = email
+    row.save()
+    schedule_delivery()
+    return row
+
+
 def queue_guardian_invite(invite):
     """Invite email to an address that may not have an account yet."""
     template = _get_template(Event.GUARDIAN_INVITE)

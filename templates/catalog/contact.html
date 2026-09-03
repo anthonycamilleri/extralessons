@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Contact us{% endblock %}
+{% block description %}Get in touch with the {{ site_config.sender_name }} about the extra-curricular activities programme.{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'catalogue' %}">← All activities</a>
+<div class="form-page panel">
+  <h1>Get in touch</h1>
+  <p class="muted small">
+    We're parent volunteers, so replies take a little time — usually a couple of
+    days. For anything about a class in progress, the provider is often quicker.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn btn-cta">Send message</button>
+  </form>
+  <p class="small muted">
+    Your message goes to <a href="mailto:{{ config.contact_email }}">{{ config.contact_email }}</a>
+    and we'll reply to the address you give us. Registering, cancelling or joining
+    a waiting list is quicker on the <a href="{% url 'catalogue' %}">activity's own page</a>
+    than by email.
+  </p>
+</div>
+{% endblock %}

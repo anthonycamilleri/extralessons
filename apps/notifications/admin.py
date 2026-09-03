@@ -21,7 +21,9 @@ class BroadcastAdmin(admin.ModelAdmin):
 class NotificationAdmin(admin.ModelAdmin):
     list_display = ["created_at", "event", "recipient", "channel", "status", "attempts"]
     list_filter = ["status", "channel", "event"]
-    search_fields = ["recipient__email"]
+    # recipient is empty for address-only sends (invites, contact-form
+    # messages), so the address snapshots have to be searchable too.
+    search_fields = ["recipient__email", "recipient_email", "reply_to"]
     readonly_fields = [f.name for f in Notification._meta.fields]
     actions = ["retry_failed"]
 

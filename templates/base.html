@@ -26,6 +26,7 @@
     <div class="nav-links">
       <a href="{% url 'catalogue' %}"{% if request.resolver_match.url_name == "catalogue" %} aria-current="page"{% endif %}>Catalogue</a>
       {% if site_config.has_terms %}<a href="{% url 'terms' %}"{% if request.resolver_match.url_name == "terms" %} aria-current="page"{% endif %}>T&amp;Cs</a>{% endif %}
+      {% if site_config.contact_email %}<a href="{% url 'contact' %}"{% if request.resolver_match.url_name == "contact" %} aria-current="page"{% endif %}>Contact</a>{% endif %}
       {% if user.is_authenticated %}
         {% if user.role == "PARENT" %}
           <a href="{% url 'parent_home' %}">My family</a>
@@ -66,7 +67,7 @@
     <div>
       <strong>{{ site_config.school_name }}</strong>
       {% if site_config.contact_email %}
-        · <a href="mailto:{{ site_config.contact_email }}">{{ site_config.contact_email }}</a>
+        · <a href="{% url 'contact' %}">Contact us</a>
       {% endif %}
       {% if site_config.has_terms %}
         · <a href="{% url 'terms' %}">Terms &amp; conditions</a>

@@ -28,4 +28,11 @@ def default_notification_templates(db):
                 "wa_param_order": migration.WA_PARAMS.get(event, []),
             },
         )
+    contact = importlib.import_module(
+        "apps.notifications.migrations.0006_contact_form_messages"
+    )
+    NotificationTemplate.objects.get_or_create(
+        event=contact.EVENT,
+        defaults={"email_subject": contact.SUBJECT, "email_body": contact.BODY},
+    )
     return NotificationTemplate.objects.all()

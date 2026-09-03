@@ -7,6 +7,10 @@ Admin → Site configuration.
 
 SENDER_NAME = "European School PTA"
 
+# Where the public contact form delivers, and the address shown to parents in
+# the footer and in email footers. Editable under Admin -> Site configuration.
+CONTACT_EMAIL = "info@esljparents.eu"
+
 TERMS_MARKDOWN = """\
 # Extra-Curricular Activities — Terms & Conditions
 

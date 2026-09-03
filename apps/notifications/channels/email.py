@@ -33,6 +33,9 @@ class EmailAdapter:
             body=notification.rendered_body,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[notification.recipient_email],
+            # Set for contact-form messages, so the office answers the parent
+            # who wrote rather than the site's no-reply address.
+            reply_to=[notification.reply_to] if notification.reply_to else None,
             connection=self.connection,
         )
         try:
