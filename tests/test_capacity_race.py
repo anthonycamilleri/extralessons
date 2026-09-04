@@ -1,4 +1,7 @@
-"""Concurrency: two admins approving at once must never oversubscribe a class."""
+"""Concurrency: two admins approving at once must never oversubscribe a class.
+
+Offers are deliberately not capacity-gated (an administrator may hand out a
+place in a full class), so only approvals race for seats."""
 import threading
 
 import pytest
@@ -49,38 +52,3 @@ def test_concurrent_approvals_never_oversubscribe():
     )
     assert statuses == ["ENROLLED", "WAITLISTED"]
 
-
-@pytest.mark.django_db(transaction=True)
-def test_concurrent_offers_for_single_seat():
-    admin = AdminFactory()
-    cls = ActivityClassFactory(capacity=2)
-    enrolled = services.approve_request(services.register(ChildFactory(), cls), admin)
-    services.approve_request(services.register(ChildFactory(), cls), admin)
-    w1 = services.approve_request(services.register(ChildFactory(), cls), admin)
-    w2 = services.approve_request(services.register(ChildFactory(), cls), admin)
-    services.cancel(enrolled, Enrollment.CancelReason.PARENT)  # exactly one seat free
-
-    barrier = threading.Barrier(2)
-    outcomes = []
-
-    def offer(enrollment):
-        try:
-            barrier.wait(timeout=5)
-            services.offer_seat(enrollment, admin)
-            outcomes.append("offered")
-        except services.EnrollmentError:
-            outcomes.append("blocked")
-        finally:
-            connection.close()
-
-    threads = [threading.Thread(target=offer, args=(e,)) for e in (w1, w2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=10)
-
-    assert sorted(outcomes) == ["blocked", "offered"]
-    offered_count = Enrollment.objects.filter(
-        activity_class=cls, status=Enrollment.Status.OFFERED
-    ).count()
-    assert offered_count == 1

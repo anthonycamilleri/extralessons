@@ -2,8 +2,11 @@
 
 Every public function runs in its own transaction and takes a row lock on the
 ActivityClass (`select_for_update`) as the capacity mutex: counting seats and
-changing enrollment rows always happen under the same lock, so a class can
-never be oversubscribed however many people click at once.
+changing enrollment rows always happen under the same lock, so approvals can
+never oversubscribe a class however many people click at once. The one
+deliberate exception is `offer_seat`: an administrator may offer a waitlisted
+family a place beyond the class's capacity, and that over-allocation is their
+call, not something a race produced.
 
 Notifications are queued inside the same transaction (transactional outbox):
 they commit together with the state change and are delivered by the
@@ -160,8 +163,23 @@ def reject_request(enrollment, admin_user):
     return enrollment
 
 
+def seats_over_capacity(activity_class):
+    """How many seats beyond capacity are held (0 when the class is within it).
+
+    Positive only after an administrator has offered places past the maximum;
+    approvals never take a class over.
+    """
+    return max(0, _seats_taken(activity_class) - activity_class.capacity)
+
+
 def offer_seat(enrollment, admin_user):
-    """Admin offers a freed seat to a chosen waitlisted family."""
+    """Admin offers a seat to a chosen waitlisted family.
+
+    Capacity is not enforced here: the roster tells the administrator when the
+    class is full, and offering anyway is a legitimate decision (a class that
+    can stretch by one, a sibling, a family that has waited all term). Only
+    approvals are gated by capacity, so nothing over-allocates by accident.
+    """
     with transaction.atomic():
         cls = _locked_class(enrollment.activity_class_id)
         _require_open(cls)
@@ -169,11 +187,6 @@ def offer_seat(enrollment, admin_user):
         enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
         if enrollment.status != Enrollment.Status.WAITLISTED:
             raise EnrollmentError("Only waitlisted registrations can receive an offer.")
-        if _seats_taken(cls) >= cls.capacity:
-            raise EnrollmentError(
-                "No free seats: the class is full or all free seats already have "
-                "outstanding offers."
-            )
         ttl_hours = SiteConfig.get().offer_ttl_hours
         now = timezone.now()
         enrollment.status = Enrollment.Status.OFFERED

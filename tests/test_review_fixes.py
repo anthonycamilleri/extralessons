@@ -89,6 +89,21 @@ class TestClassStateGuards:
 
 
 class TestCapacityGuards:
+    def test_admin_form_counts_over_capacity_seats(self):
+        """places_free_now() floors at zero; the guard must see the real number."""
+        from apps.catalog.admin import ActivityClassForm
+
+        admin = AdminFactory()
+        cls = ActivityClassFactory(capacity=1)
+        services.approve_request(services.register(ChildFactory(), cls), admin)
+        waitlisted = services.approve_request(services.register(ChildFactory(), cls), admin)
+        services.confirm_offer(services.offer_seat(waitlisted, admin))  # 2 held of 1
+
+        form = ActivityClassForm(instance=cls)
+        form.cleaned_data = {"capacity": 1}
+        with pytest.raises(Exception, match="below the 2 seat"):
+            form.clean_capacity()
+
     def test_admin_form_rejects_capacity_below_seats_taken(self, admin_client):
         admin = AdminFactory()
         cls = ActivityClassFactory(capacity=3)
@@ -131,8 +146,10 @@ class TestCapacityGuards:
 
         assert enrollment.status == Enrollment.Status.WAITLISTED
         assert cls.places_free_now() == 0
-        with pytest.raises(services.EnrollmentError, match="No free seats"):
-            services.offer_seat(enrollment, admin)
+        # ...until the office hands out a place, which is allowed even at zero
+        offered = services.offer_seat(enrollment, admin)
+        assert offered.status == Enrollment.Status.OFFERED
+        assert services.seats_over_capacity(cls) == 1
 
     def test_raising_capacity_from_zero_alerts_admins(self):
         admin = AdminFactory()

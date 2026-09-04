@@ -29,6 +29,7 @@
     <span class="pill">{{ cls.registrations_count }} registration{{ cls.registrations_count|pluralize }}</span>
     <span class="pill">{{ cls.enrolled_count }} / {{ cls.capacity }} seats taken (incl. outstanding offers)</span>
     {% if seats_free > 0 %}<span class="pill pill-ok">{{ seats_free }} seat{{ seats_free|pluralize }} free to offer</span>
+    {% elif seats_over > 0 %}<span class="pill pill-bad">{{ seats_over }} seat{{ seats_over|pluralize }} over capacity</span>
     {% else %}<span class="pill pill-warn">No free seats</span>{% endif %}
     <span class="pill{% if cls.places_available == 0 %} pill-warn{% endif %}">Parents see {{ cls.places_available }} available</span>
   </p>
@@ -72,7 +73,8 @@
 
   <h2>Waiting list ({{ waitlisted|length }})</h2>
   {% if waitlisted %}
-  <p class="quiet">First-come order shown as guidance; you choose who gets a freed seat.</p>
+  <p class="quiet">First-come order shown as guidance; you choose who gets a freed seat.
+    {% if seats_free < 1 %}The class is full: offering now takes it over its capacity of {{ cls.capacity }}.{% endif %}</p>
   <table class="desk-table">
     <thead><tr><th>#</th><th>Child</th><th>Guardians</th><th>Waiting since</th><th></th></tr></thead>
     <tbody>
@@ -85,9 +87,10 @@
       <td class="quiet">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
       <td>
         <div class="desk-actions">
-          <form method="post" action="{% url 'admin:enrollments_enrollment_offer' e.pk %}">{% csrf_token %}
+          <form method="post" action="{% url 'admin:enrollments_enrollment_offer' e.pk %}"
+                {% if seats_free < 1 %}onsubmit="return confirm('{{ cls.title|escapejs }} is full ({{ cls.enrolled_count }} of {{ cls.capacity }} seats taken). Offer {{ e.child.first_name|escapejs }} a place over capacity?');"{% endif %}>{% csrf_token %}
             <input type="hidden" name="next" value="{{ request.path }}">
-            <button type="submit" class="button default" {% if seats_free < 1 %}disabled{% endif %}>Offer seat</button>
+            <button type="submit" class="button{% if seats_free > 0 %} default{% endif %}">{% if seats_free > 0 %}Offer seat{% else %}Offer seat (over capacity){% endif %}</button>
           </form>
         </div>
       </td>

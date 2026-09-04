@@ -25,7 +25,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 **School admin**
 - Set up the school year once — term dates plus every holiday period — and every class generated in it skips those days automatically.
 - Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
-- When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48).
+- When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48). A full class can still be offered to: the roster warns and asks for confirmation, then shows how far over capacity the class is.
 - Optional email alerts on new requests and freed seats.
 - Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. See *Who sees what* under Architecture.
 - Everything happens in one place, the Django admin at `/admin/`: a Requests page with one-click approve/reject and a pending-count badge on every page, the class list as the term's dashboard (registrations, confirmed, available, waiting, pending per class), a roster page per class (enrolled, offers, waiting list with "offer seat", pending requests; CSV download), children with their guardians' contacts and every registration, the announcement composer, plus terms, providers, notification templates and site settings.
@@ -112,8 +112,10 @@ confirmed, declined, or expired.
 **Two ways of counting places.** `ActivityClassQuerySet.with_counts()` answers
 two different questions and keeps them apart. `places_free` is the *approval*
 number: capacity minus the seats actually held (enrolled children plus
-unexpired offers). It decides whether approving a request enrols or waitlists,
-and how many offers can go out. `places_available` is the *parent-facing*
+unexpired offers). It decides whether approving a request enrols or waitlists.
+Offers are not gated by it: an administrator may knowingly offer a waitlisted
+family a place in a full class, which is the only way a class goes over
+capacity. `places_available` is the *parent-facing*
 number: capacity minus every live registration, pending requests and the
 waiting list included, so a class with ten places and ten requests awaiting
 review is shown to the next family as full rather than tempting them with

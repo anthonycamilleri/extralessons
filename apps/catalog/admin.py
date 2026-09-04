@@ -222,7 +222,11 @@ class ActivityClassForm(forms.ModelForm):
     def clean_capacity(self):
         capacity = self.cleaned_data["capacity"]
         if self.instance.pk:
-            seats_taken = self.instance.capacity - self.instance.places_free_now()
+            # Counted directly rather than via places_free_now(), which floors
+            # at zero and would hide seats offered beyond the old capacity.
+            from apps.enrollments.services import _seats_taken
+
+            seats_taken = _seats_taken(self.instance)
             if capacity < seats_taken:
                 raise forms.ValidationError(
                     f"Capacity cannot go below the {seats_taken} seat(s) currently "
@@ -397,6 +401,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             "waitlisted": waitlisted,
             "pending": pending,
             "seats_free": cls.places_free,
+            "seats_over": max(0, cls.enrolled_count - cls.capacity),
         }
         return TemplateResponse(request, "admin/catalog/activityclass/roster.html", context)
 

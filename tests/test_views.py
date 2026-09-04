@@ -498,3 +498,27 @@ class TestAdminTools:
         assert response.status_code == 302
         waitlisted.refresh_from_db()
         assert waitlisted.status == Enrollment.Status.OFFERED
+
+    def test_admin_can_offer_seat_in_a_full_class(self, client):
+        """Over-allocation is the office's call: the roster warns, never blocks."""
+        admin = SuperAdminFactory()
+        cls = ActivityClassFactory(capacity=1)
+        services.approve_request(services.register(ChildFactory(), cls), admin)
+        waitlisted = services.approve_request(services.register(ChildFactory(), cls), admin)
+        client.force_login(admin)
+
+        page = client.get(reverse("admin:catalog_activityclass_roster", args=[cls.pk]))
+        assert page.status_code == 200
+        assert b"Offer seat (over capacity)" in page.content
+        assert b"disabled" not in page.content
+
+        response = client.post(
+            reverse("admin:enrollments_enrollment_offer", args=[waitlisted.pk]),
+            {"next": reverse("admin:catalog_activityclass_roster", args=[cls.pk])},
+            follow=True,
+        )
+        assert response.status_code == 200
+        waitlisted.refresh_from_db()
+        assert waitlisted.status == Enrollment.Status.OFFERED
+        assert b"1 seat over capacity" in response.content
+        assert b"over its capacity of 1" in response.content

@@ -149,11 +149,31 @@ def _full_class_with_waitlist(admin, capacity=1):
 
 
 class TestOfferFlow:
-    def test_offer_blocked_while_full(self):
+    def test_offer_allowed_while_full_takes_class_over_capacity(self):
+        """The school may knowingly stretch a class: offers are not capacity-gated."""
         admin = AdminFactory()
         cls, enrolled, waitlisted = _full_class_with_waitlist(admin)
-        with pytest.raises(EnrollmentError, match="No free seats"):
-            services.offer_seat(waitlisted, admin)
+
+        offered = services.offer_seat(waitlisted, admin)
+
+        assert offered.status == Enrollment.Status.OFFERED
+        assert notified(Event.WAITLIST_OFFER, offered).exists()
+        assert services.seats_over_capacity(cls) == 1
+        assert cls.places_free_now() == 0  # never negative
+
+        confirmed = services.confirm_offer(offered)
+        assert confirmed.status == Enrollment.Status.ENROLLED
+        assert cls.enrollments.filter(status=Enrollment.Status.ENROLLED).count() == 2
+
+    def test_approval_still_waitlists_when_over_capacity(self):
+        """Only offers may over-allocate; approvals keep waitlisting."""
+        admin = AdminFactory()
+        cls, enrolled, waitlisted = _full_class_with_waitlist(admin)
+        services.confirm_offer(services.offer_seat(waitlisted, admin))
+
+        late = services.approve_request(services.register(ChildFactory(), cls), admin)
+
+        assert late.status == Enrollment.Status.WAITLISTED
 
     def test_cancel_frees_seat_then_offer_confirm_enrolls(self):
         admin = AdminFactory()
@@ -179,9 +199,12 @@ class TestOfferFlow:
         )
         services.cancel(enrolled[0], Enrollment.CancelReason.PARENT)
         services.offer_seat(waitlisted, admin)
-        # seat now held by the offer — a second offer must be blocked
-        with pytest.raises(EnrollmentError, match="No free seats"):
-            services.offer_seat(other_waitlisted, admin)
+        # the freed seat is held by the offer: the class is full again
+        assert cls.places_free_now() == 0
+        assert services.seats_over_capacity(cls) == 0
+        # a second offer is allowed, but it is the one that goes over
+        services.offer_seat(other_waitlisted, admin)
+        assert services.seats_over_capacity(cls) == 1
 
     def test_decline_frees_seat_and_alerts_admin(self):
         admin = AdminFactory()

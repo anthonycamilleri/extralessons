@@ -208,10 +208,18 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
     def offer_view(self, request, object_id):
         def outcome(enrollment):
             deadline = date_format(timezone.localtime(enrollment.offer_expires_at), "l j F, H:i")
-            return messages.SUCCESS, (
+            text = (
                 f"Seat offered to {enrollment.child.full_name}'s family — they have "
                 f"until {deadline} to confirm."
             )
+            over = services.seats_over_capacity(enrollment.activity_class)
+            if over:
+                cls = enrollment.activity_class
+                return messages.WARNING, (
+                    f"{text} {cls.title} is now {over} seat{'s' if over != 1 else ''} "
+                    f"over its capacity of {cls.capacity}."
+                )
+            return messages.SUCCESS, text
 
         return self._transition(request, object_id, services.offer_seat, outcome)
 
