@@ -1,0 +1,59 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  › <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  › <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  › Requests
+</div>
+{% endblock %}
+
+{% block object-tools %}
+<ul class="object-tools">
+  <li><a href="{% url 'admin:catalog_activityclass_changelist' %}?term__is_active__exact=1">Classes this term</a></li>
+  <li><a href="{% url opts|admin_urlname:'changelist' %}">All enrolments</a></li>
+  <li><a href="{% url 'admin:notifications_broadcast_add' %}" class="addlink">Send announcement</a></li>
+</ul>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  {% if show_scope %}
+  <p class="desk-scope">
+    <a href="?scope=mine"{% if scope == "mine" %} aria-current="true"{% endif %}>Only my classes</a>
+    <a href="?scope=all"{% if scope == "all" %} aria-current="true"{% endif %}>All classes</a>
+  </p>
+  {% elif not is_super_admin %}
+  <p class="desk-scope">
+    {% if my_classes %}
+      You look after {% for cls in my_classes %}<b>{{ cls.title }}</b>{% if not forloop.last %}, {% endif %}{% endfor %}.
+      Other classes are handled by their own administrators.
+    {% else %}
+      No classes are assigned to you yet — a super admin assigns them from the class list.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% if focus %}
+  <p class="desk-scope">Showing requests for <b>{{ focus.title }}</b> only ·
+    <a href="{% url 'admin:enrollments_enrollment_requests' %}">all requests</a> ·
+    <a href="{% url 'admin:catalog_activityclass_roster' focus.pk %}">roster</a></p>
+  {% endif %}
+
+  {% if pending %}
+  <table class="desk-table">
+    <thead><tr><th>Requested</th><th>Child</th><th>Guardians</th><th>Class</th><th>Availability</th><th></th></tr></thead>
+    <tbody>
+    {% for e in pending %}
+      {% include "admin/enrollments/_request_row.html" with back=request.get_full_path show_class=True %}
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="quiet">Approve enrols the child if the class has a free place and puts them on the waiting list otherwise. Reject tells the family.</p>
+  {% else %}
+  <p class="desk-empty">No pending requests. 🎉</p>
+  {% endif %}
+</div>
+{% endblock %}

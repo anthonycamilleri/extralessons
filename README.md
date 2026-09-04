@@ -27,8 +27,8 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48).
 - Optional email alerts on new requests and freed seats.
-- Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) sees everything, with an *Only mine / All* switch when they have classes of their own. See *Who sees what* under Architecture.
-- Manage terms, classes, providers, notification templates, and site-wide settings in the Django admin; admin tools dashboard at `/admin-tools/`.
+- Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. See *Who sees what* under Architecture.
+- Everything happens in one place, the Django admin at `/admin/`: a Requests page with one-click approve/reject and a pending-count badge on every page, the class list as the term's dashboard (registrations, confirmed, available, waiting, pending per class), a roster page per class (enrolled, offers, waiting list with "offer seat", pending requests; CSV download), children with their guardians' contacts and every registration, the announcement composer, plus terms, providers, notification templates and site settings.
 - Let Claude do the data entry: a built-in MCP server (`manage.py mcp_server`) lets Claude Code or Claude Desktop set up school years, holidays, terms, providers and classes from a conversation — see [Connecting Claude](#connecting-claude-mcp).
 
 ## Architecture at a glance
@@ -122,17 +122,18 @@ waiting list?" step use the second; the review queue and the waiting-list page
 use the first, and the admin dashboard shows both side by side.
 
 **Who sees what (class administrators).** A class can be assigned to one or
-more admin accounts (`ActivityClass.administrators`). The rule is one
-question asked in one place, `ActivityClass.objects.managed_by(user)`:
+more admin accounts (`ActivityClass.administrators`). Every account with the
+admin role can use the Django admin; what they see there is one question asked
+in one place, `ActivityClass.objects.managed_by(user)`, and what they may do is
+declared per ModelAdmin (`school_admin_can`, apps/accounts/admin_permissions.py):
 
-| Account | Sees on the dashboard, can act on |
-|---------|-----------------------------------|
-| Admin | Only the classes assigned to them. Other classes' requests 404, the announcement composer offers only their classes, and "all classes" means all of theirs. Nothing assigned yet means an empty dashboard that says so. |
-| Super admin (admin role + superuser status) | Everything. If they also have classes of their own, the dashboard and the announcement composer get an *Only mine / All* switch, remembered in a cookie; "all classes" in an announcement follows it. They act on any class in either view. |
+| Account | In the admin |
+|---------|--------------|
+| Admin | The class-bound controls for the classes assigned to them: their classes and sessions (edit, publish, cancel), requests, rosters, waiting lists, attendance, the children in those classes (read-only, with guardian contacts and every registration), and announcements to those families ("all classes" means all of theirs). Other classes' rows 404. Nothing assigned yet shows an empty desk that says so. |
+| Super admin (admin role + superuser status) | Everything, plus the programme itself: school years, holidays, terms, providers, creating, cloning, archiving and handing out classes, user accounts, site configuration, notification templates and log. The class and enrolment lists offer a "looked after by: me" filter, and the Requests page an *Only my classes / All* link, when they have classes of their own. |
 
-The Django admin follows the same split: non-superuser staff see only their
-classes' rows (classes, sessions, enrolments, attendance); superusers see
-everything, which they must, since they are the ones who hand classes out.
+The role implies staff status (`User.save()` keeps them in step), so nobody has
+to tick anything on a new volunteer's account.
 
 Alerts are the mirror image (`User.objects.responsible_admins(cls)`): a class
 with administrators alerts exactly them, super admins included only if they
@@ -448,7 +449,7 @@ config/
     prod.py           # production: S3 media, connection pooling, SMTP, security headers
     test.py           # pytest settings (SQLite or Postgres via DATABASE_URL)
   health.py           # /_health middleware, ahead of ALLOWED_HOSTS and the HTTPS redirect
-  urls.py             # /admin/, /accounts/, /me/, /provider/, /admin-tools/, catalogue at /
+  urls.py             # /admin/, /accounts/, /me/, /provider/, /admin-tools/ (redirects to /admin/), catalogue at /
 render.yaml           # Render Blueprint: web service, notifier cron job, Postgres, shared env
 deploy/
   gunicorn.conf.py    # tuned for a small, horizontally scaled container (1 process, threads, preload)
@@ -477,7 +478,7 @@ apps/
                       # expire offers); channels/ = email + WhatsApp adapters (stub & Meta);
                       # backends/zeptomail.py = Django email backend for ZeptoMail's API;
                       # management/commands/run_notifier.py (--once/--drain/daemon)
-  dashboards/         # parent, provider and admin-tools views/urls
+  dashboards/         # parent and provider views/urls; the admin site (admin_site.py) and the old /admin-tools/ redirects
   media/              # StoredFile + DatabaseStorage: uploads kept in Postgres, served at
                       # /media/<name> immutably; prune_stored_files removes orphans
 templates/            # server-rendered HTML (HTMX-enhanced)

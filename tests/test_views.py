@@ -462,8 +462,11 @@ class TestEnrollmentViews:
 
 class TestAdminTools:
     def test_requests_queue_requires_admin(self, client):
+        # A parent is bounced to the admin login, like any non-staff visitor.
         client.force_login(UserFactory())
-        assert client.get(reverse("admintools_requests")).status_code == 403
+        response = client.get(reverse("admin:enrollments_enrollment_requests"))
+        assert response.status_code == 302
+        assert response.url.startswith(reverse("admin:login"))
 
     def test_admin_can_approve_from_queue(self, client):
         admin = SuperAdminFactory()
@@ -471,7 +474,7 @@ class TestAdminTools:
         client.force_login(admin)
 
         response = client.post(
-            reverse("admintools_request_approve", args=[enrollment.pk])
+            reverse("admin:enrollments_enrollment_approve", args=[enrollment.pk])
         )
 
         assert response.status_code == 302
@@ -486,11 +489,11 @@ class TestAdminTools:
         services.cancel(enrolled, Enrollment.CancelReason.PARENT)
         client.force_login(admin)
 
-        page = client.get(reverse("admintools_waitlist", args=[cls.pk]))
+        page = client.get(reverse("admin:catalog_activityclass_roster", args=[cls.pk]))
         assert page.status_code == 200
 
         response = client.post(
-            reverse("admintools_waitlist_offer", args=[waitlisted.pk])
+            reverse("admin:enrollments_enrollment_offer", args=[waitlisted.pk])
         )
         assert response.status_code == 302
         waitlisted.refresh_from_db()

@@ -1,0 +1,23 @@
+{% comment %}One pending request. Needs `e` (with `places_free` attached),
+   `back`, and `show_class` (whether to repeat the class column).{% endcomment %}
+<tr>
+  <td class="quiet">{{ e.created_at|date:"j M, H:i" }}</td>
+  <td>{{ e.child.full_name }}
+    <div class="quiet">{% if e.child.school_class %}{{ e.child.school_class }} · {% endif %}{{ e.child.date_of_birth|date:"j M Y" }}</div>
+    {# `is not None`: an age of 0 is a real answer, not "in range". #}
+    {% if e.age_outside_range is not None %}
+      <span class="pill pill-warn">Age {{ e.age_outside_range }} · outside {{ e.activity_class.age_min }}–{{ e.activity_class.age_max }}</span>
+    {% endif %}</td>
+  <td class="quiet">
+    {% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+  </td>
+  {% if show_class %}
+  <td>{{ e.activity_class.title }}
+    <div class="quiet">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div></td>
+  {% endif %}
+  <td>
+    {% if e.places_free > 0 %}<span class="pill pill-ok">{{ e.places_free }} free</span>
+    {% else %}<span class="pill pill-warn">Full → waiting list</span>{% endif %}
+  </td>
+  <td>{% include "admin/enrollments/_decide_buttons.html" %}</td>
+</tr>

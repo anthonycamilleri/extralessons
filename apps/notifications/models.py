@@ -73,6 +73,8 @@ class Broadcast(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "announcement"
+        verbose_name_plural = "announcements"
         ordering = ["-created_at"]
 
     def __str__(self):

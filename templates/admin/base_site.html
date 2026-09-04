@@ -1,0 +1,23 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/admin.css' %}">{% endblock %}
+
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header }}</a></div>
+{% endblock %}
+
+{% block nav-global %}
+{% comment %}The office desk, on every admin page: requests with their count,
+   the announcement composer, and the way back to the public site.{% endcomment %}
+{% if pending_requests_count is not None %}
+<nav class="desk-nav" aria-label="Office desk">
+  <a href="{% url 'admin:enrollments_enrollment_requests' %}">Requests
+    <span class="desk-badge{% if pending_requests_count %} desk-badge-live{% endif %}">{{ pending_requests_count }}</span></a>
+  <a href="{% url 'admin:catalog_activityclass_changelist' %}?term__is_active__exact=1">Classes</a>
+  <a href="{% url 'admin:notifications_broadcast_add' %}">Send announcement</a>
+</nav>
+{% endif %}
+{% endblock %}

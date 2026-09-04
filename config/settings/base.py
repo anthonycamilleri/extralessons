@@ -21,7 +21,9 @@ DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # Django's admin with the school's desk on top (requests badge, roster
+    # pages, per-admin permissions). See apps/dashboards/admin_site.py.
+    "apps.dashboards.admin_site.SchoolAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -65,6 +67,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "apps.accounts.context_processors.site_config",
+                "apps.dashboards.context_processors.admin_badge",
             ],
         },
     },

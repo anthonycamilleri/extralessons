@@ -99,6 +99,14 @@ class TestScopedAlerts:
         assert recipients == {admin.pk}
 
 
+def _requests():
+    return reverse("admin:enrollments_enrollment_requests")
+
+
+def _roster(cls):
+    return reverse("admin:catalog_activityclass_roster", args=[cls.pk])
+
+
 class TestAdminDashboard:
     def setup_method(self):
         self.boss, self.admin = _super(), AdminFactory()
@@ -107,42 +115,49 @@ class TestAdminDashboard:
         self.my_request = services.register(ChildFactory(), self.mine)
         self.their_request = services.register(ChildFactory(), self.theirs)
 
-    def test_admin_sees_only_their_requests_and_classes(self, client):
+    def test_admin_sees_only_their_requests_on_the_requests_page(self, client):
         client.force_login(self.admin)
-        content = client.get(reverse("admintools_requests")).content.decode()
+        content = client.get(_requests()).content.decode()
 
         assert self.my_request.child.full_name in content
         assert self.their_request.child.full_name not in content
-        assert "Chess" in content and "Drama" not in content
-        assert "You look after" in content
+        assert "You look after" in content and "Chess" in content
         assert "scope=mine" not in content  # no switch: there is nothing to switch to
 
     def test_admin_with_no_classes_is_told_so(self, client):
         client.force_login(AdminFactory())
-        content = client.get(reverse("admintools_requests")).content.decode()
+        content = client.get(_requests()).content.decode()
 
         assert "No classes are assigned to you yet" in content
         assert "Chess" not in content and "Drama" not in content
 
-    def test_super_admin_sees_everything_and_who_looks_after_what(self, client):
+    def test_super_admin_sees_every_request(self, client):
         client.force_login(self.boss)
-        content = client.get(reverse("admintools_requests")).content.decode()
+        content = client.get(_requests()).content.decode()
 
         assert self.my_request.child.full_name in content
         assert self.their_request.child.full_name in content
-        assert "Looked after by" in content
         assert "scope=mine" not in content  # no classes of their own: no switch
+
+    def test_class_list_shows_who_looks_after_what(self, client):
+        client.force_login(self.boss)
+        content = client.get(reverse("admin:catalog_activityclass_changelist")).content.decode()
+
+        assert "Chess" in content and "Drama" in content
+        assert self.admin.get_full_name() in content
 
     def test_admin_cannot_act_on_another_class(self, client):
         client.force_login(self.admin)
 
         approve = client.post(
-            reverse("admintools_request_approve", args=[self.their_request.pk])
+            reverse("admin:enrollments_enrollment_approve", args=[self.their_request.pk])
         )
-        reject = client.post(reverse("admintools_request_reject", args=[self.their_request.pk]))
-        waitlist = client.get(reverse("admintools_waitlist", args=[self.theirs.pk]))
+        reject = client.post(
+            reverse("admin:enrollments_enrollment_reject", args=[self.their_request.pk])
+        )
+        roster = client.get(_roster(self.theirs))
 
-        assert (approve.status_code, reject.status_code, waitlist.status_code) == (404, 404, 404)
+        assert (approve.status_code, reject.status_code, roster.status_code) == (404, 404, 404)
         self.their_request.refresh_from_db()
         assert self.their_request.status == Enrollment.Status.REQUESTED
 
@@ -150,19 +165,20 @@ class TestAdminDashboard:
         client.force_login(self.admin)
 
         response = client.post(
-            reverse("admintools_request_approve", args=[self.my_request.pk])
+            reverse("admin:enrollments_enrollment_approve", args=[self.my_request.pk])
         )
 
         assert response.status_code == 302
+        assert response.url == _requests()
         self.my_request.refresh_from_db()
         assert self.my_request.status == Enrollment.Status.ENROLLED
-        assert client.get(reverse("admintools_waitlist", args=[self.mine.pk])).status_code == 200
+        assert client.get(_roster(self.mine)).status_code == 200
 
     def test_super_admin_can_act_on_any_class(self, client):
         client.force_login(self.boss)
 
         response = client.post(
-            reverse("admintools_request_approve", args=[self.my_request.pk])
+            reverse("admin:enrollments_enrollment_approve", args=[self.my_request.pk])
         )
 
         assert response.status_code == 302
@@ -176,15 +192,29 @@ class TestAdminDashboard:
         full.save()
         client.force_login(self.admin)
 
-        response = client.post(reverse("admintools_waitlist_offer", args=[waiting.pk]))
+        response = client.post(reverse("admin:enrollments_enrollment_offer", args=[waiting.pk]))
 
         assert response.status_code == 404
         waiting.refresh_from_db()
         assert waiting.status == Enrollment.Status.WAITLISTED
 
+    def test_transitions_are_post_only_and_go_back_where_asked(self, client):
+        client.force_login(self.boss)
+        approve = reverse("admin:enrollments_enrollment_approve", args=[self.my_request.pk])
 
-class TestOnlyMineSwitch:
-    """A super admin who also looks after classes can narrow the dashboard."""
+        assert client.get(approve).status_code == 405
+        response = client.post(approve, {"next": _roster(self.mine)})
+        assert response.url == _roster(self.mine)
+        # An off-site "next" is ignored rather than followed.
+        response = client.post(
+            reverse("admin:enrollments_enrollment_reject", args=[self.their_request.pk]),
+            {"next": "https://evil.example/"},
+        )
+        assert response.url == _requests()
+
+
+class TestOnlyMineOnTheRequestsPage:
+    """A super admin who also looks after classes can narrow the page."""
 
     def setup_method(self):
         self.boss = _super()
@@ -193,65 +223,73 @@ class TestOnlyMineSwitch:
         self.my_request = services.register(ChildFactory(), self.mine)
         self.their_request = services.register(ChildFactory(), self.theirs)
 
-    def test_defaults_to_all_with_the_switch_shown(self, client):
+    def test_defaults_to_all_with_the_links_shown(self, client):
         client.force_login(self.boss)
-        content = client.get(reverse("admintools_requests")).content.decode()
+        content = client.get(_requests()).content.decode()
 
         assert 'href="?scope=mine"' in content and 'href="?scope=all"' in content
-        assert "Chess" in content and "Drama" in content
+        assert self.my_request.child.full_name in content
         assert self.their_request.child.full_name in content
 
-    def test_only_mine_narrows_and_is_remembered(self, client):
+    def test_only_mine_narrows(self, client):
         client.force_login(self.boss)
+        content = client.get(_requests() + "?scope=mine").content.decode()
 
-        narrowed = client.get(reverse("admintools_requests") + "?scope=mine")
-        content = narrowed.content.decode()
-        assert "Chess" in content and "Drama" not in content
+        assert self.my_request.child.full_name in content
         assert self.their_request.child.full_name not in content
-        assert narrowed.cookies["admin_scope"].value == "mine"
 
-        remembered = client.get(reverse("admintools_requests")).content.decode()
-        assert "Drama" not in remembered
-        assert "Showing only the classes you look after yourself" in remembered
-
-        widened = client.get(reverse("admintools_requests") + "?scope=all").content.decode()
-        assert "Drama" in widened
-
-    def test_switch_is_not_offered_to_plain_admins(self, client):
+    def test_links_are_not_offered_to_plain_admins(self, client):
         plain = AdminFactory()
         _assign(self.theirs, plain)
         client.force_login(plain)
 
-        response = client.get(reverse("admintools_requests") + "?scope=all")
+        content = client.get(_requests() + "?scope=all").content.decode()
 
-        content = response.content.decode()
-        assert "Chess" not in content and "Drama" in content
-        assert "admin_scope" not in response.cookies
+        assert self.my_request.child.full_name not in content
+        assert self.their_request.child.full_name in content
+        assert "scope=mine" not in content
 
-    def test_only_mine_still_allows_acting_on_any_class(self, client):
+    def test_class_filter_narrows_to_one_class(self, client):
         client.force_login(self.boss)
-        client.get(reverse("admintools_requests") + "?scope=mine")
+        content = client.get(_requests() + f"?class={self.theirs.pk}").content.decode()
 
-        response = client.post(
-            reverse("admintools_request_approve", args=[self.their_request.pk])
+        assert self.their_request.child.full_name in content
+        assert self.my_request.child.full_name not in content
+        assert "Showing requests for <b>Drama</b>" in content
+
+    def test_looked_after_by_me_filter_on_the_class_list(self, client):
+        client.force_login(self.boss)
+        url = reverse("admin:catalog_activityclass_changelist")
+
+        everything = client.get(url).content.decode()
+        mine = client.get(url + "?who=mine").content.decode()
+        unassigned = client.get(url + "?who=unassigned").content.decode()
+
+        assert "Chess" in everything and "Drama" in everything
+        assert "Chess" in mine and "Drama" not in mine
+        assert "Chess" not in unassigned and "Drama" not in unassigned
+
+
+class TestAnnouncementsScope:
+    def _send(self, client, data):
+        return client.post(
+            reverse("admin:notifications_broadcast_add"), {**data, "_save": "1"}
         )
 
-        assert response.status_code == 302
-        self.their_request.refresh_from_db()
-        assert self.their_request.status == Enrollment.Status.ENROLLED
+    def test_admin_broadcast_to_all_reaches_only_their_families(self, client):
+        admin = AdminFactory()
+        mine = _assign(ActivityClassFactory(title="Chess"), admin)
+        theirs = ActivityClassFactory(title="Drama")
+        my_parent = services.register(ChildFactory(), mine).child.guardians.first()
+        their_parent = services.register(ChildFactory(), theirs).child.guardians.first()
+        client.force_login(admin)
 
-    def test_broadcast_all_classes_follows_the_switch(self, client):
-        my_parent = self.my_request.child.guardians.first()
-        their_parent = self.their_request.child.guardians.first()
-        client.force_login(self.boss)
-
-        content = client.get(reverse("admintools_broadcast") + "?scope=mine").content.decode()
-        assert "All my classes" in content
+        content = client.get(reverse("admin:notifications_broadcast_add")).content.decode()
         assert "Chess" in content and "Drama" not in content
+        assert "All my classes" in content
 
-        response = client.post(
-            reverse("admintools_broadcast") + "?scope=mine",
-            {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Chess news."},
+        response = self._send(
+            client, {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Chess news."}
         )
 
         assert response.status_code == 302
@@ -261,46 +299,8 @@ class TestOnlyMineSwitch:
         assert my_parent.pk in sent_to and their_parent.pk not in sent_to
         broadcast = Broadcast.objects.get()
         assert broadcast.scope == Broadcast.Scope.SELECTED_CLASSES
-        assert list(broadcast.classes.all()) == [self.mine]
-
-    def test_broadcast_to_all_when_viewing_all(self, client):
-        client.force_login(self.boss)
-        content = client.get(reverse("admintools_broadcast") + "?scope=all").content.decode()
-        assert "All published classes" in content
-
-        client.post(
-            reverse("admintools_broadcast") + "?scope=all",
-            {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Everyone."},
-        )
-
-        assert Broadcast.objects.get().scope == Broadcast.Scope.ALL_CLASSES
-        assert Notification.objects.filter(event=Event.BROADCAST).count() >= 2
-
-
-class TestAdminBroadcastScope:
-    def test_admin_broadcast_to_all_reaches_only_their_families(self, client):
-        admin = AdminFactory()
-        mine = _assign(ActivityClassFactory(title="Chess"), admin)
-        theirs = ActivityClassFactory(title="Drama")
-        my_parent = services.register(ChildFactory(), mine).child.guardians.first()
-        their_parent = services.register(ChildFactory(), theirs).child.guardians.first()
-        client.force_login(admin)
-
-        content = client.get(reverse("admintools_broadcast")).content.decode()
-        assert "Chess" in content and "Drama" not in content
-        assert "All my classes" in content
-
-        response = client.post(
-            reverse("admintools_broadcast"),
-            {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Chess news."},
-        )
-
-        assert response.status_code == 302
-        sent_to = set(
-            Notification.objects.filter(event=Event.BROADCAST).values_list("recipient", flat=True)
-        )
-        assert my_parent.pk in sent_to and their_parent.pk not in sent_to
-        assert list(Broadcast.objects.get().classes.all()) == [mine]
+        assert list(broadcast.classes.all()) == [mine]
+        assert broadcast.sender == admin
 
     def test_admin_cannot_pick_another_class(self, client):
         admin = AdminFactory()
@@ -308,13 +308,44 @@ class TestAdminBroadcastScope:
         theirs = ActivityClassFactory()
         client.force_login(admin)
 
-        response = client.post(
-            reverse("admintools_broadcast"),
+        response = self._send(
+            client,
             {"scope": "SELECTED_CLASSES", "classes": [theirs.pk], "subject": "x", "body": "y"},
         )
 
         assert response.status_code == 200  # rejected by the form, not sent
         assert not Notification.objects.filter(event=Event.BROADCAST).exists()
+
+    def test_super_admin_all_classes_stays_all(self, client):
+        boss = _super()
+        _assign(ActivityClassFactory(title="Chess"), boss)
+        one = services.register(ChildFactory(), ActivityClassFactory(title="Drama"))
+        client.force_login(boss)
+
+        content = client.get(reverse("admin:notifications_broadcast_add")).content.decode()
+        assert "All published classes" in content
+
+        self._send(client, {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Everyone."})
+
+        assert Broadcast.objects.get().scope == Broadcast.Scope.ALL_CLASSES
+        assert Notification.objects.filter(
+            event=Event.BROADCAST, recipient=one.child.guardians.first()
+        ).exists()
+
+    def test_sent_announcements_are_a_read_only_record(self, client):
+        admin = AdminFactory()
+        mine = _assign(ActivityClassFactory(), admin)
+        services.register(ChildFactory(), mine)
+        client.force_login(admin)
+        self._send(client, {"scope": "ALL_CLASSES", "subject": "Hello", "body": "News."})
+        broadcast = Broadcast.objects.get()
+
+        page = client.get(reverse("admin:notifications_broadcast_change", args=[broadcast.pk]))
+
+        assert page.status_code == 200
+        content = page.content.decode()
+        assert "Hello" in content
+        assert 'name="_save"' not in content  # nothing to save on a sent announcement
 
 
 class TestDjangoAdminScoping:
@@ -450,21 +481,22 @@ class TestRegistrationCounts:
         assert "Join waiting list" in catalogue
         assert "Full — join the waiting list" in detail
 
-    def test_dashboard_shows_registrations_confirmed_and_available(self, client):
+    def test_class_list_shows_registrations_confirmed_and_available(self, client):
         admin = _super()
         cls = ActivityClassFactory(title="Chess", capacity=3)
         services.register(ChildFactory(), cls)
         services.approve_request(services.register(ChildFactory(), cls), admin)
         client.force_login(admin)
 
-        content = client.get(reverse("admintools_requests")).content.decode()
+        content = client.get(reverse("admin:catalog_activityclass_changelist")).content.decode()
+        requests_page = client.get(_requests()).content.decode()
 
-        assert '<td data-label="Registrations"><b>2</b></td>' in content
-        assert '<td data-label="Confirmed">1 / 3' in content
-        assert '<span class="badge badge-ok">1</span>' in content
+        assert "1 / 3" in content  # confirmed / capacity
+        assert '<span class="pill pill-ok">1</span>' in content  # available to parents
+        assert f"?class={cls.pk}" in content  # the pending count links to the requests page
         # The per-request availability badge is the approval number, not the
         # parent-facing one: the office can still enrol both children.
-        assert "2 free" in content
+        assert "2 free" in requests_page
 
     def test_age_confirm_step_uses_the_parent_facing_number(self, client):
         parent = UserFactory()

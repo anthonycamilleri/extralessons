@@ -429,11 +429,7 @@ form p:has(> input[type=checkbox]) { flex-wrap: wrap; }
 .chip-row input:checked + .chip { background: var(--day-ink); border-color: var(--day-ink); color: #fff; box-shadow: var(--shadow-sm); }
 .chip-row input:focus-visible + .chip { outline: 3px solid var(--brand-orange); outline-offset: 2px; }
 .chip-any { --day: var(--ink); --day-ink: var(--ink); }
-/* Chips as links (the admin dashboard's Only mine / All switch). */
-a.chip { text-decoration: none; }
-a.chip[aria-current="true"] { background: var(--day-ink); border-color: var(--day-ink); color: #fff; box-shadow: var(--shadow-sm); }
-.scope-toggle { margin-bottom: .75rem; }
-.scope-note { margin-top: 0; }
+.nav-badge { margin-left: .2em; padding: .05em .5em; font-size: .75rem; vertical-align: middle; }
 
 .filter-actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
 .filter-bar.js-autosubmit .filter-apply { display: none; }

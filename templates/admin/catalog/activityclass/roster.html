@@ -1,0 +1,112 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  › <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  › <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  › <a href="{% url opts|admin_urlname:'change' cls.pk %}">{{ cls.title }}</a>
+  › Roster
+</div>
+{% endblock %}
+
+{% block object-tools %}
+<ul class="object-tools">
+  <li><a href="?format=csv">Download CSV</a></li>
+  <li><a href="{% url opts|admin_urlname:'change' cls.pk %}">Edit class</a></li>
+  <li><a href="{% url 'admin:enrollments_enrollment_requests' %}">All requests</a></li>
+  <li><a href="{{ cls.get_absolute_url }}">View on site</a></li>
+</ul>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p class="desk-scope">
+    {{ cls.provider.name }} · {{ cls.term.name }} · {{ cls.schedule_display }}{% if cls.location %} · {{ cls.location }}{% endif %}
+  </p>
+  <p>
+    <span class="pill">{{ cls.registrations_count }} registration{{ cls.registrations_count|pluralize }}</span>
+    <span class="pill">{{ cls.enrolled_count }} / {{ cls.capacity }} seats taken (incl. outstanding offers)</span>
+    {% if seats_free > 0 %}<span class="pill pill-ok">{{ seats_free }} seat{{ seats_free|pluralize }} free to offer</span>
+    {% else %}<span class="pill pill-warn">No free seats</span>{% endif %}
+    <span class="pill{% if cls.places_available == 0 %} pill-warn{% endif %}">Parents see {{ cls.places_available }} available</span>
+  </p>
+
+  <h2>Enrolled ({{ enrolled|length }})</h2>
+  {% if enrolled %}
+  <table class="desk-table">
+    <thead><tr><th>Child</th><th>School class</th><th>Going home</th><th>Notes</th><th>Guardians</th><th>Since</th></tr></thead>
+    <tbody>
+    {% for e in enrolled %}
+    <tr>
+      <td><a href="{% url 'admin:accounts_child_change' e.child.pk %}">{{ e.child.full_name }}</a>
+        <div class="quiet">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
+      <td>{{ e.child.school_class|default:"—" }}</td>
+      <td>{% if e.child.may_leave_alone %}<span class="pill pill-ok">May leave alone</span>{% else %}<span class="pill pill-warn">Must be collected</span>{% endif %}</td>
+      <td class="quiet">{{ e.child.notes|default:"—" }}</td>
+      <td class="quiet">{% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+      <td class="quiet">{{ e.enrolled_at|date:"j M" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="desk-empty">No children enrolled yet.</p>{% endif %}
+
+  {% if offered %}
+  <h2>Outstanding offers ({{ offered|length }})</h2>
+  <table class="desk-table">
+    <thead><tr><th>Child</th><th>Guardians</th><th>Offered</th><th>Expires</th></tr></thead>
+    <tbody>
+    {% for e in offered %}
+    <tr>
+      <td>{{ e.child.display_name }}</td>
+      <td class="quiet">{% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+      <td class="quiet">{{ e.offered_at|date:"j M, H:i" }}</td>
+      <td>{{ e.offer_expires_at|date:"l j M, H:i" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>Waiting list ({{ waitlisted|length }})</h2>
+  {% if waitlisted %}
+  <p class="quiet">First-come order shown as guidance; you choose who gets a freed seat.</p>
+  <table class="desk-table">
+    <thead><tr><th>#</th><th>Child</th><th>Guardians</th><th>Waiting since</th><th></th></tr></thead>
+    <tbody>
+    {% for e in waitlisted %}
+    <tr>
+      <td>{{ forloop.counter }}</td>
+      <td>{{ e.child.full_name }}
+        <div class="quiet">{% if e.child.school_class %}{{ e.child.school_class }} · {% endif %}{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
+      <td class="quiet">{% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+      <td class="quiet">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
+      <td>
+        <div class="desk-actions">
+          <form method="post" action="{% url 'admin:enrollments_enrollment_offer' e.pk %}">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="button default" {% if seats_free < 1 %}disabled{% endif %}>Offer seat</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="desk-empty">The waiting list is empty.</p>{% endif %}
+
+  <h2>Pending requests ({{ pending|length }})</h2>
+  {% if pending %}
+  <table class="desk-table">
+    <thead><tr><th>Requested</th><th>Child</th><th>Guardians</th><th>Availability</th><th></th></tr></thead>
+    <tbody>
+    {% for e in pending %}
+      {% include "admin/enrollments/_request_row.html" with back=request.path show_class=False %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="desk-empty">No requests waiting.</p>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "admin/index.html" %}
+
+{% block content %}
+{% comment %}Today's desk before the app list: the two numbers an admin
+   opens the site for.{% endcomment %}
+<div class="desk-panel">
+  <a class="desk-tile{% if pending_requests_count %} desk-tile-live{% endif %}" href="{% url 'admin:enrollments_enrollment_requests' %}">
+    <span class="desk-number">{{ pending_requests_count }}</span>
+    <span class="desk-label">request{{ pending_requests_count|pluralize }} awaiting review</span>
+  </a>
+  <a class="desk-tile" href="{% url 'admin:catalog_activityclass_changelist' %}?term__is_active__exact=1">
+    <span class="desk-number">{{ classes_this_term }}</span>
+    <span class="desk-label">class{{ classes_this_term|pluralize:"es" }} this term</span>
+  </a>
+</div>
+{{ block.super }}
+{% endblock %}

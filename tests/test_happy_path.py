@@ -53,7 +53,7 @@ def test_full_lifecycle(client):
 
     # --- Admin approves: Ann takes the only seat ----------------------------
     client.force_login(admin)
-    client.post(reverse("admintools_request_approve", args=[request_a.pk]))
+    client.post(reverse("admin:enrollments_enrollment_approve", args=[request_a.pk]))
     request_a.refresh_from_db()
     assert request_a.status == Enrollment.Status.ENROLLED
     client.post(reverse("logout"))
@@ -87,7 +87,7 @@ def test_full_lifecycle(client):
     client.post(reverse("logout"))
 
     client.force_login(admin)
-    client.post(reverse("admintools_request_approve", args=[request_b.pk]))
+    client.post(reverse("admin:enrollments_enrollment_approve", args=[request_b.pk]))
     request_b.refresh_from_db()
     assert request_b.status == Enrollment.Status.WAITLISTED
     client.post(reverse("logout"))
@@ -100,7 +100,7 @@ def test_full_lifecycle(client):
     assert Notification.objects.filter(event=Event.ADMIN_SEAT_FREED).exists()
 
     client.force_login(admin)
-    client.post(reverse("admintools_waitlist_offer", args=[request_b.pk]))
+    client.post(reverse("admin:enrollments_enrollment_offer", args=[request_b.pk]))
     request_b.refresh_from_db()
     assert request_b.status == Enrollment.Status.OFFERED
     client.post(reverse("logout"))

@@ -1,10 +1,16 @@
+import csv
 import datetime
 
 from django import forms
 from django.contrib import admin, messages
-from django.shortcuts import redirect, render
-from django.urls import reverse
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
+from django.utils.html import format_html
 
+from apps.accounts.admin_permissions import SchoolAdminPermissionMixin
 from apps.accounts.models import User
 
 from .models import (
@@ -149,6 +155,33 @@ class ScopedByClassMixin:
         return qs.filter(**{lookup: scope})
 
 
+class ManagedByFilter(admin.SimpleListFilter):
+    """Changelist filter "looked after by: me / nobody yet".
+
+    The Django-native form of the old Only mine / All switch; `for_lookup`
+    builds the variant for models that reach the class through a relation.
+    """
+
+    title = "looked after by"
+    parameter_name = "who"
+    lookup_prefix = ""
+
+    @classmethod
+    def for_lookup(cls, prefix):
+        return type(f"ManagedByFilter_{prefix}", (cls,), {"lookup_prefix": prefix})
+
+    def lookups(self, request, model_admin):
+        return [("mine", "Me"), ("unassigned", "Nobody yet")]
+
+    def queryset(self, request, queryset):
+        field = f"{self.lookup_prefix}__administrators" if self.lookup_prefix else "administrators"
+        if self.value() == "mine":
+            return queryset.filter(**{field: request.user})
+        if self.value() == "unassigned":
+            return queryset.filter(**{f"{field}__isnull": True})
+        return queryset
+
+
 class AssignAdministratorsForm(forms.Form):
     administrators = forms.ModelMultipleChoiceField(
         queryset=User.objects.none(),
@@ -200,17 +233,40 @@ class ActivityClassForm(forms.ModelForm):
 
 
 @admin.register(ActivityClass)
-class ActivityClassAdmin(ScopedByClassMixin, admin.ModelAdmin):
+class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.ModelAdmin):
+    """The class list doubles as the term's dashboard: every row carries the
+    registration numbers, and links to its roster and its pending requests.
+
+    Regular admins can look after their classes (edit, publish, cancel, take
+    the roster) but not create, clone, archive or hand them out: that is
+    setting up the programme, which stays with the super admins.
+    """
+
+    school_admin_can = frozenset({"view", "change"})
+    change_form_template = "admin/catalog/activityclass/change_form.html"
     list_display = [
         "title",
         "term",
-        "provider",
         "schedule_display",
-        "capacity",
+        "registrations",
+        "confirmed",
+        "available",
+        "waiting",
+        "pending",
         "status",
         "administrator_list",
+        "roster_link",
     ]
-    list_filter = ["term", "status", "provider", "administrators", "runs_during_holidays"]
+    list_filter = [
+        ManagedByFilter,
+        # "active term" first: the desk links land here with ?term__is_active__exact=1
+        "term__is_active",
+        "term",
+        "status",
+        "provider",
+        "administrators",
+        "runs_during_holidays",
+    ]
     search_fields = ["title", "provider__name", "administrators__email"]
     prepopulated_fields = {"slug": ["title"]}
     filter_horizontal = ["administrators"]
@@ -224,14 +280,172 @@ class ActivityClassAdmin(ScopedByClassMixin, admin.ModelAdmin):
         "cancel_classes",
         "archive_classes",
     ]
+    SUPERUSER_ACTIONS = {"assign_administrators", "clone_into_term", "archive_classes"}
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related("administrators")
+        return (
+            super()
+            .get_queryset(request)
+            .with_counts()
+            .select_related("term", "provider")
+            .prefetch_related("administrators")
+        )
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser:
+            for name in self.SUPERUSER_ACTIONS:
+                actions.pop(name, None)
+        return actions
+
+    def get_readonly_fields(self, request, obj=None):
+        # Lifecycle changes must go through the actions (publish, cancel,
+        # archive) so enrollments and notifications stay consistent — editing
+        # the status directly would bypass cancel_class's bulk-cancel+notify.
+        # Handing a class to someone is a super admin's call.
+        readonly = ["status"] if obj else []
+        if not request.user.is_superuser:
+            readonly.append("administrators")
+        return readonly
+
+    # -- Dashboard columns (annotations from with_counts) ---------------------
+
+    @admin.display(description="registrations", ordering="registrations_count")
+    def registrations(self, obj):
+        return obj.registrations_count
+
+    @admin.display(description="confirmed", ordering="confirmed_count")
+    def confirmed(self, obj):
+        text = f"{obj.confirmed_count} / {obj.capacity}"
+        if obj.offered_count:
+            text += f" (+{obj.offered_count} offered)"
+        return text
+
+    @admin.display(description="available", ordering="places_available")
+    def available(self, obj):
+        css = "pill-ok" if obj.places_available > 0 else "pill-warn"
+        return format_html('<span class="pill {}">{}</span>', css, obj.places_available)
+
+    @admin.display(description="waiting", ordering="waitlist_count")
+    def waiting(self, obj):
+        return obj.waitlist_count
+
+    @admin.display(description="pending", ordering="requested_count")
+    def pending(self, obj):
+        if not obj.requested_count:
+            return "0"
+        url = reverse("admin:enrollments_enrollment_requests")
+        return format_html('<a href="{}?class={}"><b>{}</b></a>', url, obj.pk, obj.requested_count)
 
     @admin.display(description="administrators")
     def administrator_list(self, obj):
         names = [admin.get_full_name() or admin.email for admin in obj.administrators.all()]
         return ", ".join(names) or "—"
+
+    @admin.display(description="")
+    def roster_link(self, obj):
+        return format_html(
+            '<a href="{}">Roster</a>',
+            reverse("admin:catalog_activityclass_roster", kwargs={"object_id": obj.pk}),
+        )
+
+    # -- Roster ---------------------------------------------------------------
+
+    def get_urls(self):
+        roster = [
+            path(
+                "<int:object_id>/roster/",
+                self.admin_site.admin_view(self.roster_view),
+                name="catalog_activityclass_roster",
+            ),
+        ]
+        return roster + super().get_urls()
+
+    def roster_view(self, request, object_id):
+        """Everyone in one class, by state, with the actions that move them."""
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        cls = get_object_or_404(self.get_queryset(request), pk=object_id)
+
+        def people(queryset):
+            return list(queryset.select_related("child").prefetch_related("child__guardians"))
+
+        from apps.enrollments.models import Enrollment
+
+        S = Enrollment.Status
+        enrolled = people(
+            cls.enrollments.filter(status=S.ENROLLED).order_by(
+                "child__first_name", "child__last_name"
+            )
+        )
+        offered = people(cls.enrollments.filter(status=S.OFFERED).order_by("offer_expires_at"))
+        waitlisted = people(cls.enrollments.waitlist_fifo())
+        pending = people(cls.enrollments.filter(status=S.REQUESTED).order_by("created_at"))
+        for enrollment in pending:
+            enrollment.places_free = cls.places_free
+
+        if request.GET.get("format") == "csv":
+            return self._roster_csv(cls, enrolled, offered, waitlisted, pending)
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.opts,
+            "title": f"{cls.title} · roster",
+            "cls": cls,
+            "enrolled": enrolled,
+            "offered": offered,
+            "waitlisted": waitlisted,
+            "pending": pending,
+            "seats_free": cls.places_free,
+        }
+        return TemplateResponse(request, "admin/catalog/activityclass/roster.html", context)
+
+    def _roster_csv(self, cls, enrolled, offered, waitlisted, pending):
+        from apps.enrollments.admin import guardian_contacts
+
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = (
+            f'attachment; filename="roster-{cls.term.name}-{cls.slug}.csv"'
+        )
+        response.write("\ufeff")  # BOM: Excel then reads the UTF-8 correctly
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "Status",
+                "Position",
+                "Child",
+                "Date of birth",
+                "School class",
+                "May leave alone",
+                "Notes",
+                "Guardians",
+                "Since",
+            ]
+        )
+        groups = [
+            ("Enrolled", enrolled, lambda e: e.enrolled_at),
+            ("Offered", offered, lambda e: e.offered_at),
+            ("Waiting", waitlisted, lambda e: e.waitlisted_at),
+            ("Requested", pending, lambda e: e.created_at),
+        ]
+        for label, rows, since in groups:
+            for position, enrollment in enumerate(rows, start=1):
+                child = enrollment.child
+                stamp = since(enrollment)
+                writer.writerow(
+                    [
+                        label,
+                        position if label == "Waiting" else "",
+                        child.full_name,
+                        child.date_of_birth.isoformat(),
+                        child.school_class,
+                        "yes" if child.may_leave_alone else "no",
+                        child.notes,
+                        "; ".join(guardian_contacts(child)),
+                        stamp.date().isoformat() if stamp else "",
+                    ]
+                )
+        return response
 
     @admin.action(description="Assign administrators…")
     def assign_administrators(self, request, queryset):
@@ -262,12 +476,6 @@ class ActivityClassAdmin(ScopedByClassMixin, admin.ModelAdmin):
             "admin/catalog/assign_administrators.html",
             {"classes": queryset, "form": form, "title": "Assign administrators"},
         )
-
-    def get_readonly_fields(self, request, obj=None):
-        # Lifecycle changes must go through the actions (publish, cancel,
-        # archive) so enrollments and notifications stay consistent — editing
-        # the status directly would bypass cancel_class's bulk-cancel+notify.
-        return ["status"] if obj else []
 
     @admin.action(description="Publish and generate sessions")
     def publish_classes(self, request, queryset):
@@ -357,8 +565,9 @@ class ActivityClassAdmin(ScopedByClassMixin, admin.ModelAdmin):
 
 
 @admin.register(ClassSession)
-class ClassSessionAdmin(ScopedByClassMixin, admin.ModelAdmin):
+class ClassSessionAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.ModelAdmin):
     class_lookup = "activity_class"
+    school_admin_can = frozenset({"view", "change"})
     list_display = ["activity_class", "date", "cancelled", "holiday_override"]
     list_filter = ["activity_class__term", "cancelled", "holiday_override"]
     date_hierarchy = "date"

@@ -6,6 +6,16 @@ from .ages import outside_recommended_range
 
 
 class EnrollmentQuerySet(models.QuerySet):
+    def pending_for(self, user):
+        """Requests awaiting this admin's review: the one number behind the
+        badge in the admin header, the site nav and the Requests page."""
+        from apps.catalog.models import ActivityClass
+
+        return self.filter(
+            status=Enrollment.Status.REQUESTED,
+            activity_class__in=ActivityClass.objects.managed_by(user),
+        )
+
     def waitlist_fifo(self):
         """Waitlisted rows in first-come order (single definition of FIFO)."""
         return self.filter(status=Enrollment.Status.WAITLISTED).order_by(

@@ -89,6 +89,16 @@ class User(AbstractUser):
         full_name = self.get_full_name()
         return f"{full_name} <{self.email}>" if full_name else self.email
 
+    def save(self, *args, **kwargs):
+        # Every school admin works in the Django admin, which needs the staff
+        # flag; nobody should have to remember to tick it. Other roles are left
+        # alone (demotion is a deliberate act, done by hand).
+        if self.role == self.Role.ADMIN and not self.is_staff:
+            self.is_staff = True
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"is_staff"}
+        super().save(*args, **kwargs)
+
     @property
     def is_super_admin(self):
         """An admin who sees every class, not just the ones assigned to them:

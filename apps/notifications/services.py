@@ -213,10 +213,11 @@ def queue_admin_event(event, enrollment, **extra_context):
         return
 
     if event == Event.ADMIN_NEW_REQUEST:
-        action_path = reverse("admintools_requests")
+        action_path = reverse("admin:enrollments_enrollment_requests")
     else:
         action_path = reverse(
-            "admintools_waitlist", kwargs={"class_id": enrollment.activity_class_id}
+            "admin:catalog_activityclass_roster",
+            kwargs={"object_id": enrollment.activity_class_id},
         )
     context = enrollment_context(
         enrollment,

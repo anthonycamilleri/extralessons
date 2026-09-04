@@ -4,7 +4,7 @@ from django.urls import reverse
 from apps.catalog.models import ActivityClass
 from apps.enrollments import services
 from apps.enrollments.models import Enrollment
-from apps.notifications.models import Event, Notification
+from apps.notifications.models import Broadcast, Event, Notification
 
 from .factories import (
     ActivityClassFactory,
@@ -27,11 +27,12 @@ class TestAdminBroadcast:
         client.force_login(admin)
 
         response = client.post(
-            reverse("admintools_broadcast"),
+            reverse("admin:notifications_broadcast_add"),
             {
                 "scope": "ALL_CLASSES",
                 "subject": "School closed Friday",
                 "body": "Public holiday.",
+                "_save": "1",
             },
         )
 
@@ -39,19 +40,25 @@ class TestAdminBroadcast:
         assert Notification.objects.filter(
             event=Event.BROADCAST, recipient=parent
         ).exists()
+        assert Broadcast.objects.get().sender == admin
 
     def test_selected_scope_requires_classes(self, client):
-        client.force_login(AdminFactory())
+        admin = AdminFactory()
+        ActivityClassFactory().administrators.add(admin)
+        client.force_login(admin)
         response = client.post(
-            reverse("admintools_broadcast"),
-            {"scope": "SELECTED_CLASSES", "subject": "x", "body": "y"},
+            reverse("admin:notifications_broadcast_add"),
+            {"scope": "SELECTED_CLASSES", "subject": "x", "body": "y", "_save": "1"},
         )
         assert response.status_code == 200
         assert b"Pick at least one class" in response.content
+        assert not Broadcast.objects.exists()
 
     def test_broadcast_page_forbidden_for_parents(self, client):
         client.force_login(UserFactory())
-        assert client.get(reverse("admintools_broadcast")).status_code == 403
+        response = client.get(reverse("admin:notifications_broadcast_add"))
+        assert response.status_code == 302
+        assert response.url.startswith(reverse("admin:login"))
 
 
 class TestDjangoAdminActions:
