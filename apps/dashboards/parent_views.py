@@ -1,3 +1,5 @@
+import datetime
+
 from django.contrib import messages
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
@@ -8,7 +10,7 @@ from apps.accounts.forms import ChildForm, GuardianInviteForm, ProfileForm
 from apps.accounts.models import Child, Guardian, SiteConfig
 from apps.accounts.permissions import parent_required
 from apps.accounts.redirects import safe_next
-from apps.catalog.models import ActivityClass
+from apps.catalog.models import ActivityClass, ClassSession
 from apps.enrollments import ages
 from apps.enrollments import services as enrollment_services
 from apps.enrollments.models import Attendance, Enrollment
@@ -20,16 +22,71 @@ def _own_children(user):
     return Child.objects.for_guardian(user).prefetch_related("guardians")
 
 
+WEEK_AHEAD_DAYS = 7
+
+
+def _coming_up(enrolled, today):
+    """The family's lessons over the next week, grouped by day.
+
+    Cancelled lessons are listed too, marked as such: "no Chess Club on
+    Wednesday" is exactly what a parent opens the page to find out. Each entry
+    names the children in that class, so siblings in one club share a line.
+    """
+    by_class = {}
+    for enrollment in enrolled:
+        by_class.setdefault(enrollment.activity_class_id, []).append(enrollment.child)
+    sessions = (
+        ClassSession.objects.filter(
+            activity_class_id__in=by_class,
+            date__gte=today,
+            date__lt=today + datetime.timedelta(days=WEEK_AHEAD_DAYS),
+        )
+        .select_related("activity_class__provider")
+        .order_by("date", "activity_class__start_time", "activity_class__title")
+    )
+    days = []
+    for session in sessions:
+        if not days or days[-1]["date"] != session.date:
+            offset = (session.date - today).days
+            label = {0: "Today", 1: "Tomorrow"}.get(offset)
+            days.append({"date": session.date, "label": label, "lessons": []})
+        days[-1]["lessons"].append(
+            {"session": session, "children": by_class[session.activity_class_id]}
+        )
+    return days
+
+
 @parent_required
 def home(request):
     children = list(_own_children(request.user))
-    enrollments = (
+    enrollments = list(
         Enrollment.objects.filter(
             child__in=children, status__in=Enrollment.ACTIVE_STATUSES
         )
-        .select_related("child", "activity_class__provider", "activity_class__term")
+        .select_related("child")
         .order_by("created_at")
     )
+    # One query for every class on the page, carrying the next-lesson dates the
+    # catalogue already knows how to show.
+    classes = {
+        cls.pk: cls
+        for cls in ActivityClass.objects.filter(
+            pk__in={e.activity_class_id for e in enrollments}
+        )
+        .select_related("provider", "term")
+        .with_next_session()
+    }
+    window_days = SiteConfig.get().withdrawal_window_days
+    now = timezone.now()
+    for enrollment in enrollments:
+        enrollment.activity_class = classes[enrollment.activity_class_id]
+        enrollment.withdrawal_open = enrollment.can_withdraw(window_days, now=now)
+        # Only a confirmed place has a closing date worth showing.
+        enrollment.withdrawal_deadline_at = (
+            enrollment.withdrawal_deadline(window_days)
+            if enrollment.status == Enrollment.Status.ENROLLED
+            else None
+        )
     by_child = {child.pk: [] for child in children}
     for enrollment in enrollments:
         by_child[enrollment.child_id].append(enrollment)
@@ -37,10 +94,18 @@ def home(request):
         {"child": child, "enrollments": by_child[child.pk]} for child in children
     ]
     offers = [e for e in enrollments if e.status == Enrollment.Status.OFFERED]
+    enrolled = [e for e in enrollments if e.status == Enrollment.Status.ENROLLED]
     return render(
         request,
         "dashboards/parent/home.html",
-        {"families": families, "offers": offers},
+        {
+            "families": families,
+            "offers": offers,
+            "has_enrolled": bool(enrolled),
+            "coming_up": _coming_up(enrolled, timezone.localdate()),
+            "week_ahead_days": WEEK_AHEAD_DAYS,
+            "window_days": window_days,
+        },
     )
 
 
@@ -136,7 +201,9 @@ def _enrollment_action(request, enrollment_id, action, success_message, level=me
     enrollment, run one service call, flash the outcome, return home."""
     enrollment = get_object_or_404(_own_enrollments(request.user), pk=enrollment_id)
     try:
-        action(enrollment)
+        # Every service hands back the row as it now stands; the message is
+        # written from that, so it can describe what actually happened.
+        enrollment = action(enrollment) or enrollment
     except EnrollmentError as exc:
         messages.error(request, str(exc))
     else:
@@ -147,16 +214,24 @@ def _enrollment_action(request, enrollment_id, action, success_message, level=me
 @parent_required
 @require_POST
 def enrollment_cancel(request, enrollment_id):
+    """Withdraw, or ask to cancel: the service decides which applies, and the
+    message tells the parent which one happened."""
+
+    def outcome(enrollment):
+        child, title = enrollment.child.first_name, enrollment.activity_class.title
+        if enrollment.status == Enrollment.Status.CANCELLED:
+            return f"{child} has been withdrawn from {title}. The place is free for another family."
+        return (
+            f"We've passed your request to cancel {child}'s place in {title} to the "
+            f"office. Until they confirm — you'll get an email — the place is still "
+            f"{child}'s, so please keep attending."
+        )
+
     return _enrollment_action(
         request,
         enrollment_id,
-        lambda e: enrollment_services.cancel(
-            e, Enrollment.CancelReason.PARENT, actor=request.user
-        ),
-        lambda e: (
-            f"{e.child.first_name}'s registration for "
-            f"{e.activity_class.title} has been cancelled."
-        ),
+        lambda e: enrollment_services.parent_cancel(e, actor=request.user),
+        outcome,
     )
 
 

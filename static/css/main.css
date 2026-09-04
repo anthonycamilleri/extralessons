@@ -347,6 +347,20 @@ form p:has(> input[type=checkbox]) { flex-wrap: wrap; }
 .panel-title { display: flex; justify-content: space-between; align-items: center; gap: .75rem 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .panel-title h1, .panel-title h2 { margin: 0; }
 .plain { list-style: none; padding: 0; margin: 0 0 .6rem; }
+
+/* --- Family page: the week ahead ---------------------------------------- */
+.week-day + .week-day { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.week-date { margin: 0 0 .4rem; font-size: 1rem; color: var(--muted); font-weight: 600; }
+.week-today .week-date { color: var(--accent-dark); }
+.week-lessons { margin: 0; }
+.week-lesson { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem 1rem; padding: .35rem 0; }
+.week-time { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 7.5rem; }
+.week-what { display: flex; flex-direction: column; flex: 1 1 12rem; }
+.week-cancelled .week-time, .week-cancelled .week-what a { text-decoration: line-through; color: var(--muted); }
+.help-panel summary { cursor: pointer; }
+.help-panel[open] summary { margin-bottom: .75rem; }
+.help-panel ul { margin: 0; padding-left: 1.2rem; }
+.help-panel li + li { margin-top: .5rem; }
 .plain li + li { margin-top: .3rem; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .auth-box { max-width: 26rem; margin: 2rem auto; }
