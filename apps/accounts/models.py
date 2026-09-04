@@ -257,6 +257,13 @@ class SiteConfig(models.Model):
         default=48,
         help_text="Hours a family has to confirm a waiting-list offer before it expires.",
     )
+    withdrawal_window_days = models.PositiveSmallIntegerField(
+        default=defaults.WITHDRAWAL_WINDOW_DAYS,
+        help_text="Days after registering during which a family can withdraw a "
+        "confirmed place themselves, with immediate effect. After that they "
+        "can only ask to cancel, and an admin confirms (or keeps the place). "
+        "Requests, waiting-list entries and offers can always be withdrawn.",
+    )
     notify_admins_new_request = models.BooleanField(
         default=True,
         help_text="Email school admins when a new enrollment request arrives.",

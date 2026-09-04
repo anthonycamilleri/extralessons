@@ -55,5 +55,20 @@
   {% else %}
   <p class="desk-empty">No pending requests. 🎉</p>
   {% endif %}
+
+  <h2>Cancellation requests ({{ cancellations|length }})</h2>
+  {% if cancellations %}
+  <table class="desk-table">
+    <thead><tr><th>Asked</th><th>Child</th><th>Guardians</th><th>Class</th><th>Waiting list</th><th></th></tr></thead>
+    <tbody>
+    {% for e in cancellations %}
+      {% include "admin/enrollments/_cancellation_row.html" with back=request.get_full_path show_class=True %}
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="quiet">These families asked to leave after the withdrawal window closed, so the place is still theirs until you decide. Confirm ends the place and tells the family (and alerts you if someone is waiting for the seat); Keep place tells the family you'll be in touch.</p>
+  {% else %}
+  <p class="desk-empty">Nobody is asking to cancel a place.</p>
+  {% endif %}
 </div>
 {% endblock %}

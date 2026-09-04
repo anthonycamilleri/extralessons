@@ -1,6 +1,9 @@
+import datetime
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from .ages import outside_recommended_range
 
@@ -15,6 +18,22 @@ class EnrollmentQuerySet(models.QuerySet):
             status=Enrollment.Status.REQUESTED,
             activity_class__in=ActivityClass.objects.managed_by(user),
         )
+
+    def cancellation_requests_for(self, user):
+        """Confirmed places whose family has asked to leave, waiting for this
+        admin to confirm (or keep the place)."""
+        from apps.catalog.models import ActivityClass
+
+        return self.filter(
+            status=Enrollment.Status.ENROLLED,
+            cancel_requested_at__isnull=False,
+            activity_class__in=ActivityClass.objects.managed_by(user),
+        )
+
+    def desk_count(self, user):
+        """Everything on this admin's desk: new requests plus cancellation
+        requests. The one number behind every badge."""
+        return self.pending_for(user).count() + self.cancellation_requests_for(user).count()
 
     def waitlist_fifo(self):
         """Waitlisted rows in first-come order (single definition of FIFO)."""
@@ -34,6 +53,17 @@ class Enrollment(models.Model):
         WAITLISTED ── admin offers seat ──► OFFERED ── parent confirms ──► ENROLLED
         OFFERED ── parent declines / offer expires ──► CANCELLED
         any active state ── parent withdraws / admin cancels / class cancelled ──► CANCELLED
+
+    Leaving a class has two shapes, decided by the withdrawal window
+    (SiteConfig.withdrawal_window_days, counted from registration):
+
+        REQUESTED / WAITLISTED / OFFERED ── parent withdraws ──► CANCELLED (always)
+        ENROLLED, inside the window ── parent withdraws ──► CANCELLED
+        ENROLLED, after the window ── parent asks to cancel ──► cancel_requested_at set
+            ── admin confirms ──► CANCELLED        ── admin keeps the place ──► cleared
+
+    A cancellation request is not a status: the child keeps the seat, and
+    attends, until the office has confirmed.
     """
 
     class Status(models.TextChoices):
@@ -44,7 +74,8 @@ class Enrollment(models.Model):
         CANCELLED = "CANCELLED", "Cancelled"
 
     class CancelReason(models.TextChoices):
-        PARENT = "PARENT", "Cancelled by parent"
+        PARENT = "PARENT", "Withdrawn by parent"
+        PARENT_REQUEST = "PARENT_REQUEST", "Cancelled at the family's request"
         ADMIN = "ADMIN", "Cancelled by school"
         REQUEST_REJECTED = "REQUEST_REJECTED", "Request not approved"
         CLASS_CANCELLED = "CLASS_CANCELLED", "Class cancelled"
@@ -83,6 +114,19 @@ class Enrollment(models.Model):
         max_length=20, choices=CancelReason.choices, blank=True, default=""
     )
     promoted_from_waitlist = models.BooleanField(default=False)
+    cancel_requested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the family asked to cancel a confirmed place after the "
+        "withdrawal window; cleared when an admin confirms or keeps the place.",
+    )
+    cancel_requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cancellation_requests",
+    )
     terms_accepted_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -113,6 +157,35 @@ class Enrollment(models.Model):
         recommended range, else None. The parent confirmed the warning at
         registration; this is how the school sees it on review."""
         return outside_recommended_range(self.activity_class, self.child)
+
+    @property
+    def cancellation_requested(self):
+        return self.cancel_requested_at is not None
+
+    def withdrawal_deadline(self, window_days):
+        """The moment self-service withdrawal of a confirmed place closes.
+
+        Counted from registration. A child who came off the waiting list gets
+        the window from the day their place was confirmed instead: the wait
+        should not eat into their two weeks.
+        """
+        anchor = self.created_at
+        if self.promoted_from_waitlist and self.enrolled_at:
+            anchor = self.enrolled_at
+        return anchor + datetime.timedelta(days=window_days)
+
+    def can_withdraw(self, window_days, now=None):
+        """Whether the family can leave with immediate effect.
+
+        Always, while nothing is confirmed (a request, a waiting-list entry, an
+        offer): nobody has planned around the child yet. For a confirmed place,
+        only until the deadline; after that they ask, and the office confirms.
+        """
+        if self.status not in self.ACTIVE_STATUSES:
+            return False
+        if self.status != self.Status.ENROLLED:
+            return True
+        return (now or timezone.now()) < self.withdrawal_deadline(window_days)
 
     def waitlist_position(self):
         """1-based FIFO position among waitlisted enrollments (guidance only)."""

@@ -42,7 +42,21 @@
     {% for e in enrolled %}
     <tr>
       <td><a href="{% url 'admin:accounts_child_change' e.child.pk %}">{{ e.child.full_name }}</a>
-        <div class="quiet">{{ e.child.date_of_birth|date:"j M Y" }}</div></td>
+        <div class="quiet">{{ e.child.date_of_birth|date:"j M Y" }}</div>
+        {% if e.cancellation_requested %}
+          <span class="pill pill-warn">Asked to cancel {{ e.cancel_requested_at|date:"j M" }}</span>
+          <div class="desk-actions">
+            <form method="post" action="{% url 'admin:enrollments_enrollment_confirm_cancellation' e.pk %}"
+                  onsubmit="return confirm('Cancel this place? The family will be told it is confirmed.');">{% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button type="submit" class="button danger">Confirm cancellation</button>
+            </form>
+            <form method="post" action="{% url 'admin:enrollments_enrollment_keep_place' e.pk %}">{% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <button type="submit" class="button">Keep place</button>
+            </form>
+          </div>
+        {% endif %}</td>
       <td>{{ e.child.school_class|default:"—" }}</td>
       <td>{% if e.child.may_leave_alone %}<span class="pill pill-ok">May leave alone</span>{% else %}<span class="pill pill-warn">Must be collected</span>{% endif %}</td>
       <td class="quiet">{{ e.child.notes|default:"—" }}</td>

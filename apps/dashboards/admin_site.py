@@ -37,7 +37,7 @@ class SchoolAdminSite(admin.AdminSite):
         # Also rendered on the login page and on error pages, where there is
         # nobody to count for.
         context["pending_requests_count"] = (
-            Enrollment.objects.pending_for(request.user).count()
+            Enrollment.objects.desk_count(request.user)
             if request.user.is_authenticated and self.has_permission(request)
             else None
         )

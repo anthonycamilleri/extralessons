@@ -101,6 +101,16 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
                 wrap(self.offer_view),
                 name="enrollments_enrollment_offer",
             ),
+            path(
+                "<int:object_id>/confirm-cancellation/",
+                wrap(self.confirm_cancellation_view),
+                name="enrollments_enrollment_confirm_cancellation",
+            ),
+            path(
+                "<int:object_id>/keep-place/",
+                wrap(self.keep_place_view),
+                name="enrollments_enrollment_keep_place",
+            ),
         ]
         # Before Django's own patterns: the trailing <path:object_id>/ would
         # otherwise swallow "requests/".
@@ -108,17 +118,20 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
 
     def requests_view(self, request):
         """Pending requests for this admin's classes, oldest first, with the
-        class's availability and one-click approve/reject."""
+        class's availability and one-click approve/reject — and, below them,
+        the families asking to cancel a confirmed place."""
         if not self.has_view_permission(request):
             raise PermissionDenied
         user = request.user
         pending = Enrollment.objects.pending_for(user)
+        cancellations = Enrollment.objects.cancellation_requests_for(user)
 
         # A super admin with classes of their own can narrow to just those.
         show_scope = user.is_super_admin and user.managed_classes.exists()
         scope = request.GET.get("scope") if show_scope else None
         if scope == "mine":
             pending = pending.filter(activity_class__administrators=user)
+            cancellations = cancellations.filter(activity_class__administrators=user)
         elif show_scope:
             scope = "all"
 
@@ -128,6 +141,7 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
             focus = ActivityClass.objects.managed_by(user).filter(pk=class_id).first()
             if focus is not None:
                 pending = pending.filter(activity_class=focus)
+                cancellations = cancellations.filter(activity_class=focus)
 
         pending = list(
             pending.select_related("child", "activity_class__provider", "activity_class__term")
@@ -143,12 +157,28 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
         }
         for enrollment in pending:
             enrollment.places_free = places_free.get(enrollment.activity_class_id, 0)
+        cancellations = list(
+            cancellations.select_related(
+                "child", "activity_class__provider", "activity_class__term", "cancel_requested_by"
+            )
+            .prefetch_related("child__guardians")
+            .order_by("cancel_requested_at")
+        )
+        waiting = {
+            cls.pk: cls.waitlist_count
+            for cls in ActivityClass.objects.filter(
+                pk__in={e.activity_class_id for e in cancellations}
+            ).with_counts()
+        }
+        for enrollment in cancellations:
+            enrollment.waitlist_count = waiting.get(enrollment.activity_class_id, 0)
 
         context = {
             **self.admin_site.each_context(request),
             "opts": self.opts,
             "title": "Enrolment requests",
             "pending": pending,
+            "cancellations": cancellations,
             "focus": focus,
             "scope": scope,
             "show_scope": show_scope,
@@ -222,6 +252,25 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
             return messages.SUCCESS, text
 
         return self._transition(request, object_id, services.offer_seat, outcome)
+
+    def confirm_cancellation_view(self, request, object_id):
+        def outcome(enrollment):
+            return messages.SUCCESS, (
+                f"{enrollment.child.full_name}'s place in {enrollment.activity_class.title} "
+                "has been cancelled; the family has been told."
+            )
+
+        return self._transition(request, object_id, services.confirm_cancellation, outcome)
+
+    def keep_place_view(self, request, object_id):
+        def outcome(enrollment):
+            return messages.INFO, (
+                f"{enrollment.child.full_name} keeps their place in "
+                f"{enrollment.activity_class.title}; the family has been told to expect "
+                "a word from you."
+            )
+
+        return self._transition(request, object_id, services.decline_cancellation, outcome)
 
     # -- Bulk actions ---------------------------------------------------------
 

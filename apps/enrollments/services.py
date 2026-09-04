@@ -257,8 +257,20 @@ def expire_offers(now=None):
     return processed
 
 
+# What the family hears when a registration ends, by who ended it and how.
+_CANCEL_EVENTS = {
+    Enrollment.CancelReason.PARENT: Event.WITHDRAWN,
+    Enrollment.CancelReason.PARENT_REQUEST: Event.CANCELLATION_CONFIRMED,
+}
+
+
 def cancel(enrollment, reason, actor=None):
-    """Cancel any active enrollment (parent withdrawal or admin action)."""
+    """Cancel any active enrollment (parent withdrawal or admin action).
+
+    The parent-facing email follows the reason: a withdrawal gets a receipt, a
+    cancellation the office confirmed says so, anything else is the school's
+    own cancellation notice.
+    """
     with transaction.atomic():
         cls = _locked_class(enrollment.activity_class_id)
         enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
@@ -271,7 +283,9 @@ def cancel(enrollment, reason, actor=None):
         if actor is not None and actor.is_authenticated and reason != enrollment.CancelReason.PARENT:
             enrollment.decided_by = actor
         enrollment.save()
-        notifications.queue_event(Event.SUBSCRIPTION_CANCELLED, enrollment)
+        notifications.queue_event(
+            _CANCEL_EVENTS.get(reason, Event.SUBSCRIPTION_CANCELLED), enrollment
+        )
         if held_seat:
             waitlist_count = cls.enrollments.filter(
                 status=Enrollment.Status.WAITLISTED
@@ -280,6 +294,90 @@ def cancel(enrollment, reason, actor=None):
                 notifications.queue_admin_event(
                     Event.ADMIN_SEAT_FREED, enrollment, waitlist_count=waitlist_count
                 )
+    return enrollment
+
+
+def withdrawal_window_days():
+    return SiteConfig.get().withdrawal_window_days
+
+
+def parent_cancel(enrollment, actor):
+    """A family wants out. Withdraw on the spot while that is allowed —
+    nothing confirmed yet, or a confirmed place still inside the withdrawal
+    window — otherwise file a cancellation request for the office.
+
+    Returns the enrollment: CANCELLED when withdrawn, still ENROLLED with
+    `cancel_requested_at` set when the office has to confirm. The caller reads
+    the outcome from that, so a parent whose window closed between loading the
+    page and clicking gets the request rather than an error.
+    """
+    with transaction.atomic():
+        _locked_class(enrollment.activity_class_id)
+        enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
+        if enrollment.can_withdraw(withdrawal_window_days()):
+            return cancel(enrollment, Enrollment.CancelReason.PARENT, actor=actor)
+        return request_cancellation(enrollment, actor)
+
+
+def request_cancellation(enrollment, actor):
+    """Parent asks to cancel a confirmed place after the withdrawal window.
+
+    The seat stays held and the child keeps attending; the office confirms
+    (confirm_cancellation) or keeps the place (decline_cancellation).
+    """
+    with transaction.atomic():
+        _locked_class(enrollment.activity_class_id)
+        enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
+        if enrollment.status == Enrollment.Status.CANCELLED:
+            raise EnrollmentError("This registration is already cancelled.")
+        if enrollment.status != Enrollment.Status.ENROLLED:
+            raise EnrollmentError(
+                "Only a confirmed place needs a cancellation request; anything else "
+                "can simply be withdrawn."
+            )
+        if enrollment.cancellation_requested:
+            raise EnrollmentError(
+                "You have already asked to cancel this place; the office will confirm shortly."
+            )
+        enrollment.cancel_requested_at = timezone.now()
+        enrollment.cancel_requested_by = actor if actor is not None and actor.is_authenticated else None
+        enrollment.save()
+        deadline = timezone.localtime(enrollment.withdrawal_deadline(withdrawal_window_days()))
+        notifications.queue_event(Event.CANCELLATION_REQUESTED, enrollment)
+        notifications.queue_admin_event(
+            Event.ADMIN_CANCELLATION_REQUESTED,
+            enrollment,
+            withdrawal_deadline=deadline.strftime("%A %d %B"),
+        )
+    return enrollment
+
+
+def _require_cancellation_request(enrollment):
+    if enrollment.status != Enrollment.Status.ENROLLED or not enrollment.cancellation_requested:
+        raise EnrollmentError("This place has no open cancellation request.")
+
+
+def confirm_cancellation(enrollment, admin_user):
+    """Admin confirms a family's cancellation request: the place ends and the
+    family is told; a freed seat alerts the admins if anyone is waiting."""
+    with transaction.atomic():
+        _locked_class(enrollment.activity_class_id)
+        enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
+        _require_cancellation_request(enrollment)
+        return cancel(enrollment, Enrollment.CancelReason.PARENT_REQUEST, actor=admin_user)
+
+
+def decline_cancellation(enrollment, admin_user):
+    """Admin keeps the place: the request is cleared and the family told."""
+    with transaction.atomic():
+        _locked_class(enrollment.activity_class_id)
+        enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
+        _require_cancellation_request(enrollment)
+        enrollment.cancel_requested_at = None
+        enrollment.cancel_requested_by = None
+        enrollment.decided_by = admin_user
+        enrollment.save()
+        notifications.queue_event(Event.CANCELLATION_DECLINED, enrollment)
     return enrollment
 
 

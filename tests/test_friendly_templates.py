@@ -17,10 +17,12 @@ OLD = importlib.import_module("apps.notifications.migrations.0002_default_templa
 NEW = importlib.import_module("apps.notifications.migrations.0005_friendly_templates")
 # Events introduced after the rewording seed their own default, in the
 # migration that added them.
+LEAVING = importlib.import_module("apps.notifications.migrations.0008_cancellation_events")
 LATER = {
     importlib.import_module(
         "apps.notifications.migrations.0006_contact_form_messages"
     ).EVENT,
+    *LEAVING.TEMPLATES,
 }
 
 
@@ -38,6 +40,35 @@ def test_every_event_has_a_reworded_default():
         assert "Dear " not in body, event
         if not event.startswith("ADMIN_"):
             assert "{{ sender_name }}" in body, event
+
+
+def test_leaving_templates_speak_like_the_others():
+    for event, (subject, body) in LEAVING.TEMPLATES.items():
+        assert "Dear " not in body, event
+        if not event.startswith("ADMIN_"):
+            assert "{{ sender_name }}" in body, event
+            assert "Hi {{ parent_first_name }}" in body, event
+
+
+def test_school_cancellation_wording_is_narrowed_only_if_untouched():
+    """SUBSCRIPTION_CANCELLED now means 'the school cancelled'; the migration
+    rewrites 0005's wording to say so, and leaves an admin's own alone."""
+    from django.apps import apps
+
+    row = NotificationTemplate.objects.get(event=Event.SUBSCRIPTION_CANCELLED)
+    assert "cancelled by the PTA" in row.email_body  # the seeded state after 0008
+    row.email_body = "Our own wording"
+    row.save()
+    LEAVING.create_templates(apps, None)
+    assert NotificationTemplate.objects.get(event=Event.SUBSCRIPTION_CANCELLED).email_body == "Our own wording"
+
+    row.email_subject, row.email_body = NEW.TEMPLATES["SUBSCRIPTION_CANCELLED"]
+    row.save()
+    LEAVING.create_templates(apps, None)
+    assert (
+        NotificationTemplate.objects.get(event=Event.SUBSCRIPTION_CANCELLED).email_body
+        == LEAVING.SCHOOL_CANCELLED[1]
+    )
 
 
 def test_receipt_is_signed_by_the_pta(client):
