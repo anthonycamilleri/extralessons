@@ -14,7 +14,9 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Change their password while logged in without retyping the current one.
 - Multi-guardian support: invite a co-parent by email to share access to a child.
 - Request a place in a class; duplicates are blocked automatically, and a child outside the class's recommended age range gets a "this is recommended for ages X–Y — continue?" step rather than a refusal (the mismatch is flagged to the office on the review queue).
-- Confirm or decline waiting-list offers before they expire; withdraw from a class at any time.
+- Confirm or decline waiting-list offers before they expire.
+- A family page built for the school week: the next seven days of lessons across all the family's classes (today and tomorrow called out, cancelled lessons marked), and a *Next class* date on every registration.
+- Leave a class in one of two ways, decided by the withdrawal window (14 days from registration by default, configurable in Site configuration): **Withdraw** takes effect immediately and is always available for anything not yet confirmed (a pending request, a waiting-list entry, an offer) and for a confirmed place inside the window; after the window, a confirmed place shows **Cancel** instead, which files a request the office confirms or turns down. The page explains the difference, and each step is confirmed by email.
 - Per-user notification preferences (email and/or WhatsApp).
 
 **Providers**
@@ -25,6 +27,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 **School admin**
 - Set up the school year once — term dates plus every holiday period — and every class generated in it skips those days automatically.
 - Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
+- Cancellation requests on the same page and on the roster: a family that asks to leave after the withdrawal window keeps the seat until an admin confirms the cancellation (the family is told, and a freed seat with a waiting list raises the usual alert) or keeps the place (the family is told to expect a word). Both count towards the requests badge.
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48).
 - Optional email alerts on new requests and freed seats.
 - Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. See *Who sees what* under Architecture.
@@ -104,10 +107,18 @@ WAITLISTED ── admin offers seat ──► OFFERED ── parent confirms ─
 OFFERED ── parent declines / offer expires (48h, configurable) ──► CANCELLED
 
 any active state ── withdrawal / admin cancel / class cancelled ──► CANCELLED
+
+ENROLLED, after the withdrawal window ── parent asks to cancel ──► cancel_requested_at set
+    ── admin confirms ──► CANCELLED          ── admin keeps the place ──► cleared
 ```
 
 `ENROLLED` and `OFFERED` hold a seat; an offer reserves the seat until
-confirmed, declined, or expired.
+confirmed, declined, or expired. A cancellation request is a flag on an
+`ENROLLED` row, not a status: the seat stays held and the child keeps
+attending until the office decides. `Enrollment.can_withdraw()` is the single
+definition of the window — always open while nothing is confirmed, and for a
+confirmed place until `SiteConfig.withdrawal_window_days` after registration
+(or after the seat was confirmed, for a child promoted from the waiting list).
 
 **Two ways of counting places.** `ActivityClassQuerySet.with_counts()` answers
 two different questions and keeps them apart. `places_free` is the *approval*

@@ -127,6 +127,9 @@ def enrollment_context(enrollment, parent=None, **extra):
     if enrollment.offer_expires_at:
         local = timezone.localtime(enrollment.offer_expires_at)
         context["offer_expires_at"] = local.strftime("%A %d %B, %H:%M")
+    if enrollment.cancel_requested_at:
+        local = timezone.localtime(enrollment.cancel_requested_at)
+        context["cancel_requested_at"] = local.strftime("%A %d %B")
     context.update(extra)
     return context
 
@@ -212,7 +215,7 @@ def queue_admin_event(event, enrollment, **extra_context):
     if template is None:
         return
 
-    if event == Event.ADMIN_NEW_REQUEST:
+    if event in (Event.ADMIN_NEW_REQUEST, Event.ADMIN_CANCELLATION_REQUESTED):
         action_path = reverse("admin:enrollments_enrollment_requests")
     else:
         action_path = reverse(

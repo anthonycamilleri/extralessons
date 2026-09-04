@@ -30,6 +30,40 @@
 </div>
 {% endif %}
 
+{% if has_enrolled %}
+<div class="panel week-panel">
+  <div class="panel-title">
+    <h2>📅 Coming up</h2>
+    <span class="muted small">The next {{ week_ahead_days }} days</span>
+  </div>
+  {% for day in coming_up %}
+    <div class="week-day{% if day.label == "Today" %} week-today{% endif %}">
+      <h3 class="week-date">{% if day.label %}{{ day.label }} · {% endif %}{{ day.date|date:"l j F" }}</h3>
+      <ul class="plain week-lessons">
+        {% for lesson in day.lessons %}
+          <li class="week-lesson{% if lesson.session.cancelled %} week-cancelled{% endif %}">
+            <span class="week-time">{{ lesson.session.activity_class.start_time|time:"H:i" }}–{{ lesson.session.activity_class.end_time|time:"H:i" }}</span>
+            <span class="week-what">
+              <a href="{{ lesson.session.activity_class.get_absolute_url }}">{{ lesson.session.activity_class.title }}</a>
+              <span class="muted small">
+                {% for child in lesson.children %}{{ child.first_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if lesson.session.activity_class.location %} · {{ lesson.session.activity_class.location }}{% endif %}
+              </span>
+            </span>
+            {% if lesson.session.cancelled %}
+              <span class="badge badge-bad">No class{% if lesson.session.notes %} — {{ lesson.session.notes }}{% endif %}</span>
+            {% elif lesson.session.notes %}
+              <span class="badge badge-info">{{ lesson.session.notes }}</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% empty %}
+    <p class="muted">No lessons in the next {{ week_ahead_days }} days — school holidays, or the term hasn't started yet. The next date for each class is listed below.</p>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if not families %}
   <div class="panel">
     <p>Add your children to your family to start enrolling them in activities.</p>
@@ -49,16 +83,23 @@
   </div>
   {% if family.enrollments %}
   <div class="table-wrap"><table class="list stacked">
-    <tr><th>Class</th><th>Schedule</th><th>Status</th><th></th></tr>
+    <tr><th>Class</th><th>Schedule</th><th>Next class</th><th>Status</th><th></th></tr>
     {% for e in family.enrollments %}
       <tr>
         <td data-label="Class">
           <a href="{{ e.activity_class.get_absolute_url }}">{{ e.activity_class.title }}</a>
           <div class="muted small">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div>
         </td>
-        <td data-label="Schedule">{{ e.activity_class.schedule_display }}</td>
+        <td data-label="Schedule">{{ e.activity_class.schedule_display }}{% if e.activity_class.location %}<div class="muted small">{{ e.activity_class.location }}</div>{% endif %}</td>
+        <td data-label="Next class">
+          {% with next=e.activity_class.next_session_label %}{% if next %}
+            <b>{{ next.1|date:"D j M" }}</b>{% if next.0 == "First class" %} <span class="muted small">(first class)</span>{% endif %}
+          {% else %}<span class="muted">No dates yet</span>{% endif %}{% endwith %}
+        </td>
         <td data-label="Status">
-          {% if e.status == "ENROLLED" %}<span class="badge badge-ok">Enrolled</span>
+          {% if e.status == "ENROLLED" %}
+            {% if e.cancellation_requested %}<span class="badge badge-warn">Cancellation requested · awaiting the office</span>
+            {% else %}<span class="badge badge-ok">Enrolled</span>{% endif %}
           {% elif e.status == "REQUESTED" %}<span class="badge badge-info">Awaiting confirmation</span>
           {% elif e.status == "OFFERED" %}<span class="badge badge-warn">Seat offered — respond above!</span>
           {% elif e.status == "WAITLISTED" %}<span class="badge badge-warn">Waiting list · position {{ e.waitlist_position }}</span>
@@ -69,11 +110,24 @@
             {% if e.status == "ENROLLED" %}
               <a class="small" href="{% url 'enrollment_attendance' e.pk %}">Attendance</a>
             {% endif %}
-            <form method="post" action="{% url 'enrollment_cancel' e.pk %}"
-                  onsubmit="return confirm('Cancel {{ e.child.first_name|escapejs }}\'s place in {{ e.activity_class.title|escapejs }}?');">
-              {% csrf_token %}
-              <button type="submit" class="linklike small">Cancel</button>
-            </form>
+            {% if e.cancellation_requested %}
+              <span class="muted small">Asked to cancel on {{ e.cancel_requested_at|date:"j M" }}</span>
+            {% elif e.withdrawal_open %}
+              <form method="post" action="{% url 'enrollment_cancel' e.pk %}"
+                    onsubmit="return confirm('Withdraw {{ e.child.first_name|escapejs }} from {{ e.activity_class.title|escapejs }}? This takes effect immediately.');">
+                {% csrf_token %}
+                <button type="submit" class="linklike small">Withdraw</button>
+              </form>
+              {% if e.withdrawal_deadline_at %}
+                <span class="muted small" title="After this date, cancelling needs the office's confirmation">free until {{ e.withdrawal_deadline_at|date:"j M" }}</span>
+              {% endif %}
+            {% else %}
+              <form method="post" action="{% url 'enrollment_cancel' e.pk %}"
+                    onsubmit="return confirm('Ask the office to cancel {{ e.child.first_name|escapejs }}\'s place in {{ e.activity_class.title|escapejs }}? The place stays {{ e.child.first_name|escapejs }}\'s until they confirm.');">
+                {% csrf_token %}
+                <button type="submit" class="linklike small">Cancel</button>
+              </form>
+            {% endif %}
           </div>
         </td>
       </tr>
@@ -84,6 +138,17 @@
   {% endif %}
 </div>
 {% endfor %}
+
+{% if families %}
+<details class="panel help-panel">
+  <summary><b>Changing your mind: withdraw or cancel?</b></summary>
+  <ul>
+    <li><b>Withdraw</b> takes effect immediately, and you'll get an email to confirm it. It's available for the first <b>{{ window_days }} day{{ window_days|pluralize }}</b> after you register a child for a class (or, if they came off the waiting list, after their place was confirmed) — and at any time for a request that's still awaiting confirmation, a waiting-list entry or a seat offer.</li>
+    <li><b>Cancel</b> is what's left once those {{ window_days }} days have passed. It sends a request to the office, who confirm it with the provider. Until you hear from us the place is still your child's, so please keep attending; the provider's fees for the current period may still be due{% if site_config.has_terms %} — see the <a href="{% url 'terms' %}">terms and conditions</a>{% endif %}.</li>
+    <li>Either way, please do it here rather than with the provider: it keeps waiting lists and class numbers right for everyone.</li>
+  </ul>
+</details>
+{% endif %}
 
 <p><a class="btn btn-secondary" href="{% url 'catalogue' %}">Browse the activities catalogue →</a></p>
 {% endblock %}

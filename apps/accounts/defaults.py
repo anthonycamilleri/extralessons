@@ -11,6 +11,11 @@ SENDER_NAME = "European School PTA"
 # the footer and in email footers. Editable under Admin -> Site configuration.
 CONTACT_EMAIL = "info@esljparents.eu"
 
+# How long after registering a family may withdraw a confirmed place on their
+# own. Past this, cancelling needs the office's confirmation. Editable under
+# Admin -> Site configuration; the default terms below describe the same rule.
+WITHDRAWAL_WINDOW_DAYS = 14
+
 TERMS_MARKDOWN = """\
 # Extra-Curricular Activities — Terms & Conditions
 
@@ -37,6 +42,10 @@ Fees are paid directly to the provider, monthly or per semester, on the terms ag
 ## Cancellations and withdrawals
 
 Withdrawals are processed through the PTA website, not directly with the provider. This keeps waiting lists and class numbers accurate for everyone.
+
+During the first two weeks after registering you can withdraw your child from a class yourself, from your family page, with immediate effect — the place goes straight back to the waiting list. A request that hasn't been confirmed yet, a waiting-list entry or a seat offer can be withdrawn at any time.
+
+After those two weeks, a confirmed place can only be cancelled by asking the PTA. Use the Cancel button on your family page: we'll confirm the cancellation by email, and until we do the place is still your child's, so please keep attending and note that the provider's fees may still be due for the current period. Providers plan staff and space around the children enrolled, which is why we ask you to decide within the first two weeks where you can.
 
 ## Absences and refunds
 

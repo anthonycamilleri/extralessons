@@ -1,0 +1,33 @@
+{% comment %}One cancellation request. Needs `e` (with `waitlist_count`
+   attached), `back`, and `show_class` (whether to repeat the class column).{% endcomment %}
+<tr>
+  <td class="quiet">{{ e.cancel_requested_at|date:"j M, H:i" }}
+    {% if e.cancel_requested_by %}<div class="quiet">by {{ e.cancel_requested_by }}</div>{% endif %}</td>
+  <td>{{ e.child.full_name }}
+    <div class="quiet">{% if e.child.school_class %}{{ e.child.school_class }} · {% endif %}enrolled {{ e.enrolled_at|date:"j M" }}</div></td>
+  <td class="quiet">
+    {% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+  </td>
+  {% if show_class %}
+  <td>{{ e.activity_class.title }}
+    <div class="quiet">{{ e.activity_class.provider.name }} · {{ e.activity_class.term.name }}</div></td>
+  {% endif %}
+  <td>
+    {% if e.waitlist_count %}<span class="pill pill-ok">{{ e.waitlist_count }} waiting for a seat</span>
+    {% else %}<span class="pill">Nobody waiting</span>{% endif %}
+  </td>
+  <td>
+    <div class="desk-actions">
+      <form method="post" action="{% url 'admin:enrollments_enrollment_confirm_cancellation' e.pk %}"
+            onsubmit="return confirm('Cancel this place? The family will be told it is confirmed.');">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ back }}">
+        <button type="submit" class="button danger">Confirm cancellation</button>
+      </form>
+      <form method="post" action="{% url 'admin:enrollments_enrollment_keep_place' e.pk %}"
+            onsubmit="return confirm('Keep the place? The family will be told you will be in touch.');">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ back }}">
+        <button type="submit" class="button">Keep place</button>
+      </form>
+    </div>
+  </td>
+</tr>

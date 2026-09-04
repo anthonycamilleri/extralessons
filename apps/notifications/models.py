@@ -12,7 +12,11 @@ class Event(models.TextChoices):
     WAITLISTED = "WAITLISTED", "Added to waiting list"
     WAITLIST_OFFER = "WAITLIST_OFFER", "Seat offered from waiting list"
     OFFER_EXPIRED = "OFFER_EXPIRED", "Waiting-list offer expired"
-    SUBSCRIPTION_CANCELLED = "SUBSCRIPTION_CANCELLED", "Enrollment cancelled"
+    SUBSCRIPTION_CANCELLED = "SUBSCRIPTION_CANCELLED", "Enrollment cancelled by the school"
+    WITHDRAWN = "WITHDRAWN", "Withdrawn by the family (receipt)"
+    CANCELLATION_REQUESTED = "CANCELLATION_REQUESTED", "Cancellation requested (receipt)"
+    CANCELLATION_CONFIRMED = "CANCELLATION_CONFIRMED", "Cancellation confirmed"
+    CANCELLATION_DECLINED = "CANCELLATION_DECLINED", "Cancellation not accepted, place kept"
     CLASS_CANCELLED = "CLASS_CANCELLED", "Class cancelled"
     GUARDIAN_INVITE = "GUARDIAN_INVITE", "Co-parent invitation"
     BROADCAST = "BROADCAST", "Announcement"
@@ -20,6 +24,10 @@ class Event(models.TextChoices):
     ADMIN_NEW_REQUEST = "ADMIN_NEW_REQUEST", "Admin: new enrollment request"
     ADMIN_SEAT_FREED = "ADMIN_SEAT_FREED", "Admin: seat freed"
     ADMIN_OFFER_LAPSED = "ADMIN_OFFER_LAPSED", "Admin: offer declined/expired"
+    ADMIN_CANCELLATION_REQUESTED = (
+        "ADMIN_CANCELLATION_REQUESTED",
+        "Admin: family asks to cancel a place",
+    )
     CONTACT_MESSAGE = "CONTACT_MESSAGE", "Admin: message from the contact form"
 
 
@@ -30,7 +38,7 @@ class NotificationTemplate(models.Model):
     that includes: school_name, sender_name, contact_email, site_url,
     parent_name, parent_first_name, child_name, child_first_name, class_title,
     provider_name, schedule, term_name, location, subject, body, action_url,
-    offer_expires_at (where applicable).
+    offer_expires_at, withdrawal_deadline, cancel_requested_at (where applicable).
 
     WhatsApp business-initiated messages must use templates pre-approved in
     Meta Business Manager: `wa_template_name` names the approved template and
