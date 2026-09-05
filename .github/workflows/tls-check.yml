@@ -1,30 +1,47 @@
-# Diagnostic: what certificate do the production hostnames actually serve,
-# seen from outside Render? Runs on push to the diagnostic branch (GitHub only
-# registers workflow_dispatch workflows once they are on the default branch).
+# Certificate watch for the production hostnames, seen from outside Render.
+#
+# Fails when a hostname does not present a valid, correctly chained certificate
+# for its own name, or when that certificate expires within 14 days. Runs
+# weekly, on demand from the Actions tab, and whenever this file changes (so an
+# edit to the check is itself checked). Render renews the certificates on its
+# own; this is the alarm for the day it does not.
 name: TLS check
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays, 06:17 UTC
   push:
-    branches: [claude/eslj-parents-ssl-errors-tehnf9]
+    paths: [.github/workflows/tls-check.yml]
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe DNS and certificates
+      - name: Check certificates
         run: |
-          echo "--- CAA esljparents.eu"; dig +short CAA esljparents.eu; echo "(end CAA)"
-          for h in esljparents.eu www.esljparents.eu extralessons-web.onrender.com; do
-            echo
+          set -u
+          failed=0
+          for h in esljparents.eu www.esljparents.eu; do
             echo "=================== $h"
-            echo "--- DNS"; dig +short A "$h"; dig +short CNAME "$h"
-            echo "--- handshake"
-            echo | timeout 20 openssl s_client -connect "$h:443" -servername "$h" 2>&1 \
-              | grep -E "subject=|issuer=|Verify return|verify error|alert|error|CONNECTED" || true
-            echo "--- certificate"
-            echo | timeout 20 openssl s_client -connect "$h:443" -servername "$h" 2>/dev/null \
-              | openssl x509 -noout -subject -issuer -dates -ext subjectAltName 2>&1 || echo "no certificate parsed"
-            echo "--- https"
-            curl -sS -o /dev/null -m 20 -w "http=%{http_code} redirect=%{redirect_url} ssl_verify=%{ssl_verify_result}\n" "https://$h/" 2>&1 || true
-            echo "--- http"
-            curl -sS -o /dev/null -m 20 -w "http=%{http_code} redirect=%{redirect_url}\n" "http://$h/" 2>&1 || true
+            echo "DNS: $(dig +short "$h" | tr '\n' ' ')"
+            rc=0
+            out=$(echo | timeout 20 openssl s_client -connect "$h:443" -servername "$h" -verify_return_error 2>&1) || rc=$?
+            printf '%s\n' "$out" | grep -E "subject=|issuer=|Verify return|verify error|alert" || true
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::$h: TLS handshake or chain verification failed"
+              failed=1
+              continue
+            fi
+            pem=$(printf '%s\n' "$out" | openssl x509 2>/dev/null)
+            printf '%s\n' "$pem" | openssl x509 -noout -dates -ext subjectAltName
+            if ! printf '%s\n' "$pem" | openssl x509 -noout -checkhost "$h" | grep -q "does match"; then
+              echo "::error::$h: certificate is not for this hostname"
+              failed=1
+            fi
+            if ! printf '%s\n' "$pem" | openssl x509 -noout -checkend $((14 * 86400)) >/dev/null; then
+              echo "::error::$h: certificate expires within 14 days"
+              failed=1
+            fi
+            curl -sS -o /dev/null -m 20 -w "https://$h/ -> http=%{http_code} redirect=%{redirect_url}\n" "https://$h/" \
+              || { echo "::error::$h: HTTPS request failed"; failed=1; }
           done
+          exit "$failed"
