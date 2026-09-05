@@ -1,8 +1,11 @@
-# Manual diagnostic: what certificate do the production hostnames actually
-# serve, seen from outside Render? Run from the Actions tab (workflow_dispatch).
+# Diagnostic: what certificate do the production hostnames actually serve,
+# seen from outside Render? Runs on push to the diagnostic branch (GitHub only
+# registers workflow_dispatch workflows once they are on the default branch).
 name: TLS check
 on:
   workflow_dispatch:
+  push:
+    branches: [claude/eslj-parents-ssl-errors-tehnf9]
 jobs:
   check:
     runs-on: ubuntu-latest
