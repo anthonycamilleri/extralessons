@@ -1,11 +1,16 @@
 django~=5.2
-psycopg[binary]~=3.2
+psycopg[binary,pool]~=3.2
 gunicorn~=23.0
 whitenoise~=6.8
-Pillow~=11.0
+Pillow~=12.3
 django-environ~=0.12
 requests~=2.32
+markdown~=3.7
+django-storages[s3]~=1.14
+mcp<2,>=1.29
 
 [dev]
 pytest-django~=4.9
 factory-boy~=3.3
+
+[mcp]
