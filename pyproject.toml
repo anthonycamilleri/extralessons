@@ -8,7 +8,7 @@ dependencies = [
     "psycopg[binary,pool]~=3.2",
     "gunicorn~=23.0",
     "whitenoise~=6.8",
-    "Pillow~=11.0",
+    "Pillow~=12.3",
     "django-environ~=0.12",
     "requests~=2.32",
     # Renders the admin-edited Terms & Conditions (apps.accounts.SiteConfig).
