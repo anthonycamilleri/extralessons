@@ -569,6 +569,19 @@ row-level `SELECT … FOR UPDATE` inside a transaction, which the pooler honours
 because it pins the connection for the transaction's duration. If you ever
 reach for `pg_advisory_lock`, it will appear to work and then quietly not.
 
+**The database scales to zero, and pooled connections do not know.** With
+`cpu-min=0` the database stops after five minutes without queries and the
+first query afterwards pays a cold start of about three seconds — fine. What
+is not fine is a connection the app's pool kept open across the stop: the
+backend behind it is gone, and its first use fails with `OperationalError:
+internal error`, one 500 for whoever arrives first. `config/settings/prod.py`
+therefore turns on `CONN_HEALTH_CHECKS`, so the pool checks each connection
+as it hands it out, and closes connections idle for
+longer than `DB_POOL_MAX_IDLE` (120 s, under the database's five minutes), so
+the dead one is replaced rather than served. If cold starts themselves become
+a complaint, `scw sdb-sql database update <id> cpu-min=1` keeps the database
+warm around the clock, at the cost of one vCPU billed continuously.
+
 **Session settings leak between pooled clients.** Serverless SQL Database sits
 behind a connection pooler that does not reset session state when one client
 disconnects and another is given the same backend — `SET`, `RESET`,

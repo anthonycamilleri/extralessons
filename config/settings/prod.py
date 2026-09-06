@@ -48,11 +48,20 @@ if is_postgres():
     # CONN_MAX_AGE stays 0 whenever the pool is on.
     if env.bool("DB_POOL", default=True):
         DATABASES["default"]["CONN_MAX_AGE"] = 0
+        # Serverless SQL Database scales to zero after five idle minutes and
+        # takes the backends with it. A connection the pool kept open across
+        # that answers "internal error" on its first use, which was one 500 for
+        # the first parent of the morning. With health checks on, the pool
+        # checks every connection as it hands it out (one cheap round trip)
+        # and replaces a dead one instead of serving it; max_idle lets idle
+        # connections go before the database does.
+        DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
         DATABASES["default"].setdefault("OPTIONS", {})
         DATABASES["default"]["OPTIONS"]["pool"] = {
             "min_size": env.int("DB_POOL_MIN_SIZE", default=1),
             "max_size": env.int("DB_POOL_MAX_SIZE", default=4),
             "timeout": env.int("DB_POOL_TIMEOUT", default=10),
+            "max_idle": env.int("DB_POOL_MAX_IDLE", default=120),
         }
     else:
         DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=0)
