@@ -24,10 +24,6 @@ name: "Scaleway: move production from Render"
 
 on:
   workflow_dispatch:
-  # A push that touches this file only registers the workflow with GitHub so
-  # it can be dispatched; the job below refuses to run on it.
-  push:
-    paths: [".github/workflows/migrate-to-scaleway.yml"]
     inputs:
       mode:
         description: "What to do"
@@ -38,6 +34,10 @@ on:
         description: "Type the mode again to confirm (cutover and rollback only)"
         type: string
         default: ""
+  # A push that touches this file only registers the workflow with GitHub so
+  # it can be dispatched; the job below refuses to run on it.
+  push:
+    paths: [".github/workflows/migrate-to-scaleway.yml"]
 
 concurrency:
   group: deploy-production

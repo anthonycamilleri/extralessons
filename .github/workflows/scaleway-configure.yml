@@ -23,10 +23,6 @@ name: "Scaleway: configure the estate"
 
 on:
   workflow_dispatch:
-  # A push that touches this file only registers the workflow with GitHub so
-  # it can be dispatched; the job below refuses to run on it.
-  push:
-    paths: [".github/workflows/scaleway-configure.yml"]
     inputs:
       dry_run:
         description: "Only show the configuration that would be applied"
@@ -44,6 +40,10 @@ on:
         description: "Container min-scale (empty = leave as is; 1 = always warm, no cold starts)"
         type: string
         default: ""
+  # A push that touches this file only registers the workflow with GitHub so
+  # it can be dispatched; the job below refuses to run on it.
+  push:
+    paths: [".github/workflows/scaleway-configure.yml"]
 
 concurrency:
   group: deploy-production
