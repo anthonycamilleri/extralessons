@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.http import Http404, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 
-from apps.accounts.models import Child, SiteConfig, User
+from apps.accounts.models import Child, SiteConfig
 from apps.notifications import services as notification_services
 
 from .forms import ContactForm
@@ -138,7 +138,7 @@ def class_detail(request, term_id, slug):
         slug=slug,
     )
     children = []
-    if request.user.is_authenticated and request.user.role == User.Role.PARENT:
+    if request.user.is_authenticated and request.user.is_parent:
         children = Child.objects.for_guardian(request.user)
     return render(
         request,

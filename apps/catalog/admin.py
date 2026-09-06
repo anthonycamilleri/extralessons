@@ -387,6 +387,9 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         pending = people(cls.enrollments.filter(status=S.REQUESTED).order_by("created_at"))
         for enrollment in pending:
             enrollment.places_free = cls.places_free
+        from apps.enrollments.admin import flag_own_children
+
+        flag_own_children(request.user, enrolled, offered, waitlisted, pending)
 
         if request.GET.get("format") == "csv":
             return self._roster_csv(cls, enrolled, offered, waitlisted, pending)

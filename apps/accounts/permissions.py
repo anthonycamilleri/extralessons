@@ -21,9 +21,10 @@ def role_required(*roles):
 
 
 def parent_required(view_func):
+    """The family pages: parents, and admins acting as parents (User.is_parent)."""
     from .models import User
 
-    return role_required(User.Role.PARENT)(view_func)
+    return role_required(*User.FAMILY_ROLES)(view_func)
 
 
 def provider_required(view_func):

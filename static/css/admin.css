@@ -30,6 +30,8 @@
 .pill-ok, .status-enrolled { background: #e3f5e8; color: #1e6b36; border-color: #b7e0c3; }
 .pill-warn, .status-waitlisted, .status-offered, .status-requested { background: #fdf1d8; color: #7a4d00; border-color: #f2d799; }
 .pill-bad, .status-cancelled { background: #fbe3e3; color: #8a1f1f; border-color: #f0b8b8; }
+/* The admin's own child on the desk (admins are parents too). */
+.pill-own { background: #e4eefb; color: #1f4f8f; border-color: #b9d0f0; }
 
 /* Tables on the desk pages (requests, roster). */
 .desk-table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }

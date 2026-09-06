@@ -2,7 +2,7 @@
    `back`, and `show_class` (whether to repeat the class column).{% endcomment %}
 <tr>
   <td class="quiet">{{ e.created_at|date:"j M, H:i" }}</td>
-  <td>{{ e.child.full_name }}
+  <td>{{ e.child.full_name }}{% if e.own_child %} <span class="pill pill-own">Your child</span>{% endif %}
     <div class="quiet">{% if e.child.school_class %}{{ e.child.school_class }} · {% endif %}{{ e.child.date_of_birth|date:"j M Y" }}</div>
     {# `is not None`: an age of 0 is a real answer, not "in range". #}
     {% if e.age_outside_range is not None %}

@@ -18,6 +18,20 @@ from .models import Attendance, Enrollment
 from .services import EnrollmentError
 
 
+def flag_own_children(user, *groups):
+    """Set ``own_child`` on every enrollment whose child is one of the admin's
+    own (admins are parents too, see User.is_parent).
+
+    Deciding on your own child's request is allowed: a small volunteer team
+    may have nobody else to do it. It is also worth a second look, so the desk
+    says so with a pill rather than hiding it. One query, however many rows.
+    """
+    own = set(user.children.values_list("pk", flat=True))
+    for group in groups:
+        for enrollment in group:
+            enrollment.own_child = enrollment.child_id in own
+
+
 def guardian_contacts(child):
     """Guardians as 'Name <email> · phone' lines, for lists and CSV."""
     lines = []
@@ -172,6 +186,7 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
         }
         for enrollment in cancellations:
             enrollment.waitlist_count = waiting.get(enrollment.activity_class_id, 0)
+        flag_own_children(user, pending, cancellations)
 
         context = {
             **self.admin_site.each_context(request),

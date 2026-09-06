@@ -65,7 +65,7 @@
 
   <section class="register-card" id="register">
     <h2>Register</h2>
-    {% if user.is_authenticated and user.role == "PARENT" %}
+    {% if user.is_authenticated and user.is_parent %}
       {% if children %}
         <form method="post" action="{% url 'enroll' cls.pk %}">
           {% csrf_token %}

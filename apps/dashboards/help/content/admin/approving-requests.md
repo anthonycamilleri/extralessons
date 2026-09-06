@@ -45,6 +45,11 @@ confirm first, because there is no undo.
 If the child's age is outside the class's recommended range, an amber pill
 says so. It is a flag for your judgement, not a block — you can still approve.
 
+A blue **Your child** pill means the request is for one of your own children
+(your admin account is also your family account — **My family** at the top of
+the public site). You can decide on it like any other; the pill is there so a
+colleague can take it instead if your team prefers that.
+
 ## Approving several at once {#bulk}
 
 For a long queue, go to **Enrolments → Enrolments**, tick the rows you want,

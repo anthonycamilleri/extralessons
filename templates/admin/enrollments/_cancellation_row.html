@@ -3,7 +3,7 @@
 <tr>
   <td class="quiet">{{ e.cancel_requested_at|date:"j M, H:i" }}
     {% if e.cancel_requested_by %}<div class="quiet">by {{ e.cancel_requested_by }}</div>{% endif %}</td>
-  <td>{{ e.child.full_name }}
+  <td>{{ e.child.full_name }}{% if e.own_child %} <span class="pill pill-own">Your child</span>{% endif %}
     <div class="quiet">{% if e.child.school_class %}{{ e.child.school_class }} · {% endif %}enrolled {{ e.enrolled_at|date:"j M" }}</div></td>
   <td class="quiet">
     {% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}

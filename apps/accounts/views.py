@@ -84,7 +84,7 @@ def _valid_invite_or_404(token):
 @login_required
 def accept_guardian_invite(request, token):
     invite = _valid_invite_or_404(token)
-    if request.user.role != User.Role.PARENT:
+    if not request.user.is_parent:
         messages.error(request, "Only parent accounts can accept a co-parent invitation.")
         return redirect("post_login")
     # The invite grants guardianship over a child — only the account with the

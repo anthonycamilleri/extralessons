@@ -18,6 +18,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - A family page built for the school week: the next seven days of lessons across all the family's classes (today and tomorrow called out, cancelled lessons marked), and a *Next class* date on every registration.
 - Leave a class in one of two ways, decided by the withdrawal window (14 days from registration by default, configurable in Site configuration): **Withdraw** takes effect immediately and is always available for anything not yet confirmed (a pending request, a waiting-list entry, an offer) and for a confirmed place inside the window; after the window, a confirmed place shows **Cancel** instead, which files a request the office confirms or turns down. The page explains the difference, and each step is confirmed by email.
 - Per-user notification preferences (email and/or WhatsApp).
+- School admins are parents too: an admin account has the same family page, so a volunteer who runs the programme registers their own children from the account they already have. Their own children are marked *Your child* on the Requests page and rosters.
 
 **Providers**
 - Dashboard with class rosters for their own classes.
@@ -151,6 +152,16 @@ declared per ModelAdmin (`school_admin_can`, apps/accounts/admin_permissions.py)
 
 The role implies staff status (`User.save()` keeps them in step), so nobody has
 to tick anything on a new volunteer's account.
+
+The admin role includes the parent one (`User.FAMILY_ROLES`, asked as
+`user.is_parent`): the family pages, the register form on a class page and
+co-parent invitations accept both, so promoting a parent to admin keeps their
+family, and an admin never needs a second account to register their own
+children. The public site sends an admin to the Requests desk after login and
+puts *My family* beside it in the navigation. On the desk, an enrolment whose
+child is the admin's own carries a *Your child* pill (`flag_own_children`,
+apps/enrollments/admin.py): deciding on it is allowed, since a small team may
+have nobody else, but it is never a surprise.
 
 Alerts are the mirror image (`User.objects.responsible_admins(cls)`): a class
 with administrators alerts exactly them, super admins included only if they

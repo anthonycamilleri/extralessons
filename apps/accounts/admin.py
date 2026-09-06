@@ -30,7 +30,10 @@ class UserAdmin(DjangoUserAdmin):
                 "lists, sessions, the children in them and announcements to their families. "
                 "Superuser status makes them a <b>super admin</b>: every class, plus the "
                 "programme itself (school years, terms, providers, new classes, accounts, "
-                "settings). Alerts for a class with nobody assigned go to the super admins.",
+                "settings). Alerts for a class with nobody assigned go to the super admins. "
+                "Admins are parents too: the same account can add its own children and "
+                "register them from the public site (<i>My family</i> in the navigation); "
+                "their own children are marked on the Requests page and rosters.",
             },
         ),
         ("Important dates", {"fields": ("last_login", "date_joined")}),

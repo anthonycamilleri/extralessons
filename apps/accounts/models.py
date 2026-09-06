@@ -62,6 +62,12 @@ class User(AbstractUser):
         PROVIDER = "PROVIDER", "Course provider"
         PARENT = "PARENT", "Parent"
 
+    # The roles that may use the family pages: add children, register them,
+    # answer offers, accept a co-parent invitation. School admins are usually
+    # parents at the school too, so the admin role includes the parent one
+    # rather than forcing a second account under a second email address.
+    FAMILY_ROLES = frozenset({Role.PARENT, Role.ADMIN})
+
     username = None
     email = models.EmailField("email address", unique=True)
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.PARENT)
@@ -98,6 +104,13 @@ class User(AbstractUser):
             if kwargs.get("update_fields") is not None:
                 kwargs["update_fields"] = set(kwargs["update_fields"]) | {"is_staff"}
         super().save(*args, **kwargs)
+
+    @property
+    def is_parent(self):
+        """May use the family side of the site (see FAMILY_ROLES). Nothing
+        here depends on having children yet: an admin with none sees an
+        empty family page and the "add a child" button, like a new parent."""
+        return self.role in self.FAMILY_ROLES
 
     @property
     def is_super_admin(self):
