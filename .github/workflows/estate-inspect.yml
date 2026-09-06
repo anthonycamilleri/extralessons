@@ -121,7 +121,7 @@ jobs:
         run: |
           for i in 1 2 3; do
             deploy/smoke.sh "$APP_URL" || true
-            [ $i -lt 3 ] && sleep 20
+            [ $i -lt 3 ] && sleep 20 || true
           done
 
   render:
