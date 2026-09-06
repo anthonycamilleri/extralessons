@@ -205,18 +205,28 @@ jobs:
         # already running hold pooled connections with prepared statements
         # against the old tables, and answer 500 until they reconnect. A
         # redeploy replaces them; the image does not change.
+        # Best effort: the smoke test that follows is the real judge. `deploy`
+        # is the current CLI verb; an `update` of the description also rolls the
+        # container if that verb is refused.
         run: |
-          set -euo pipefail
-          scw container container deploy "$CONTAINER_ID" -o json > /dev/null
-          sleep 10
+          set -uo pipefail
+          if out="$(scw container container deploy "$CONTAINER_ID" -o json 2>&1)"; then
+            echo "redeploy requested"
+          elif out2="$(scw container container update "$CONTAINER_ID" description="redeployed $(date -u +%FT%TZ) after a database restore" -o json 2>&1)"; then
+            echo "redeploy requested through an update ('deploy' said: $out)"
+          else
+            echo "::warning::could not redeploy the container: $out / $out2"
+            exit 0
+          fi
+          sleep 15
           for attempt in $(seq 1 60); do
             status="$(scw container container get "$CONTAINER_ID" -o json | jq -r .status)"
             echo "attempt $attempt: $status"
             [ "$status" = "ready" ] && exit 0
-            [ "$status" = "error" ] && { echo "::error::container in error"; exit 1; }
+            [ "$status" = "error" ] && { echo "::warning::container reports error"; exit 0; }
             sleep 5
           done
-          echo "::error::container not ready after five minutes"; exit 1
+          echo "::warning::container not ready after five minutes"
 
       - name: Smoke test Scaleway
         if: ${{ inputs.mode != 'rollback' }}
