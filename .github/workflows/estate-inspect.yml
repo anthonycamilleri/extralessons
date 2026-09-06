@@ -83,6 +83,47 @@ jobs:
           scw iam application list -o json | jq -r '.[] | "\(.name)  id=\(.id)  keys=\(.nb_api_keys)"'
           scw iam api-key list -o json | jq -r '.[] | "key \(.access_key)  app=\(.application_id // "-")  user=\(.user_id // "-")  default_project=\(.default_project_id)  expires=\(.expires_at // "never")"'
 
+  database-probe:
+    name: Scaleway database probe
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16 > /dev/null
+      - name: Twelve fresh connections, one after another
+        # Each psql call is a new client, so a pooled backend that is broken
+        # or carries leaked session settings shows up as an odd line here.
+        # The first line may be slow: that is the database's cold start.
+        run: |
+          set -uo pipefail
+          db="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json | jq -r '.environment_variables.DATABASE_URL // empty')"
+          [ -n "$db" ] || { echo "::error::no DATABASE_URL on the migrate job"; exit 1; }
+          echo "::add-mask::$db"
+          for i in $(seq 1 12); do
+            start=$(date +%s%N)
+            out="$(psql "$db" --no-psqlrc -Atc "select current_setting('search_path') || ' | children=' || (select count(*) from accounts_child) || ' | backend_pid=' || pg_backend_pid() || ' | up_since=' || pg_postmaster_start_time()::text" 2>&1)"
+            ms=$(( ($(date +%s%N) - start) / 1000000 ))
+            echo "$i: ${ms}ms  $out"
+            sleep 2
+          done
+      - name: The site, three times, twenty seconds apart
+        run: |
+          for i in 1 2 3; do
+            deploy/smoke.sh "$APP_URL" || true
+            [ $i -lt 3 ] && sleep 20
+          done
+
   render:
     name: Render
     runs-on: ubuntu-latest
