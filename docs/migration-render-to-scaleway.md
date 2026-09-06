@@ -88,7 +88,10 @@ and closed again after, whatever happens. The Scaleway database ends up as a
 snapshot of production, verified: row counts for every table against the
 counts taken at dump time, total bytes of uploaded images, and the migration
 ledger. Then the migrate job runs (a no-op if Render and Scaleway are on the
-same commit) and the generated endpoint is smoke-tested.
+same commit), the container is redeployed so its instances drop the pooled
+connections that still point at the tables the restore replaced (without this
+they answer 500 until they reconnect), and the generated endpoint is
+smoke-tested.
 
 Now do the **testing** below against the generated endpoint. Everything you
 see there is a copy; break it freely. Rehearse as many times as you like.
@@ -106,7 +109,8 @@ anything queued. Then *Scaleway: move production from Render* with
 2. waits until Render stops answering, then a little longer for in-flight
    requests to commit;
 3. copies and verifies the database exactly as in the rehearsal;
-4. runs the migrate job on Scaleway and smoke-tests the generated endpoint;
+4. runs the migrate job on Scaleway, redeploys the container and smoke-tests
+   the generated endpoint;
 5. prints the DNS records to change.
 
 From step 1 to step 4 is typically five to ten minutes, during which the site
@@ -203,6 +207,7 @@ Against the generated endpoint after a rehearsal, and against
 | Migrate: pg_restore exits non-zero | Something in the dump the managed database refuses | The log names the object. The workflow already skips schema and extension entries; anything else is new — fix and re-run, Render is untouched (rehearsal) or suspended (cutover) |
 | Migrate: row counts differ | The source changed during the copy | Only possible in rehearsal (Render live). Harmless there; a cutover freezes first |
 | Smoke: 400 on the catalogue | `ALLOWED_HOSTS` missing the hostname | Configure again; check `domain`/`apex_domain` inputs |
+| Smoke: 500 on every database-backed page right after a copy | Running instances still hold connections to the tables the restore replaced | The workflow redeploys the container for this; if it recurs, `scw container container deploy <id>` and wait for `ready` |
 | Smoke: redirect loop | Platform forwarding HTTP without `X-Forwarded-Proto` | Set `SECURE_SSL_REDIRECT=false` on the container (scaleway-setup.md, *Things that will bite you*) |
 | Attach domains: refused | DNS not yet pointing at the container, or still cached | Wait for the TTL; `dig +short` must show the Scaleway hostname |
 | Emails not arriving after cutover | Token not copied, or ZeptoMail blocking the new sending IPs (it does not filter by IP, but check) | The notification log shows the error text per row; *Inspect* shows whether `ZEPTOMAIL_SEND_MAIL_TOKEN` is set on the container |

@@ -199,6 +199,25 @@ jobs:
         # difference; otherwise it is a no-op that proves the ledger is sane.
         run: deploy/scw-run-job.sh "$JOB_MIGRATE_ID"
 
+      - name: Redeploy the container so it opens fresh connections
+        if: ${{ inputs.mode != 'rollback' }}
+        # The restore dropped and recreated every table. Instances that were
+        # already running hold pooled connections with prepared statements
+        # against the old tables, and answer 500 until they reconnect. A
+        # redeploy replaces them; the image does not change.
+        run: |
+          set -euo pipefail
+          scw container container deploy "$CONTAINER_ID" -o json > /dev/null
+          sleep 10
+          for attempt in $(seq 1 60); do
+            status="$(scw container container get "$CONTAINER_ID" -o json | jq -r .status)"
+            echo "attempt $attempt: $status"
+            [ "$status" = "ready" ] && exit 0
+            [ "$status" = "error" ] && { echo "::error::container in error"; exit 1; }
+            sleep 5
+          done
+          echo "::error::container not ready after five minutes"; exit 1
+
       - name: Smoke test Scaleway
         if: ${{ inputs.mode != 'rollback' }}
         run: deploy/smoke.sh "https://${{ steps.scw.outputs.GENERATED_HOST }}"
