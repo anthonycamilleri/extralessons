@@ -43,6 +43,27 @@ configure workflow replaces the environment wholesale, and with `S3_BUCKET`
 absent the app stores and serves uploads from the database, as it does on
 Render today.
 
+## Where things stand (6 September 2026)
+
+Done, from this branch, with Render still serving parents:
+
+- *Scaleway: configure the estate* applied: container and both jobs carry the
+  production environment, with `SECRET_KEY`, the ZeptoMail token and
+  `MCP_API_TOKEN` copied from Render.
+- *Deploy to Scaleway* run from the branch: the current image is on the
+  container and both jobs; migrations and `ensure_admin` ran.
+- *Scaleway: move production from Render* in **rehearsal** mode, five runs. The
+  first three found and fixed two Serverless SQL Database quirks (see *What can
+  go wrong*); the last one passed every step: 29 tables, 2,061 rows and 1.75 MB
+  of images verified identical, migrate job green, container redeployed,
+  smoke test 0 failures on the generated endpoint.
+
+So the Scaleway estate is a working, verified snapshot of production as of
+19:42 UTC. Steps 1 to 4 below are therefore already satisfied for a first
+look; what remains is your testing (against the generated endpoint), the
+merge, and then steps 5 to 9. Re-run the rehearsal after merging if a day or
+more has passed, so the snapshot you test is fresh.
+
 ## Order of operations
 
 Every workflow below is under *Actions → (name) → Run workflow*. Run them from
