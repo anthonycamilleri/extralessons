@@ -20,6 +20,8 @@ jobs:
   scaleway:
     name: Scaleway (fr-par)
     runs-on: ubuntu-latest
+    # The deploy workflows pin their secrets to this environment.
+    environment: production
     env:
       SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
       SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
@@ -56,7 +58,7 @@ jobs:
         run: |
           echo "## namespaces"; scw container namespace list -o json | jq -r '.[] | "\(.name)  id=\(.id)  status=\(.status)  registry=\(.registry_namespace_id)"'
           echo "## containers"
-          scw container container list -o json | jq -r '.[] | "\(.name)  id=\(.id)  status=\(.status)\n  image=\(.registry_image // .image)\n  endpoint=\(.public_endpoint // .domain_name)\n  scale=\(.min_scale)..\(.max_scale) mem=\(.memory_limit) cpu=\(.cpu_limit) timeout=\(.timeout) privacy=\(.privacy) https_only=\(.http_option // .https_connections_only)\n  probe=\(.health_check // .liveness_probe | tostring)\n  env keys=\(.environment_variables | keys | join(","))\n  secret keys=\([.secret_environment_variables[]?.key] | join(","))\n  domains=\([.domain_name] | join(","))"'
+          scw container container list -o json | jq -r '.[] | "\(.name)  id=\(.id)  status=\(.status)\n  image=\(.registry_image // .image)\n  endpoint=\(.public_endpoint // .domain_name)\n  scale=\(.min_scale)..\(.max_scale) mem=\(.memory_limit) cpu=\(.cpu_limit) timeout=\(.timeout) privacy=\(.privacy) https_only=\(.http_option // .https_connections_only)\n  probe=\(.health_check // .liveness_probe | tostring)\n  env keys=\(.environment_variables | keys | join(","))\n  secret env=\(.secret_environment_variables | tostring)\n  region=\(.region) created=\(.created_at) updated=\(.updated_at)"'
           for id in $(scw container container list -o json | jq -r '.[].id'); do
             echo "## custom domains of $id"; scw container domain list container-id="$id" -o json | jq -r '.[] | "\(.hostname)  status=\(.status)  url=\(.url)"'
           done
@@ -84,6 +86,7 @@ jobs:
   render:
     name: Render
     runs-on: ubuntu-latest
+    environment: production
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       API: https://api.render.com/v1
