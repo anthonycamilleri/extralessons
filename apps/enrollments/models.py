@@ -136,6 +136,8 @@ class Enrollment(models.Model):
     objects = EnrollmentQuerySet.as_manager()
 
     class Meta:
+        verbose_name = "enrolment"
+        verbose_name_plural = "enrolments"
         ordering = ["created_at"]
         constraints = [
             models.UniqueConstraint(

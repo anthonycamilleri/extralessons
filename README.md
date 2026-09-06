@@ -26,7 +26,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 
 **School admin**
 - Set up the school year once — term dates plus every holiday period — and every class generated in it skips those days automatically.
-- Review queue: approve or reject enrollment requests (approve enrolls directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
+- Review queue: approve or reject enrolment requests (approve enrols directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
 - Cancellation requests on the same page and on the roster: a family that asks to leave after the withdrawal window keeps the seat until an admin confirms the cancellation (the family is told, and a freed seat with a waiting list raises the usual alert) or keeps the place (the family is told to expect a word). Both count towards the requests badge.
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48). A full class can still be offered to: the roster warns and asks for confirmation, then shows how far over capacity the class is.
 - Optional email alerts on new requests and freed seats.
@@ -91,7 +91,7 @@ sweep.
 There is no queue broker and no always-on worker: the outbox lives in the
 database the app already has.
 
-**Enrollment state machine.** All transitions go through
+**Enrolment state machine.** All transitions go through
 `apps/enrollments/services.py`, which takes a row lock on the class as a
 capacity mutex so a class can never be oversubscribed under concurrent
 requests. The lock is row-level `SELECT ... FOR UPDATE` inside a transaction,

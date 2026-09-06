@@ -6,13 +6,13 @@ class Event(models.TextChoices):
     """Every notification the system can send, parent-facing and admin-facing."""
 
     # Parent-facing
-    ENROLLMENT_REQUESTED = "ENROLLMENT_REQUESTED", "Enrollment requested (receipt)"
+    ENROLLMENT_REQUESTED = "ENROLLMENT_REQUESTED", "Enrolment requested (receipt)"
     REGISTRATION_CONFIRMED = "REGISTRATION_CONFIRMED", "Registration confirmed"
     REQUEST_REJECTED = "REQUEST_REJECTED", "Request not approved"
     WAITLISTED = "WAITLISTED", "Added to waiting list"
     WAITLIST_OFFER = "WAITLIST_OFFER", "Seat offered from waiting list"
     OFFER_EXPIRED = "OFFER_EXPIRED", "Waiting-list offer expired"
-    SUBSCRIPTION_CANCELLED = "SUBSCRIPTION_CANCELLED", "Enrollment cancelled by the school"
+    SUBSCRIPTION_CANCELLED = "SUBSCRIPTION_CANCELLED", "Enrolment cancelled by the school"
     WITHDRAWN = "WITHDRAWN", "Withdrawn by the family (receipt)"
     CANCELLATION_REQUESTED = "CANCELLATION_REQUESTED", "Cancellation requested (receipt)"
     CANCELLATION_CONFIRMED = "CANCELLATION_CONFIRMED", "Cancellation confirmed"
@@ -21,7 +21,7 @@ class Event(models.TextChoices):
     GUARDIAN_INVITE = "GUARDIAN_INVITE", "Co-parent invitation"
     BROADCAST = "BROADCAST", "Announcement"
     # Admin-facing (email only)
-    ADMIN_NEW_REQUEST = "ADMIN_NEW_REQUEST", "Admin: new enrollment request"
+    ADMIN_NEW_REQUEST = "ADMIN_NEW_REQUEST", "Admin: new enrolment request"
     ADMIN_SEAT_FREED = "ADMIN_SEAT_FREED", "Admin: seat freed"
     ADMIN_OFFER_LAPSED = "ADMIN_OFFER_LAPSED", "Admin: offer declined/expired"
     ADMIN_CANCELLATION_REQUESTED = (

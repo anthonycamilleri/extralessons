@@ -177,7 +177,10 @@ class GuardianInviteAdmin(admin.ModelAdmin):
 class SiteConfigAdmin(admin.ModelAdmin):
     fieldsets = (
         ("School", {"fields": ("school_name", "sender_name", "contact_email", "catalogue_intro")}),
-        ("Registrations", {"fields": ("signup_open", "offer_ttl_hours")}),
+        (
+            "Registrations",
+            {"fields": ("signup_open", "offer_ttl_hours", "withdrawal_window_days")},
+        ),
         ("Admin alerts", {"fields": ("notify_admins_new_request", "notify_admins_seat_freed")}),
         (
             "Terms and conditions",

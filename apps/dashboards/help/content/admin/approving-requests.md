@@ -47,7 +47,7 @@ says so. It is a flag for your judgement, not a block — you can still approve.
 
 ## Approving several at once {#bulk}
 
-For a long queue, go to **Enrollments → Enrollments**, tick the rows you want,
+For a long queue, go to **Enrolments → Enrolments**, tick the rows you want,
 and pick one of these from the **Action** menu:
 
 - *Approve selected requests*
@@ -64,8 +64,8 @@ term is no longer the active one. Fix the class first, then come back.
 
 ## Changing your mind {#undo}
 
-There is no undo button, but nothing is stuck. Go to **Enrollments →
-Enrollments**, find the row, and use the action *Cancel selected enrollments
+There is no undo button, but nothing is stuck. Go to **Enrolments →
+Enrolments**, find the row, and use the action *Cancel selected enrolments
 (notifies families)*. The family is told — which is why it is better to be
 sure first.
 
@@ -74,8 +74,14 @@ sure first.
 The lower half of the same page is **Cancellation requests**.
 
 A parent can withdraw a child on their own for a short while after
-registering (usually the first two weeks). After that, they can only *ask*,
-and the request lands here. **The child keeps the place until you decide.**
+registering — two weeks unless you change it, under **Accounts → Site
+configuration → Registrations → Withdrawal window days**. After that, they can
+only *ask*, and the request lands here. **The child keeps the place until you
+decide.**
+
+> If you change that number, change the terms and conditions too (Site
+> configuration, at the bottom). They state the same period in words, and
+> nothing keeps the two in step for you.
 
 ![The Cancellation requests section, with Confirm cancellation and Keep place buttons](cancellation-requests.png)
 

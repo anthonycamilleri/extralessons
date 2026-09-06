@@ -3,7 +3,7 @@ badge, the roster and its CSV, bulk actions, and the old dashboard's redirects."
 import pytest
 from django.urls import reverse
 
-from apps.accounts.models import User
+from apps.accounts.models import SiteConfig, User
 from apps.enrollments import services
 from apps.enrollments.models import Enrollment
 from apps.notifications.models import Event, Notification
@@ -333,3 +333,44 @@ class TestOldDashboardRedirects:
 
         body = Notification.objects.get(event=Event.ADMIN_NEW_REQUEST).rendered_body
         assert reverse("admin:enrollments_enrollment_requests") in body
+
+
+class TestTheWordsOnScreen:
+    """Two things that rotted silently once already: a setting the form drops,
+    and the admin menu contradicting the page under it."""
+
+    def test_the_withdrawal_window_is_editable(self, client):
+        """SiteConfigAdmin lists its fields explicitly, so a new one is easy to
+        leave out — and then only a shell can change it."""
+        client.force_login(SuperAdminFactory())
+        config = SiteConfig.get()
+        page = client.get(
+            reverse("admin:accounts_siteconfig_change", args=[config.pk])
+        ).content.decode()
+        assert 'name="withdrawal_window_days"' in page
+
+    def test_saving_the_withdrawal_window_sticks(self, client):
+        client.force_login(SuperAdminFactory())
+        config = SiteConfig.get()
+        response = client.post(
+            reverse("admin:accounts_siteconfig_change", args=[config.pk]),
+            {
+                "school_name": config.school_name,
+                "sender_name": config.sender_name,
+                "contact_email": config.contact_email,
+                "catalogue_intro": config.catalogue_intro,
+                "offer_ttl_hours": config.offer_ttl_hours,
+                "withdrawal_window_days": 21,
+                "terms_markdown": config.terms_markdown,
+            },
+        )
+        assert response.status_code == 302, response.context["adminform"].form.errors
+        assert SiteConfig.get().withdrawal_window_days == 21
+
+    def test_the_admin_says_enrolment(self, client):
+        """British spelling, and in step with the help guide, which names this
+        menu literally."""
+        client.force_login(SuperAdminFactory())
+        page = client.get(reverse("admin:index")).content.decode()
+        assert "Enrolments" in page
+        assert "Enrollment" not in page

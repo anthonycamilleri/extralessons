@@ -262,11 +262,13 @@ class SiteConfig(models.Model):
         help_text="Days after registering during which a family can withdraw a "
         "confirmed place themselves, with immediate effect. After that they "
         "can only ask to cancel, and an admin confirms (or keeps the place). "
-        "Requests, waiting-list entries and offers can always be withdrawn.",
+        "Requests, waiting-list entries and offers can always be withdrawn. "
+        "The terms and conditions below spell this period out in words — "
+        "change them to match if you change this.",
     )
     notify_admins_new_request = models.BooleanField(
         default=True,
-        help_text="Email school admins when a new enrollment request arrives.",
+        help_text="Email school admins when a new enrolment request arrives.",
     )
     notify_admins_seat_freed = models.BooleanField(
         default=True,

@@ -4,7 +4,7 @@
 <h1>Invite a co-parent for {{ child.full_name }}</h1>
 <div class="panel">
   <p class="muted">They will receive an email invitation. Once accepted, they can manage
-     {{ child.first_name }}'s enrollments and will receive all class notifications.</p>
+     {{ child.first_name }}'s enrolments and will receive all class notifications.</p>
   <form method="post">
     {% csrf_token %}
     {{ form.as_p }}

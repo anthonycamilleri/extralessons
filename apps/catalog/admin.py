@@ -231,7 +231,7 @@ class ActivityClassForm(forms.ModelForm):
                 raise forms.ValidationError(
                     f"Capacity cannot go below the {seats_taken} seat(s) currently "
                     "held by enrolled children and outstanding offers. Cancel "
-                    "enrollments first if the class must shrink."
+                    "enrolments first if the class must shrink."
                 )
         return capacity
 
@@ -549,7 +549,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             messages.WARNING,
         )
 
-    @admin.action(description="Archive classes (only allowed with no active enrollments)")
+    @admin.action(description="Archive classes (only allowed with no active enrolments)")
     def archive_classes(self, request, queryset):
         from apps.enrollments.models import Enrollment
 
@@ -562,7 +562,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             self.message_user(
                 request,
                 f"Skipped {blocked.count()} class(es) that still have active "
-                "enrollments — cancel the class (or its enrollments) first.",
+                "enrolments — cancel the class (or its enrolments) first.",
                 messages.WARNING,
             )
         if archived:

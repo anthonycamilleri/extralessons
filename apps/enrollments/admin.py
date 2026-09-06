@@ -308,7 +308,7 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
             messages.WARNING,
         )
 
-    @admin.action(description="Cancel selected enrollments (notifies families)", permissions=["change"])
+    @admin.action(description="Cancel selected enrolments (notifies families)", permissions=["change"])
     def cancel_enrollments(self, request, queryset):
         cancelled = 0
         for enrollment in queryset.filter(status__in=Enrollment.ACTIVE_STATUSES):
@@ -318,7 +318,7 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
                 continue  # e.g. cancelled concurrently by the parent
             cancelled += 1
         self.message_user(
-            request, f"Cancelled {cancelled} enrollment(s).", messages.WARNING
+            request, f"Cancelled {cancelled} enrolment(s).", messages.WARNING
         )
 
 
