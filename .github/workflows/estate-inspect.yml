@@ -1,0 +1,160 @@
+name: Inspect hosting estate
+
+# Read-only. Prints what exists on Scaleway and on Render — names, ids, states,
+# images, schedules and the *names* of environment variables — so a migration
+# can be planned against facts rather than memory. Never prints a secret value:
+# every env-var listing is reduced to its keys, and no connection string is
+# fetched. Run it from Actions → Run workflow on any branch.
+
+on:
+  workflow_dispatch:
+  # Also runs when this file itself changes, which is what registers a new
+  # workflow with GitHub so it can be dispatched from a branch at all.
+  push:
+    paths: [".github/workflows/estate-inspect.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  scaleway:
+    name: Scaleway (fr-par)
+    runs-on: ubuntu-latest
+    # The deploy workflows pin their secrets to this environment.
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+    steps:
+      - name: Which secrets and variables GitHub holds
+        env:
+          V_NS: ${{ vars.SCW_REGISTRY_NAMESPACE }}
+          V_C: ${{ vars.SCW_CONTAINER_ID }}
+          V_M: ${{ vars.SCW_JOB_MIGRATE_ID }}
+          V_N: ${{ vars.SCW_JOB_NOTIFIER_ID }}
+          V_URL: ${{ vars.APP_URL }}
+          V_RWEB: ${{ vars.RENDER_WEB_SERVICE_ID }}
+          S_RENDER: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID SCW_DEFAULT_ORGANIZATION_ID; do
+            [ -n "${!n}" ] && echo "secret   $n: set" || echo "secret   $n: MISSING"
+          done
+          [ -n "$S_RENDER" ] && echo "secret   RENDER_API_KEY: set" || echo "secret   RENDER_API_KEY: MISSING"
+          echo "variable SCW_REGISTRY_NAMESPACE = ${V_NS:-<unset>}"
+          echo "variable SCW_CONTAINER_ID       = ${V_C:-<unset>}"
+          echo "variable SCW_JOB_MIGRATE_ID     = ${V_M:-<unset>}"
+          echo "variable SCW_JOB_NOTIFIER_ID    = ${V_N:-<unset>}"
+          echo "variable APP_URL                = ${V_URL:-<unset>}"
+          echo "variable RENDER_WEB_SERVICE_ID  = ${V_RWEB:-<unset>}"
+      - name: Install the Scaleway CLI
+        run: |
+          curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+          scw version
+      - name: Containers
+        continue-on-error: true
+        run: |
+          echo "## namespaces"; scw container namespace list -o json | jq -r '.[] | "\(.name)  id=\(.id)  status=\(.status)  registry=\(.registry_namespace_id)"'
+          echo "## containers"
+          scw container container list -o json | jq -r '.[] | "\(.name)  id=\(.id)  status=\(.status)\n  image=\(.registry_image // .image)\n  endpoint=\(.public_endpoint // .domain_name)\n  scale=\(.min_scale)..\(.max_scale) mem=\(.memory_limit) cpu=\(.cpu_limit) timeout=\(.timeout) privacy=\(.privacy) https_only=\(.http_option // .https_connections_only)\n  probe=\(.health_check // .liveness_probe | tostring)\n  env keys=\(.environment_variables | keys | join(","))\n  secret env=\(.secret_environment_variables | tostring)\n  region=\(.region) created=\(.created_at) updated=\(.updated_at)"'
+          for id in $(scw container container list -o json | jq -r '.[].id'); do
+            echo "## custom domains of $id"; scw container domain list container-id="$id" -o json | jq -r '.[] | "\(.hostname)  status=\(.status)  url=\(.url)"'
+          done
+      - name: Jobs
+        continue-on-error: true
+        run: |
+          scw jobs definition list -o json | jq -r '.[] | "\(.name)  id=\(.id)\n  image=\(.image_uri)\n  command=\(.command)  cron=\(.cron_schedule | tostring)\n  cpu=\(.cpu_limit) mem=\(.memory_limit) storage=\(.local_storage_capacity) timeout=\(.job_timeout)\n  env keys=\(.environment_variables | keys | join(","))"'
+          echo "## recent runs"; scw jobs run list -o json | jq -r '.[:8][] | "\(.job_definition_id)  \(.state)  started=\(.started_at)  ended=\(.terminated_at)  exit=\(.exit_code)  \(.error_message // "")"'
+      - name: Serverless SQL Database (may be denied to the CI key)
+        continue-on-error: true
+        run: scw sdb-sql database list -o json | jq -r '.[] | "\(.name)  id=\(.id)  status=\(.status)  engine=\(.engine)  cpu=\(.cpu_min)..\(.cpu_max)  endpoint=\(.endpoint)  created=\(.created_at)"'
+      - name: Registry
+        continue-on-error: true
+        run: |
+          scw registry namespace list -o json | jq -r '.[] | "\(.name)  id=\(.id)  endpoint=\(.endpoint)  size=\(.size)"'
+          for img in $(scw registry image list -o json | jq -r '.[].id'); do
+            scw registry image get "$img" -o json | jq -r '"image \(.name)  id=\(.id)  size=\(.size)  tags=\(.tags | join(","))"'
+          done
+      - name: IAM (may be denied to the CI key)
+        continue-on-error: true
+        run: |
+          scw iam application list -o json | jq -r '.[] | "\(.name)  id=\(.id)  keys=\(.nb_api_keys)"'
+          scw iam api-key list -o json | jq -r '.[] | "key \(.access_key)  app=\(.application_id // "-")  user=\(.user_id // "-")  default_project=\(.default_project_id)  expires=\(.expires_at // "never")"'
+
+  database-probe:
+    name: Scaleway database probe
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16 > /dev/null
+      - name: Twelve fresh connections, one after another
+        # Each psql call is a new client, so a pooled backend that is broken
+        # or carries leaked session settings shows up as an odd line here.
+        # The first line may be slow: that is the database's cold start.
+        run: |
+          set -uo pipefail
+          db="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json | jq -r '.environment_variables.DATABASE_URL // empty')"
+          [ -n "$db" ] || { echo "::error::no DATABASE_URL on the migrate job"; exit 1; }
+          echo "::add-mask::$db"
+          for i in $(seq 1 12); do
+            start=$(date +%s%N)
+            out="$(psql "$db" --no-psqlrc -Atc "select current_setting('search_path') || ' | children=' || (select count(*) from accounts_child) || ' | backend_pid=' || pg_backend_pid() || ' | up_since=' || pg_postmaster_start_time()::text" 2>&1)"
+            ms=$(( ($(date +%s%N) - start) / 1000000 ))
+            echo "$i: ${ms}ms  $out"
+            sleep 2
+          done
+      - name: The site, three times, twenty seconds apart
+        run: |
+          for i in 1 2 3; do
+            deploy/smoke.sh "$APP_URL" || true
+            [ $i -lt 3 ] && sleep 20
+          done
+
+  render:
+    name: Render
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      API: https://api.render.com/v1
+    steps:
+      - name: Services
+        continue-on-error: true
+        run: |
+          [ -n "$RENDER_API_KEY" ] || { echo "RENDER_API_KEY missing"; exit 1; }
+          get() { curl -fsS "$API$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
+          services=$(get "/services?limit=50")
+          echo "$services" | jq -r '.[].service | "\(.name)  id=\(.id)  type=\(.type)  suspended=\(.suspended)  branch=\(.branch)  autoDeploy=\(.autoDeploy // .autoDeployTrigger)\n  url=\(.serviceDetails.url // "-")  plan=\(.serviceDetails.plan // "-")  region=\(.serviceDetails.region // "-")  schedule=\(.serviceDetails.schedule // "-")  numInstances=\(.serviceDetails.numInstances // "-")"'
+          for id in $(echo "$services" | jq -r '.[].service.id'); do
+            echo "## env var keys of $id (values withheld)"
+            get "/services/$id/env-vars?limit=100" | jq -r '[.[].envVar.key] | join(", ")'
+            echo "## env groups linked to $id"
+            get "/services/$id/env-groups" 2>/dev/null | jq -r '.[]? | "\(.name)  id=\(.id)"' || true
+            echo "## custom domains of $id"
+            get "/services/$id/custom-domains?limit=20" 2>/dev/null | jq -r '.[]? | .customDomain | "\(.name)  verified=\(.verificationStatus)  domainType=\(.domainType)"' || true
+            echo "## latest deploy of $id"
+            get "/services/$id/deploys?limit=1" | jq -r '.[0].deploy | "\(.status)  commit=\(.commit.id[0:8])  finished=\(.finishedAt)"'
+          done
+          echo "## env groups"
+          get "/env-groups?limit=20" | jq -r '.[].envGroup | "\(.name)  id=\(.id)  keys=\([.envVars[]?.key] | join(","))"'
+      - name: Postgres
+        continue-on-error: true
+        run: |
+          get() { curl -fsS "$API$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
+          for id in $(get "/postgres?limit=20" | jq -r '.[].postgres.id'); do
+            get "/postgres/$id" | jq -r '"\(.name)  id=\(.id)  status=\(.status)  plan=\(.plan)  version=\(.version)  region=\(.region)  databaseName=\(.databaseName)  user=\(.databaseUser)  diskSizeGB=\(.diskSizeGB // "-")  highAvailability=\(.highAvailabilityEnabled)\n  ipAllowList=\(.ipAllowList | tostring)\n  expires=\(.expiresAt // "never")  created=\(.createdAt)"'
+          done

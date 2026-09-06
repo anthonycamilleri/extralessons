@@ -1,18 +1,14 @@
-# Deploying Extralessons on Scaleway Serverless (legacy)
-
-> **Superseded.** Production now runs on Render — see
-> [render-setup.md](render-setup.md). Nothing here is triggered automatically
-> any more: `.github/workflows/deploy.yml` only runs from *Actions → Run
-> workflow*, and `deploy/provision.sh` is kept for reference and for tearing
-> the old estate down. The Scaleway-specific environment variables (IAM
-> credentials in `DATABASE_URL`, `S3_*` pointing at `fr-par`) still work
-> unchanged if you ever need them.
+# Deploying Extralessons on Scaleway Serverless
 
 End-to-end setup, from an empty Scaleway project to a deploying-on-push
 pipeline. Everything is in `fr-par`, the only region that currently offers all
 three of Serverless Containers, Serverless Jobs and Serverless SQL Database.
 
-Budget about an hour for the first run.
+Budget about an hour for the first run. If the estate already exists — it does
+for `esljparents.eu` — skip to *Operating it*; the environment is kept in step
+by the *Scaleway: configure the estate* workflow, and
+[migration-render-to-scaleway.md](migration-render-to-scaleway.md) is the
+runbook that brought the data back from Render.
 
 ## The short version
 
@@ -23,13 +19,19 @@ exists:
 ```sh
 scw init                                      # once, interactive
 cp deploy/scaleway.env.example deploy/scaleway.env
-$EDITOR deploy/scaleway.env                   # domain, admin email, SMTP password
+$EDITOR deploy/scaleway.env                   # domain, admin email, ZeptoMail token
 ./deploy/provision.sh
 ./deploy/github-config.sh                     # writes the Actions secrets (needs gh)
 ```
 
-It prints the two things it cannot do for you — the DNS record, and creating
-the first admin user — and the exact commands for both.
+It prints the one thing it cannot do for you — the DNS record — and the exact
+command to attach the domain afterwards. The first administrator is created by
+the migrate job (`manage.py ensure_admin`) and emailed a set-password link.
+
+The variables every role runs with live in one file,
+`deploy/scaleway-env.lib.sh`; `provision.sh` applies them to a fresh estate and
+the *Scaleway: configure the estate* workflow to an existing one. Add a setting
+there and both paths carry it.
 
 Read the rest of this document to understand what it made and why, or to do it
 by hand. The commands here and in the script are the same commands.
@@ -47,13 +49,13 @@ by hand. The commands here and in the script are the same commands.
                     │ "extralessons-web"   │  Scales 0..N, static files
                     └──────────┬───────────┘  served from inside by WhiteNoise.
                                │
-              ┌────────────────┼──────────────────┐
-              │                │                  │
-   ┌──────────▼─────────┐  ┌───▼────────────┐  ┌──▼──────────────┐
-   │ Serverless SQL DB  │  │ Object Storage │  │ SMTP / WhatsApp │
-   │ (PostgreSQL)       │  │ (class images) │  │ (outbound only) │
-   └──────────▲─────────┘  └────────────────┘  └──▲──────────────┘
-              │                                    │
+              ┌────────────────┴──────────────────┐
+              │                                   │
+   ┌──────────▼─────────┐                    ┌────▼─────────────────┐
+   │ Serverless SQL DB  │  rows + uploaded   │ ZeptoMail API /      │
+   │ (PostgreSQL 16)    │  class images      │ WhatsApp (outbound)  │
+   └──────────▲─────────┘  (apps/media)      └────▲─────────────────┘
+              │                                   │
    ┌──────────┴──────────────┐        ┌────────────┴─────────────┐
    │ Job: extralessons-      │        │ Job: extralessons-       │
    │      migrate            │        │      notifier            │
@@ -62,7 +64,10 @@ by hand. The commands here and in the script are the same commands.
 ```
 
 One image, three roles. The container serves HTTP; the two jobs run the same
-image with a different start command. Nothing is deployed twice.
+image with a different start command. Nothing is deployed twice, and there is
+no bucket: uploaded class images are small JPEGs stored in the database
+(`apps/media`), served at `/media/` with immutable caching, and backed up with
+everything else.
 
 **Why the notifier is a Job and not a second container.** The outbox worker is a
 loop that mostly sleeps. As a container it could never scale to zero, so you
@@ -84,7 +89,7 @@ Then set the variables the rest of this guide uses:
 export SCW_DEFAULT_REGION=fr-par
 export PROJECT_ID=$(scw config get default-project-id)
 export APP_NAME=extralessons
-export DOMAIN=activities.example.com      # your domain
+export DOMAIN=www.esljparents.eu          # your domain
 ```
 
 ## 1. An IAM application for the app itself
@@ -98,35 +103,25 @@ rotated without locking you out.
 APP_ID=$(scw iam application create name="$APP_NAME-runtime" \
   description="Extralessons running on Serverless" -o json | jq -r '.id')
 
-# ServerlessSQLDatabaseReadWrite: query the database.
-# ObjectStorageFullAccess:        read/write the media bucket.
+# ServerlessSQLDatabaseReadWrite: query the database. Nothing else — the app
+# has no bucket to reach.
 scw iam policy create name="$APP_NAME-runtime" application-id="$APP_ID" \
   rules.0.project-ids.0="$PROJECT_ID" \
-  rules.0.permission-set-names.0=ServerlessSQLDatabaseReadWrite \
-  rules.1.project-ids.0="$PROJECT_ID" \
-  rules.1.permission-set-names.0=ObjectStorageFullAccess
+  rules.0.permission-set-names.0=ServerlessSQLDatabaseReadWrite
 
 # The secret key is shown once. Keep it.
-# default-project-id is what makes the key usable as an Object Storage
-# credential; without it the S3 calls authenticate but have no project to
-# resolve the bucket in.
 scw iam api-key create application-id="$APP_ID" \
   default-project-id="$PROJECT_ID" \
   description="$APP_NAME runtime" -o json
 ```
 
 The **application ID** is the database username; the API key's **secret key** is
-the database password *and* the Object Storage secret key. Export both — the
-rest of this guide uses them:
+the database password. Export both — the rest of this guide uses them:
 
 ```sh
 export RUNTIME_ACCESS_KEY=SCWXXXXXXXXXXXXXXXXX
 export RUNTIME_SECRET_KEY=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
-
-`ObjectStorageFullAccess` above is scoped to this one project; narrow it to the
-`ObjectStorageObjects*` sets if you want least privilege and are willing to
-test the upload path afterwards.
 
 Make a second application the same way for CI (`$APP_NAME-ci`) with
 `ContainerRegistryFullAccess`, `ContainersFullAccess` and
@@ -171,22 +166,21 @@ forget, but be explicit.
 > needs `CREATE DATABASE`, and Scaleway blocks DDL on databases and users. CI
 > runs against a plain `postgres:16` service container; keep it that way.
 
-## 3. Object Storage for uploaded images
+## 3. Uploaded images: nothing to create
 
 Class cover images (`ActivityClass.image`) cannot live on the container
 filesystem: it is ephemeral and per-instance, so an image uploaded through one
-instance would 404 on the next request.
+instance would 404 on the next request. They live in the database instead
+(`apps/media`, selected whenever `S3_BUCKET` is unset): every upload is shrunk
+to a JPEG of at most 1600px first, so a class image is one or two hundred
+kilobytes and a school's whole catalogue is tens of megabytes. Backups include
+them; a database move carries them. `manage.py prune_stored_files` reclaims
+the rows replaced images leave behind.
 
-```sh
-# Bucket names share one global namespace across all Scaleway users, so this
-# will fail if someone else took it. Prefix it with your school's name.
-BUCKET="$APP_NAME-media"
-scw object bucket create "$BUCKET" region=fr-par
-```
-
-Objects are uploaded with a `public-read` ACL by `django-storages`, so they are
-readable without a signed URL — which is what lets a CDN cache them. The bucket
-itself can stay private.
+The S3 path is still in the code. If the catalogue ever outgrows the database,
+create a bucket, give the runtime application `ObjectStorageFullAccess`, and
+set `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID` and
+`S3_SECRET_ACCESS_KEY` on the container.
 
 ## 4. Container Registry
 
@@ -216,12 +210,23 @@ docker buildx build --platform linux/amd64 --target runtime -t "$IMAGE" --push .
 
 ## 6. Create the container and the two jobs
 
-First, the environment every one of them shares:
+First, the environment every one of them shares. `deploy/scaleway-env.lib.sh`
+is the authority; the commands below spell it out.
 
 ```sh
 export SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')
+export MCP_API_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(36))')
 export SITE_URL="https://$DOMAIN"
+export ZEPTOMAIL_SEND_MAIL_TOKEN=...       # the Mail Agent's Send Mail token
+export ADMIN_EMAIL=you@example.com
 ```
+
+Email goes out through Zoho ZeptoMail's API
+(`apps/notifications/backends/zeptomail.py`): verify the sending domain in
+ZeptoMail (`zeptomail.zoho.eu` for an EU account), create a Mail Agent, copy its
+*Send Mail token*. The token selects the backend; without it the app falls back
+to plain SMTP over the `EMAIL_*` variables (port 587 only, see *Things that
+will bite you*).
 
 ### The web container
 
@@ -244,18 +249,25 @@ scw container container create namespace-id="$NS_ID" name="$APP_NAME-web" \
   environment-variables.CSRF_TRUSTED_ORIGINS="https://$DOMAIN" \
   environment-variables.SITE_URL="$SITE_URL" \
   environment-variables.TIME_ZONE=Europe/Malta \
-  environment-variables.S3_BUCKET="$BUCKET" \
-  environment-variables.S3_REGION=fr-par \
-  environment-variables.EMAIL_HOST=smtp.tem.scw.cloud \
-  environment-variables.EMAIL_PORT=587 \
-  environment-variables.DEFAULT_FROM_EMAIL="School Activities <notifications@$DOMAIN>" \
+  environment-variables.LOG_LEVEL=INFO \
+  environment-variables.DEFAULT_FROM_EMAIL="ESLJ Parents <info@$DOMAIN>" \
+  environment-variables.ZEPTOMAIL_API_URL=https://api.zeptomail.eu/v1.1/email \
+  environment-variables.ADMIN_EMAIL="$ADMIN_EMAIL" \
+  environment-variables.DB_POOL_MAX_SIZE=8 \
+  environment-variables.NOTIFIER_DRAIN_MAX_SECONDS=300 \
+  environment-variables.WHATSAPP_ENABLED=false \
   secret-environment-variables.SECRET_KEY="$SECRET_KEY" \
   secret-environment-variables.DATABASE_URL="$DATABASE_URL" \
-  secret-environment-variables.S3_ACCESS_KEY_ID="$RUNTIME_ACCESS_KEY" \
-  secret-environment-variables.S3_SECRET_ACCESS_KEY="$RUNTIME_SECRET_KEY" \
-  secret-environment-variables.EMAIL_HOST_PASSWORD="$SMTP_PASSWORD" \
+  secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
+  secret-environment-variables.MCP_API_TOKEN="$MCP_API_TOKEN" \
   -o json
 ```
+
+`ALLOWED_HOSTS` must also carry the endpoint Scaleway generates for the
+container (read it back once the container is `ready`; `provision.sh` does
+this in a second pass), and a bare apex domain if you accept one alongside
+`www`. `container update` replaces the plain map wholesale and merges the
+secret map, so every later update re-sends the full plain set.
 
 Why these numbers:
 
@@ -298,10 +310,18 @@ scw jobs definition create name="$APP_NAME-migrate" \
   environment-variables.DJANGO_SETTINGS_MODULE=config.settings.prod \
   environment-variables.SECRET_KEY="$SECRET_KEY" \
   environment-variables.DATABASE_URL="$DATABASE_URL" \
+  environment-variables.SITE_URL="$SITE_URL" \
+  environment-variables.DEFAULT_FROM_EMAIL="ESLJ Parents <info@$DOMAIN>" \
+  environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
+  environment-variables.ADMIN_EMAIL="$ADMIN_EMAIL" \
   -o json
 ```
 
-No cron: this one only ever runs from the deploy pipeline.
+No cron: this one only ever runs from the deploy pipeline, twice per deploy —
+once as defined, then once more with `args.0=ensure_admin` (contextual
+arguments override the definition's for that run only), which creates the
+`ADMIN_EMAIL` superuser with a set-password email the first time and does
+nothing thereafter. That is why it carries the email settings.
 
 ### The notifier job
 
@@ -321,12 +341,10 @@ scw jobs definition create name="$APP_NAME-notifier" \
   args.0=run_notifier args.1=--drain args.2=--max-seconds args.3=240 \
   environment-variables.DJANGO_SETTINGS_MODULE=config.settings.prod \
   environment-variables.SITE_URL="$SITE_URL" \
-  environment-variables.EMAIL_HOST=smtp.tem.scw.cloud \
-  environment-variables.EMAIL_PORT=587 \
-  environment-variables.DEFAULT_FROM_EMAIL="School Activities <notifications@$DOMAIN>" \
+  environment-variables.DEFAULT_FROM_EMAIL="ESLJ Parents <info@$DOMAIN>" \
   environment-variables.SECRET_KEY="$SECRET_KEY" \
   environment-variables.DATABASE_URL="$DATABASE_URL" \
-  environment-variables.EMAIL_HOST_PASSWORD="$SMTP_PASSWORD" \
+  environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
   -o json
 ```
 
@@ -365,38 +383,37 @@ the database awake anyway, so it costs close to nothing. The saving from
 scaling to zero comes from nights, weekends and holidays, and a nightly job
 keeps all of it.
 
-> **Secrets in job definitions.** The commands above put `DATABASE_URL` in a
-> plain environment variable, which is readable by anyone who can read the job
-> definition. For anything beyond a first deploy, store it in Secret Manager and
-> reference it instead:
+> **Secrets in job definitions.** The commands above put `DATABASE_URL`,
+> `SECRET_KEY` and the email token in plain environment variables, readable by
+> anyone who can read the job definition — including the CI key, which is what
+> lets the migration workflow find the database without a human. Once things
+> have settled, move them to Secret Manager and reference them instead:
 > ```sh
+> SECRET_ID=$(scw secret secret create name=extralessons-database-url -o json | jq -r .id)
+> scw secret version create "$SECRET_ID" data="$DATABASE_URL"
 > scw jobs secret create job-definition-id="$JOB_ID" \
 >   secrets.0.secret-manager-id="$SECRET_ID" \
+>   secrets.0.secret-manager-version=latest \
 >   secrets.0.env-var-name=DATABASE_URL
 > ```
-> Containers have this built in already — that is what
-> `secret-environment-variables` above is.
+> then remove the plain variable from the definition. The runtime application
+> needs `SecretManagerSecretAccess` (not `ReadOnly`, which is metadata only)
+> to read the version at run time. Containers have this built in already —
+> that is what `secret-environment-variables` above is.
 
 ## 7. Run the first migration and create an admin
 
 ```sh
-MIGRATE_ID=$(scw jobs definition list name="$APP_NAME-migrate" -o json | jq -r '.[0].id')
-RUN_ID=$(scw jobs definition start "$MIGRATE_ID" -o json | jq -r '.id')
-scw jobs run wait "$RUN_ID"
+MIGRATE_ID=$(scw jobs definition list -o json | jq -r '.[] | select(.name=="extralessons-migrate") | .id')
+deploy/scw-run-job.sh "$MIGRATE_ID"                      # migrate
+deploy/scw-run-job.sh "$MIGRATE_ID" args.0=ensure_admin  # first admin, emailed a set-password link
 ```
 
-`createsuperuser` is interactive, which a job is not. Override the migration
-job's arguments for one run instead — `scw jobs definition start` takes
-contextual `args` that apply to that run only, leaving the definition alone:
-
-```sh
-scw jobs definition start "$MIGRATE_ID" \
-  args.0=shell args.1=-c \
-  args.2="from django.contrib.auth import get_user_model; U=get_user_model(); U.objects.create_superuser(email='you@example.com', password='CHANGE-ME')"
-```
-
-Change that password at first login. The same trick runs any management
-command against production — `seed_demo`, a data fix, a `dbshell` query.
+`scw jobs definition start` takes contextual `args` that apply to that run
+only, leaving the definition alone; `deploy/scw-run-job.sh` wraps start, wait
+and the success check. The same trick runs any management command against
+production — `prune_stored_files`, a data fix, `ensure_admin --send-reset`
+to resend the link.
 
 ## 8. Custom domain, TLS and CDN
 
@@ -411,17 +428,19 @@ Point a `CNAME` for `$DOMAIN` at that hostname, then:
 scw container domain create container-id="$CONTAINER_ID" hostname="$DOMAIN"
 ```
 
-Scaleway issues and renews a Let's Encrypt certificate automatically. This is
-what Caddy used to do in the old VPS stack; there is nothing to configure.
+or run *Scaleway: attach domains* from Actions. Scaleway checks the record at
+creation (so DNS has to move first), then issues and renews a Let's Encrypt
+certificate itself. For a bare apex (`esljparents.eu`) alongside `www`: an
+apex cannot be a CNAME, so use an ALIAS/ANAME record at the registrar (or
+Scaleway Domains and DNS, which has them), add the apex to `ALLOWED_HOSTS` and
+`CSRF_TRUSTED_ORIGINS` (the `APEX_DOMAIN` setting does this), and attach it
+the same way.
 
-Add an Edge Services pipeline in front for caching. Static files already carry
-year-long immutable cache headers (hashed filenames via WhiteNoise's manifest
-storage), and so do media objects, so the CDN absorbs almost all asset traffic
-without ever waking an instance.
-
-If you put Edge Services in front of the media bucket too, set
-`S3_CUSTOM_DOMAIN` on the container to that hostname and Django will render
-image URLs pointing at the CDN.
+Optionally add an Edge Services pipeline in front for caching. Static files
+already carry year-long immutable cache headers (hashed filenames via
+WhiteNoise's manifest storage), and so do the images served at `/media/`, so
+a CDN absorbs almost all asset traffic without ever waking an instance. Not
+needed for a school's traffic; a cost knob for later.
 
 ## 9. Wire up GitHub Actions
 
@@ -446,9 +465,17 @@ Under *Settings → Secrets and variables → Actions*:
 | `SCW_JOB_NOTIFIER_ID` | `scw jobs definition list name=extralessons-notifier -o json \| jq -r '.[0].id'` |
 | `APP_URL` | `https://activities.example.com` (optional; enables the post-deploy smoke test) |
 
-Push to `main` and `.github/workflows/deploy.yml` takes it from there: build for
-`linux/amd64`, push, run migrations as a job and wait for them, repoint the
-notifier job, redeploy the container, then smoke-test `/_health`.
+Create the `production` environment under *Settings → Environments* (the
+deploy workflow is pinned to it; required reviewers there give you a manual
+approval step if you ever want one). Then push to `main`: once *CI* is green,
+`.github/workflows/deploy.yml` takes it from there — build for `linux/amd64`,
+push, run migrations as a job and wait for them, repoint the notifier job,
+redeploy the container, then smoke-test `/_health`.
+
+Four more workflows use the same secrets from *Actions → Run workflow*:
+*Inspect hosting estate* (read-only listing), *Scaleway: configure the estate*
+(apply `deploy/scaleway-env.lib.sh` to the container and jobs), *Scaleway:
+attach domains*, and *Scaleway: move production from Render* (the data copy).
 
 Note what is *not* in GitHub: no database URL, no SMTP password, no WhatsApp
 token. Application secrets live in Scaleway; GitHub only gets a key that can
@@ -471,10 +498,22 @@ un-apply migrations — if the bad deploy included a destructive migration you
 are restoring from a backup instead, which is the usual reason to keep
 migrations additive and ship them a deploy ahead of the code that needs them.
 
-**Backups.** Serverless SQL Database is backed up automatically. There is no
-manual-backup button, so if you want an off-Scaleway copy, run `pg_dump` on a
-schedule — a third Serverless Job with a cron writing to Object Storage is the
-natural home for it.
+**Backups.** Serverless SQL Database is backed up automatically. For an
+off-Scaleway copy, `SOURCE_DATABASE_URL=$DATABASE_URL deploy/migrate-db.sh
+--dump-only` from a laptop writes a `pg_dump` custom-format file (and the row
+counts to check a restore against) to `deploy/dumps/`, gitignored. Uploaded
+images are in it. Restoring one elsewhere is the same script with
+`--restore-only`. Note the dump holds families' personal data.
+
+**Checking a deployment.** `deploy/smoke.sh https://www.esljparents.eu`
+exercises the probe, the public pages, login and admin, hashed statics, the
+security headers and `/mcp` from outside; add `MCP_API_TOKEN=...` to make a
+real tool call.
+
+**Freezing the site.** `MAINTENANCE_MODE=true` on the container answers
+everything but the health probe with a 503 and `Retry-After`
+(`config/maintenance.py`) — for copying the database somewhere while nothing
+can write to it.
 
 **Cost knobs, roughly in order of impact:**
 
@@ -529,6 +568,31 @@ not use them — the capacity mutex in `apps/enrollments/services.py` is a
 row-level `SELECT … FOR UPDATE` inside a transaction, which the pooler honours
 because it pins the connection for the transaction's duration. If you ever
 reach for `pg_advisory_lock`, it will appear to work and then quietly not.
+
+**The database scales to zero, and pooled connections do not know.** With
+`cpu-min=0` the database stops after five minutes without queries and the
+first query afterwards pays a cold start of about three seconds — fine. What
+is not fine is a connection the app's pool kept open across the stop: the
+backend behind it is gone, and its first use fails with `OperationalError:
+internal error`, one 500 for whoever arrives first. `config/settings/prod.py`
+therefore turns on `CONN_HEALTH_CHECKS`, so the pool checks each connection
+as it hands it out, and closes connections idle for
+longer than `DB_POOL_MAX_IDLE` (120 s, under the database's five minutes), so
+the dead one is replaced rather than served. If cold starts themselves become
+a complaint, `scw sdb-sql database update <id> cpu-min=1` keeps the database
+warm around the clock, at the cost of one vCPU billed continuously.
+
+**Session settings leak between pooled clients.** Serverless SQL Database sits
+behind a connection pooler that does not reset session state when one client
+disconnects and another is given the same backend — `SET`, `RESET`,
+`search_path` are all documented as shared. The one place this bit: `pg_dump`
+output starts by setting `search_path` to nothing for its session, so after a
+`pg_restore` the next clients on that backend could not see any table by its
+bare name (the app answered 500, `psql` said the tables did not exist).
+`deploy/migrate-db.sh` runs `RESET ALL` on a few fresh connections after
+restoring and schema-qualifies its own queries. Anything else you run against
+the database by hand that changes session settings should wrap them in a
+transaction (`SET LOCAL`) or reset them afterwards.
 
 **Redirect loops.** If `/` bounces forever, the platform is forwarding plain
 HTTP without `X-Forwarded-Proto`. Set `SECURE_SSL_REDIRECT=false` on the

@@ -1,0 +1,18 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Back shortly · Activities</title>
+  <link rel="icon" href="{% static 'img/icon-32.png' %}" type="image/png" sizes="32x32">
+  <link rel="stylesheet" href="{% static 'css/main.css' %}">
+</head>
+<body>
+<main id="content" class="container" style="max-width: 36rem; margin: 4rem auto; text-align: center;">
+  <img src="{% static 'img/pta-logo.png' %}" width="270" height="150" alt="" style="max-width: 100%; height: auto;">
+  <h1>Back shortly</h1>
+  <p>{% if message %}{{ message }}{% else %}The activities site is being moved to a new home and is paused for a few minutes. Nothing you have registered is affected. Please try again shortly.{% endif %}</p>
+</main>
+</body>
+</html>

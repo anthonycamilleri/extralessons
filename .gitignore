@@ -12,3 +12,6 @@ db.sqlite3
 # holds IAM secret keys the API only ever shows once.
 /deploy/scaleway.env
 /deploy/.scaleway-state
+
+# pg_dump output from deploy/migrate-db.sh
+/deploy/dumps/

@@ -3,7 +3,7 @@
 Everything here is environment-driven so the same image runs unchanged as a
 web service, as a pre-deploy migration step, as a nightly cron job, and on
 a laptop against SQLite. Environment-specific modules layer on top:
-`dev` (local), `prod` (Render), `test` (pytest).
+`dev` (local), `prod` (Scaleway), `test` (pytest).
 """
 from pathlib import Path
 
@@ -42,6 +42,9 @@ MIDDLEWARE = [
     # First on purpose: the platform's health probe must be answered before
     # ALLOWED_HOSTS validation and before any HTTPS redirect. See config.health.
     "config.health.HealthCheckMiddleware",
+    # Second on purpose: with MAINTENANCE_MODE=true every other request is
+    # answered with a 503 before it can touch the session or the database.
+    "config.maintenance.MaintenanceModeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -53,6 +56,14 @@ MIDDLEWARE = [
 ]
 
 HEALTH_CHECK_PATH = env("HEALTH_CHECK_PATH", default="/_health")
+
+# --- Maintenance mode ---
+# Flip on to freeze the site while its database is copied to another host: every
+# request but the health probe gets a 503 (config/maintenance.py). Off by
+# default; set it as an environment variable on the platform, not here.
+MAINTENANCE_MODE = env.bool("MAINTENANCE_MODE", default=False)
+MAINTENANCE_MESSAGE = env("MAINTENANCE_MESSAGE", default="")
+MAINTENANCE_RETRY_AFTER = env.int("MAINTENANCE_RETRY_AFTER", default=600)
 
 ROOT_URLCONF = "config.urls"
 
@@ -191,12 +202,12 @@ ADMIN_EMAIL = env("ADMIN_EMAIL", default="")
 # --- Remote MCP (apps.catalog.mcp_http) ---
 # Bearer token for the /mcp endpoint that lets Claude Desktop, Cowork and
 # claude.ai populate the catalogue as a custom connector. Empty = endpoint off.
-# It carries the trust of a school-office login; Render generates it.
+# It carries the trust of a school-office login; deploy/provision.sh generates it.
 MCP_API_TOKEN = env("MCP_API_TOKEN", default="")
 
 # --- Logging ---
 # A managed platform has no `docker compose logs`: stdout is the only channel,
-# and it is what Render collects. Django's default console handler is gated
+# and it is what the platform (Cockpit on Scaleway) collects. Django's default console handler is gated
 # behind DEBUG, so without this every logger.info in the notifier disappears in
 # production.
 LOG_LEVEL = env("LOG_LEVEL", default="INFO").upper()

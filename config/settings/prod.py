@@ -1,14 +1,14 @@
 """Production settings.
 
-Written for a managed container platform (Render today, Scaleway Serverless
-before it) and deliberately neutral between them: the platform is described by
+Written for a managed container platform (Scaleway Serverless today, Render
+in between) and deliberately neutral between them: the platform is described by
 environment variables, not by code. The same module serves all three roles —
 web, migrate, notifier — because they are the same image with a different
 start command. Everything that differs between them is an argument, not a
 setting.
 
 The database section is shaped by managed PostgreSQL offerings that front or
-cap connections; see docs/render-setup.md for the reasoning.
+cap connections; see docs/scaleway-setup.md for the reasoning.
 """
 from .base import *  # noqa: F401,F403
 from .base import ALLOWED_HOSTS, DATABASES, MEDIA_MAX_AGE, STORAGES, env, is_postgres
@@ -17,10 +17,12 @@ DEBUG = False
 
 # --- Hosts ---
 # Django 400s any Host it was not told about, so the platform's generated
-# hostname has to be listed alongside any custom domain. Render passes its
-# generated hostname in as RENDER_EXTERNAL_HOSTNAME; picking it up here means a
-# fresh service answers on *.onrender.com before anyone has configured DNS,
-# and keeps answering there after they have.
+# hostname has to be listed alongside any custom domain. On Scaleway that is
+# done explicitly (deploy/scaleway-env.lib.sh puts the generated endpoint in
+# ALLOWED_HOSTS). Render passes its generated hostname in as
+# RENDER_EXTERNAL_HOSTNAME; picking it up here means a fresh Render service
+# answers on *.onrender.com before anyone has configured DNS. Harmless where
+# the variable is absent.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 _platform_host = env("RENDER_EXTERNAL_HOSTNAME", default="")
 if _platform_host:
@@ -46,11 +48,20 @@ if is_postgres():
     # CONN_MAX_AGE stays 0 whenever the pool is on.
     if env.bool("DB_POOL", default=True):
         DATABASES["default"]["CONN_MAX_AGE"] = 0
+        # Serverless SQL Database scales to zero after five idle minutes and
+        # takes the backends with it. A connection the pool kept open across
+        # that answers "internal error" on its first use, which was one 500 for
+        # the first parent of the morning. With health checks on, the pool
+        # checks every connection as it hands it out (one cheap round trip)
+        # and replaces a dead one instead of serving it; max_idle lets idle
+        # connections go before the database does.
+        DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
         DATABASES["default"].setdefault("OPTIONS", {})
         DATABASES["default"]["OPTIONS"]["pool"] = {
             "min_size": env.int("DB_POOL_MIN_SIZE", default=1),
             "max_size": env.int("DB_POOL_MAX_SIZE", default=4),
             "timeout": env.int("DB_POOL_TIMEOUT", default=10),
+            "max_idle": env.int("DB_POOL_MAX_IDLE", default=120),
         }
     else:
         DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=0)
