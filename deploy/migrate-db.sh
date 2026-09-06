@@ -169,7 +169,18 @@ elif [ -n "$SRC" ]; then
 else
   die "nothing to verify against: give SOURCE_DATABASE_URL or a dump with its .counts file"
 fi
-actual_counts="$(row_counts "$TGT")"; actual_media="$(media_bytes "$TGT")"
+# A pooled managed database can hand the next connection a backend whose
+# catalog view predates the DDL the restore just ran ("relation does not
+# exist" for a table that is plainly there). It clears within a minute or two;
+# judge the copy on a connection that sees the tables, not on the first one.
+actual_counts=""
+for attempt in $(seq 1 15); do
+  if actual_counts="$(row_counts "$TGT" 2>/dev/null)" && [ -n "$actual_counts" ]; then break; fi
+  warn "target not yet consistent (attempt $attempt/15); waiting 10s"
+  actual_counts=""; sleep 10
+done
+[ -n "$actual_counts" ] || die "could not read the target's tables after 150s; re-run with --verify-only"
+actual_media="$(media_bytes "$TGT")"
 
 status=0
 if diff <(printf '%s\n' "$expected_counts") <(printf '%s\n' "$actual_counts") > /dev/null; then
