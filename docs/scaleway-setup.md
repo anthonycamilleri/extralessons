@@ -569,6 +569,18 @@ row-level `SELECT … FOR UPDATE` inside a transaction, which the pooler honours
 because it pins the connection for the transaction's duration. If you ever
 reach for `pg_advisory_lock`, it will appear to work and then quietly not.
 
+**Session settings leak between pooled clients.** Serverless SQL Database sits
+behind a connection pooler that does not reset session state when one client
+disconnects and another is given the same backend — `SET`, `RESET`,
+`search_path` are all documented as shared. The one place this bit: `pg_dump`
+output starts by setting `search_path` to nothing for its session, so after a
+`pg_restore` the next clients on that backend could not see any table by its
+bare name (the app answered 500, `psql` said the tables did not exist).
+`deploy/migrate-db.sh` runs `RESET ALL` on a few fresh connections after
+restoring and schema-qualifies its own queries. Anything else you run against
+the database by hand that changes session settings should wrap them in a
+transaction (`SET LOCAL`) or reset them afterwards.
+
 **Redirect loops.** If `/` bounces forever, the platform is forwarding plain
 HTTP without `X-Forwarded-Proto`. Set `SECURE_SSL_REDIRECT=false` on the
 container and let `https-connections-only=true` keep plain HTTP out at the

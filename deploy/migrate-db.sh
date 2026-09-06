@@ -75,7 +75,7 @@ row_counts() { # row_counts URL
   [ -n "$tables" ] || { warn "no tables found"; return; }
   while IFS= read -r t; do
     [ -n "$t" ] || continue
-    q="${q:+$q union all }select '$t' as t, count(*) as n from \"$t\""
+    q="${q:+$q union all }select '$t' as t, count(*) as n from public.\"$t\""
   done <<< "$tables"
   sql "$url" "$q order by 1" | awk -F'|' '{printf "%s\t%s\n", $1, $2}'
 }
@@ -83,7 +83,7 @@ row_counts() { # row_counts URL
 # Bytes of uploaded images, so a truncated bytea would show even with matching
 # row counts. Absent table (very old schema) = 0.
 media_bytes() { # media_bytes URL
-  sql "$1" "select coalesce(sum(size),0) from media_storedfile" 2>/dev/null || echo 0
+  sql "$1" "select coalesce(sum(size),0) from public.media_storedfile" 2>/dev/null || echo 0
 }
 
 # --- Preflight -------------------------------------------------------------
@@ -154,7 +154,17 @@ if [ "$MODE" = full ] || [ "$MODE" = restore ]; then
     die "pg_restore exited with $rc; nothing above this line is trustworthy — fix the cause and re-run with --restore-only $DUMP_FILE"
   fi
   ok "restored"
-  sql "$TGT" "analyze" >/dev/null && ok "statistics refreshed (ANALYZE)"
+  # pg_dump output begins by emptying search_path for its session (and sets
+  # half a dozen other session parameters). Behind a connection pooler that
+  # does not reset session state between clients — Serverless SQL Database
+  # documents exactly this — the backend the restore used keeps those
+  # settings and is handed to the next clients, which then cannot see any
+  # table by its bare name: the app answers 500, the verifier is told the
+  # tables do not exist. Reset it. Each call is a fresh client connection, so
+  # a handful of them reaches the pooled backend(s) involved.
+  for _ in 1 2 3 4 5 6 7 8; do sql "$TGT" "reset all" >/dev/null 2>&1 || true; done
+  ok "session settings the restore left on pooled connections reset"
+  sql "$TGT" "analyze" >/dev/null 2>&1 && ok "statistics refreshed (ANALYZE)" || warn "ANALYZE was refused; harmless"
 fi
 
 # --- Verify ----------------------------------------------------------------
@@ -197,7 +207,7 @@ else
 fi
 # The migration ledger decides what `manage.py migrate` will do next; it must
 # have come across intact or the first deploy re-runs history.
-m="$(sql "$TGT" "select count(*) from django_migrations")"
+m="$(sql "$TGT" "select count(*) from public.django_migrations")"
 [ "${m:-0}" -gt 0 ] && ok "django_migrations has $m rows" || { status=1; printf '    %s✗%s django_migrations is empty\n' "$R" "$N"; }
 
 if [ $status -eq 0 ]; then
