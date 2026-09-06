@@ -11,13 +11,14 @@
 
 {% block nav-global %}
 {% comment %}The office desk, on every admin page: requests with their count,
-   the announcement composer, and the way back to the public site.{% endcomment %}
+   the announcement composer, and the guides to how it all works.{% endcomment %}
 {% if pending_requests_count is not None %}
 <nav class="desk-nav" aria-label="Office desk">
   <a href="{% url 'admin:enrollments_enrollment_requests' %}">Requests
     <span class="desk-badge{% if pending_requests_count %} desk-badge-live{% endif %}">{{ pending_requests_count }}</span></a>
   <a href="{% url 'admin:catalog_activityclass_changelist' %}?term__is_active__exact=1">Classes</a>
   <a href="{% url 'admin:notifications_broadcast_add' %}">Send announcement</a>
+  <a href="{% url 'admin:help_index' %}" class="desk-help">Help</a>
 </nav>
 {% endif %}
 {% endblock %}

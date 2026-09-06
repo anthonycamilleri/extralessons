@@ -6,6 +6,7 @@
 <li><a href="{% url 'admin:catalog_activityclass_roster' original.pk %}?format=csv">Download CSV</a></li>
 <li><a href="{% url 'admin:enrollments_enrollment_requests' %}?class={{ original.pk }}">Requests</a></li>
 <li><a href="{{ original.get_absolute_url }}">View on site</a></li>
+<li><a href="{% url 'admin:help_topic' 'class-details-and-dates' %}#dates">Help with dates</a></li>
 {% endif %}
 {{ block.super }}
 {% endblock %}

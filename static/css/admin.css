@@ -45,3 +45,52 @@
 .desk-scope a { margin-right: .75rem; }
 .desk-scope a[aria-current] { font-weight: 700; text-decoration: underline; }
 .desk-empty { padding: 1rem 1.25rem; border: 1px dashed var(--hairline-color); border-radius: .5rem; color: var(--body-quiet-color); }
+
+/* Help pages (/admin/help/). Prose, not a dashboard: a narrow measure, and
+   screenshots framed so a light-theme capture still reads in the dark theme. */
+.help-intro { max-width: 46rem; color: var(--body-quiet-color); }
+.help-tile-title { font-size: 1.15rem; font-weight: 700; margin-bottom: .25rem; }
+
+/* Prose stays at a readable measure; screenshots may run wider. */
+.help-article { max-width: 64rem; }
+.help-article > :not(figure) { max-width: 46rem; }
+.help-article h1 { font-size: 1.6rem; margin: 0 0 .5rem; }
+.help-article h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; padding-top: .75rem; border-top: 1px solid var(--hairline-color); }
+.help-article h3 { font-size: 1rem; margin: 1.5rem 0 .35rem; }
+.help-article p, .help-article li { line-height: 1.6; }
+.help-article ul, .help-article ol { padding-left: 1.25rem; }
+.help-article li + li { margin-top: .35rem; }
+.help-article code { background: var(--darkened-bg); padding: .1em .35em; border-radius: .25rem; }
+.help-article figure { margin: 1.25rem 0 1.75rem; }
+.help-article img {
+  display: block; width: 100%;
+  background: #fff; padding: .5rem; border-radius: .5rem;
+  border: 1px solid var(--hairline-color);
+}
+.help-article figcaption, .help-article img + em {
+  display: block; margin-top: .4rem; max-width: 46rem;
+  color: var(--body-quiet-color); font-size: .85rem;
+}
+.help-article table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+.help-article th, .help-article td { padding: .5rem .6rem; border-bottom: 1px solid var(--hairline-color); text-align: left; vertical-align: top; }
+.help-article th { background: var(--darkened-bg); }
+
+/* "Be careful" and "worth knowing" notes: > blockquote in the Markdown. */
+.help-article blockquote {
+  margin: 1.25rem 0; padding: .75rem 1rem; border-left: 4px solid #f5a623;
+  background: var(--darkened-bg); border-radius: 0 .35rem .35rem 0;
+}
+.help-article blockquote p { margin: .35rem 0; }
+
+.help-more { max-width: 46rem; margin-top: 2.5rem; }
+.help-more h2 { font-size: 1rem; }
+.help-more ul { list-style: none; padding: 0; }
+.help-more li { margin-bottom: .5rem; }
+.help-more .desk-label { display: block; font-size: .85rem; }
+
+/* One-line pointer to a guide, for pages with no object-tools bar. */
+.help-inline {
+  margin: 0 0 1rem; padding: .6rem .9rem; border-radius: .35rem;
+  background: var(--darkened-bg); border: 1px solid var(--hairline-color);
+  color: var(--body-quiet-color);
+}

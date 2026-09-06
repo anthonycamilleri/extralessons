@@ -13,5 +13,7 @@
     <span class="desk-label">class{{ classes_this_term|pluralize:"es" }} this term</span>
   </a>
 </div>
+<p class="help-inline">New to this? The <a href="{% url 'admin:help_index' %}">help pages</a>
+  explain approving requests, class dates, waiting lists and announcements.</p>
 {{ block.super }}
 {% endblock %}

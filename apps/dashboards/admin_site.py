@@ -10,6 +10,7 @@ dashboards app itself.
 """
 from django.contrib import admin
 from django.contrib.admin.apps import AdminConfig
+from django.urls import path
 
 
 class SchoolAdminSite(admin.AdminSite):
@@ -42,6 +43,24 @@ class SchoolAdminSite(admin.AdminSite):
             else None
         )
         return context
+
+    def get_urls(self):
+        """The help pages, ahead of the admin's own catch-all.
+
+        Wrapped in admin_view so they are behind the same door as every other
+        admin page, and namespaced with it, so templates link to them as
+        ``{% url 'admin:help_index' %}``.
+        """
+        from apps.dashboards.help import views as help_views
+
+        return [
+            path("help/", self.admin_view(help_views.help_index), name="help_index"),
+            path(
+                "help/<slug:slug>/",
+                self.admin_view(help_views.help_topic),
+                name="help_topic",
+            ),
+        ] + super().get_urls()
 
     def index(self, request, extra_context=None):
         from apps.catalog.models import ActivityClass

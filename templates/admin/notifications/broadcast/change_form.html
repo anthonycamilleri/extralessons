@@ -1,0 +1,12 @@
+{% extends "admin/change_form.html" %}
+
+{% comment %}The composer is an add form, where Django renders no object-tools
+   bar, so the pointer to the guide goes above the form instead.{% endcomment %}
+{% block content %}
+<p class="help-inline">
+  An announcement goes out straight away and cannot be unsent.
+  <a href="{% url 'admin:help_topic' 'announcements' %}">Read who receives it</a>
+  before you send.
+</p>
+{{ block.super }}
+{% endblock %}

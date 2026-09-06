@@ -10,16 +10,16 @@
 </div>
 {% endblock %}
 
-{% block object-tools %}
+{% block content %}
+<div id="content-main">
+{% comment %}Django nests object-tools inside the content block, so a page
+   that overrides content has to render the bar itself.{% endcomment %}
 <ul class="object-tools">
   <li><a href="{% url 'admin:catalog_activityclass_changelist' %}?term__is_active__exact=1">Classes this term</a></li>
   <li><a href="{% url opts|admin_urlname:'changelist' %}">All enrolments</a></li>
   <li><a href="{% url 'admin:notifications_broadcast_add' %}" class="addlink">Send announcement</a></li>
+  <li><a href="{% url 'admin:help_topic' 'approving-requests' %}">Help with approving</a></li>
 </ul>
-{% endblock %}
-
-{% block content %}
-<div id="content-main">
   {% if show_scope %}
   <p class="desk-scope">
     <a href="?scope=mine"{% if scope == "mine" %} aria-current="true"{% endif %}>Only my classes</a>

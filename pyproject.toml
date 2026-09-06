@@ -26,6 +26,12 @@ dev = [
 ]
 # Kept for older instructions; the SDK is now a core dependency.
 mcp = []
+# Only for scripts/capture_help_screenshots.py, which re-shoots the pictures on
+# the in-app help pages. Deliberately out of `dev`: the test suite must never
+# start downloading a browser.
+screenshots = [
+    "playwright~=1.49",
+]
 
 [build-system]
 requires = ["setuptools>=69"]

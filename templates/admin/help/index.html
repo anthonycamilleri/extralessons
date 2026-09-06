@@ -1,0 +1,27 @@
+{% extends base_template %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a> &rsaquo; Help
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p class="help-intro">{{ audience.intro }}</p>
+
+  <div class="desk-panel">
+    {% for topic in audience.topics %}
+    <a class="desk-tile help-tile" href="{% url 'admin:help_topic' topic.slug %}">
+      <span class="help-tile-title">{{ topic.title }}</span>
+      <span class="desk-label">{{ topic.summary }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  <p class="help-intro quiet">
+    Something missing? Tell the office and it can be added here — these pages
+    live with the app, so they are updated when the app changes.
+  </p>
+</div>
+{% endblock %}

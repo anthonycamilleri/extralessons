@@ -11,17 +11,17 @@
 </div>
 {% endblock %}
 
-{% block object-tools %}
+{% block content %}
+<div id="content-main">
+{% comment %}Django nests object-tools inside the content block, so a page
+   that overrides content has to render the bar itself.{% endcomment %}
 <ul class="object-tools">
   <li><a href="?format=csv">Download CSV</a></li>
   <li><a href="{% url opts|admin_urlname:'change' cls.pk %}">Edit class</a></li>
   <li><a href="{% url 'admin:enrollments_enrollment_requests' %}">All requests</a></li>
   <li><a href="{{ cls.get_absolute_url }}">View on site</a></li>
+  <li><a href="{% url 'admin:help_topic' 'waiting-lists' %}">Help with waiting lists</a></li>
 </ul>
-{% endblock %}
-
-{% block content %}
-<div id="content-main">
   <p class="desk-scope">
     {{ cls.provider.name }} · {{ cls.term.name }} · {{ cls.schedule_display }}{% if cls.location %} · {{ cls.location }}{% endif %}
   </p>
@@ -34,6 +34,7 @@
     <span class="pill{% if cls.places_available == 0 %} pill-warn{% endif %}">Parents see {{ cls.places_available }} available</span>
   </p>
 
+  <section id="enrolled">
   <h2>Enrolled ({{ enrolled|length }})</h2>
   {% if enrolled %}
   <table class="desk-table">
@@ -67,8 +68,10 @@
     </tbody>
   </table>
   {% else %}<p class="desk-empty">No children enrolled yet.</p>{% endif %}
+  </section>
 
   {% if offered %}
+  <section id="offers">
   <h2>Outstanding offers ({{ offered|length }})</h2>
   <table class="desk-table">
     <thead><tr><th>Child</th><th>Guardians</th><th>Offered</th><th>Expires</th></tr></thead>
@@ -83,8 +86,10 @@
     {% endfor %}
     </tbody>
   </table>
+  </section>
   {% endif %}
 
+  <section id="waiting-list">
   <h2>Waiting list ({{ waitlisted|length }})</h2>
   {% if waitlisted %}
   <p class="quiet">First-come order shown as guidance; you choose who gets a freed seat.
@@ -113,7 +118,9 @@
     </tbody>
   </table>
   {% else %}<p class="desk-empty">The waiting list is empty.</p>{% endif %}
+  </section>
 
+  <section id="pending-requests">
   <h2>Pending requests ({{ pending|length }})</h2>
   {% if pending %}
   <table class="desk-table">
@@ -125,5 +132,6 @@
     </tbody>
   </table>
   {% else %}<p class="desk-empty">No requests waiting.</p>{% endif %}
+  </section>
 </div>
 {% endblock %}

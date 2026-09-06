@@ -1,0 +1,31 @@
+{% extends base_template %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:help_index' %}">Help</a>
+  &rsaquo; {{ topic.title }}
+</div>
+{% endblock %}
+
+{% comment %}The guide carries its own <h1>; `title` is still set, for the
+   browser tab and the breadcrumb.{% endcomment %}
+{% block content_title %}{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <article class="help-article">
+    {{ body }}
+  </article>
+
+  <nav class="help-more" aria-label="More help">
+    <h2>More help</h2>
+    <ul>
+      {% for other in siblings %}
+      <li><a href="{% url 'admin:help_topic' other.slug %}">{{ other.title }}</a>
+        <span class="desk-label">{{ other.summary }}</span></li>
+      {% endfor %}
+    </ul>
+  </nav>
+</div>
+{% endblock %}

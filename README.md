@@ -420,6 +420,48 @@ Most day-to-day settings are editable in the admin without redeploying, and both
 - **School years and holidays**: a `SchoolYear` holds the calendar; its `School holiday` rows (half-terms, Christmas, public holidays — inclusive date ranges) are the system-level default. Terms point at a school year and inherit them. "Copy holidays into another school year…" sets next year up from this one, shifted by whole weeks so periods keep their weekdays.
 - **Notification templates** (one row per event): email subject/body as Django template strings (context includes `school_name`, `sender_name`, `contact_email`, `site_url`, `parent_name`, `parent_first_name`, `child_name`, `child_first_name`, `class_title`, `provider_name`, `schedule`, `location`, `term_name`, `action_url`, `offer_expires_at`, and for the contact form `from_name`, `from_email`, `subject`, `body`, ...), an enabled flag, plus the WhatsApp mapping — approved template name, language, and which context keys fill the `{{1}}..{{n}}` placeholders. Leave the WhatsApp template name empty to skip WhatsApp for that event. The defaults are written as a parent volunteer would write to another parent and signed by `sender_name`; the data migration that seeds them only rewrites rows still carrying the previous default wording, so edits made in the admin survive deploys.
 
+## In-app help
+
+Every admin page carries a **Help** link, and the busy pages (Requests, a
+class, a roster, the announcement composer) link straight to the guide that
+covers them. The guides live at `/admin/help/`.
+
+The content is Markdown in the repository, not rows in a table, so a guide
+changes in the same commit as the behaviour it describes:
+
+```
+apps/dashboards/help/
+  registry.py                # the audiences and their topics — one entry per page
+  markdown_ext.py            # ![shot](name.png) → static URL; [text](other-topic) → its URL
+  views.py                   # index + topic, mounted on the admin site in admin_site.py
+  content/admin/*.md         # the guides themselves
+static/img/help/admin/*.png  # their screenshots
+templates/admin/help/        # index.html, topic.html
+```
+
+**To add a guide**: write `content/<audience>/<slug>.md`, add a `Topic` to that
+audience in `registry.py`, and give the headings you want to link to explicit
+anchors (`## Approving a request {#approve}`). `tests/test_admin_help.py`
+fails if a registered file, a referenced screenshot or a link to another guide
+is missing.
+
+**To refresh the screenshots** — do this whenever an admin screen changes:
+
+```bash
+pip install -e ".[screenshots]"
+playwright install chromium
+python scripts/capture_help_screenshots.py
+```
+
+It builds a throwaway database (`seed_demo` plus `scripts/demo_office.py`, which
+adds the requests, waiting list and outstanding offer the pictures need), drives
+the real admin in headless Chromium, and rewrites the PNGs in place. Commit the
+diff. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` points it at a Chromium Playwright did
+not install itself.
+
+Help for parents and providers is not written yet; the registry is keyed by
+audience so it is a folder of Markdown and one entry, not a second mechanism.
+
 ## WhatsApp setup
 
 WhatsApp delivery uses the Meta WhatsApp Cloud API and sends business-initiated *template* messages only. You need:
@@ -491,15 +533,19 @@ apps/
                       # expire offers); channels/ = email + WhatsApp adapters (stub & Meta);
                       # backends/zeptomail.py = Django email backend for ZeptoMail's API;
                       # management/commands/run_notifier.py (--once/--drain/daemon)
-  dashboards/         # parent and provider views/urls; the admin site (admin_site.py) and the old /admin-tools/ redirects
+  dashboards/         # parent and provider views/urls; the admin site (admin_site.py) and the
+                      # old /admin-tools/ redirects; help/ = the in-app guides (see below)
   media/              # StoredFile + DatabaseStorage: uploads kept in Postgres, served at
                       # /media/<name> immutably; prune_stored_files removes orphans
 templates/            # server-rendered HTML (HTMX-enhanced)
 static/               # main.css (the whole design system), vendored htmx.min.js,
-                      # img/ (PTA logo + generated favicons), fonts/ (self-hosted
+                      # img/ (PTA logo, generated favicons, help/ screenshots),
+                      # fonts/ (self-hosted
                       # Fredoka woff2 + OFL licence — no third-party font requests)
 scripts/              # make_icons.py: regenerate the favicons from the logo;
-                      # mcp_smoke.py: start the MCP server over stdio and call a tool
+                      # mcp_smoke.py: start the MCP server over stdio and call a tool;
+                      # capture_help_screenshots.py + demo_office.py: re-shoot the
+                      # pictures on the help pages
 tests/                # pytest suite (services, capacity race, notifications, views,
                       # school holidays, health probe, inline delivery, notifier job modes,
                       # MCP tools)
