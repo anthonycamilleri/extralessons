@@ -23,6 +23,10 @@ name: "Scaleway: configure the estate"
 
 on:
   workflow_dispatch:
+  # A push that touches this file only registers the workflow with GitHub so
+  # it can be dispatched; the job below refuses to run on it.
+  push:
+    paths: [".github/workflows/scaleway-configure.yml"]
     inputs:
       dry_run:
         description: "Only show the configuration that would be applied"
@@ -50,6 +54,7 @@ permissions:
 
 jobs:
   configure:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20

@@ -8,6 +8,10 @@ name: "Scaleway: attach domains"
 
 on:
   workflow_dispatch:
+  # A push that touches this file only registers the workflow with GitHub so
+  # it can be dispatched; the job below refuses to run on it.
+  push:
+    paths: [".github/workflows/scaleway-domains.yml"]
     inputs:
       hostnames:
         description: "Comma-separated hostnames"
@@ -19,6 +23,7 @@ permissions:
 
 jobs:
   domains:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     env:
