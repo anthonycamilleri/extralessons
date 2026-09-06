@@ -391,7 +391,8 @@ in `deploy/scaleway-env.lib.sh` — see [docs/scaleway-setup.md](docs/scaleway-s
 | `DEBUG` | Keep `false` outside development |
 | `ALLOWED_HOSTS` | Comma-separated hostnames the app serves: the custom domain(s) and the endpoint Scaleway generated for the container |
 | `CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. `https://www.esljparents.eu` |
-| `SITE_URL` | Absolute base URL used in notification links |
+| `SITE_URL` | Absolute base URL used in notification links, and the target of the canonical-host redirect |
+| `CANONICAL_REDIRECT_HOSTS` | Hostnames answered with a permanent redirect to `SITE_URL` (`config/canonical.py`): the bare domain, so `esljparents.eu` lands on `www`. Empty = off |
 | `MAINTENANCE_MODE` / `MAINTENANCE_MESSAGE` / `MAINTENANCE_RETRY_AFTER` | Freeze the site: every request but the health probe gets a 503 (`config/maintenance.py`). For copying the database elsewhere |
 | `TIME_ZONE` | Default `Europe/Malta` |
 | `LOG_LEVEL` | Root log level; everything goes to stdout |

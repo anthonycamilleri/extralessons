@@ -45,6 +45,8 @@ MIDDLEWARE = [
     # Second on purpose: with MAINTENANCE_MODE=true every other request is
     # answered with a 503 before it can touch the session or the database.
     "config.maintenance.MaintenanceModeMiddleware",
+    # Bare domain -> www, before the HTTPS redirect so it is one hop.
+    "config.canonical.CanonicalHostMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -192,6 +194,11 @@ NOTIFIER_INLINE_MAX_SECONDS = env.int("NOTIFIER_INLINE_MAX_SECONDS", default=20)
 
 # Absolute base URL used in notification links (no trailing slash).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
+
+# Hostnames that are redirected permanently to SITE_URL (config/canonical.py):
+# the bare domain, so esljparents.eu lands on www.esljparents.eu. They must
+# also be in ALLOWED_HOSTS. Empty = no redirects.
+CANONICAL_REDIRECT_HOSTS = env.list("CANONICAL_REDIRECT_HOSTS", default=[])
 
 # --- Bootstrap admin ---
 # `manage.py ensure_admin` (part of the pre-deploy command) creates this

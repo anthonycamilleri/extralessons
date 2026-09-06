@@ -432,9 +432,11 @@ or run *Scaleway: attach domains* from Actions. Scaleway checks the record at
 creation (so DNS has to move first), then issues and renews a Let's Encrypt
 certificate itself. For a bare apex (`esljparents.eu`) alongside `www`: an
 apex cannot be a CNAME, so use an ALIAS/ANAME record at the registrar (or
-Scaleway Domains and DNS, which has them), add the apex to `ALLOWED_HOSTS` and
-`CSRF_TRUSTED_ORIGINS` (the `APEX_DOMAIN` setting does this), and attach it
-the same way.
+Scaleway Domains and DNS, which has them), add the apex to `ALLOWED_HOSTS`,
+`CSRF_TRUSTED_ORIGINS` and `CANONICAL_REDIRECT_HOSTS` (the `APEX_DOMAIN`
+setting does all three), and attach it the same way. The app then answers
+the apex with a permanent redirect to `SITE_URL` (`config/canonical.py`), so
+one hostname carries every session, cookie and link.
 
 Optionally add an Edge Services pipeline in front for caching. Static files
 already carry year-long immutable cache headers (hashed filenames via

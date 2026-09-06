@@ -21,7 +21,7 @@
 
 # Plain (non-secret) settings shared by the container and both jobs.
 # Needs: TIME_ZONE ALLOWED_HOSTS CSRF_TRUSTED_ORIGINS SITE_URL
-#        DEFAULT_FROM_EMAIL ZEPTOMAIL_API_URL ADMIN_EMAIL
+#        DEFAULT_FROM_EMAIL ZEPTOMAIL_API_URL ADMIN_EMAIL; APEX_DOMAIN may be empty
 # Optional, with defaults: LOG_LEVEL DB_POOL_MAX_SIZE NOTIFIER_DRAIN_MAX_SECONDS WHATSAPP_ENABLED
 scw_plain_env() { # fills PLAIN_ENV
   PLAIN_ENV=(
@@ -31,6 +31,9 @@ scw_plain_env() { # fills PLAIN_ENV
     environment-variables.ALLOWED_HOSTS="$ALLOWED_HOSTS"
     environment-variables.CSRF_TRUSTED_ORIGINS="$CSRF_TRUSTED_ORIGINS"
     environment-variables.SITE_URL="$SITE_URL"
+    # The bare domain redirects to SITE_URL (config/canonical.py). Empty when
+    # there is no apex, which the app reads as "no redirects".
+    environment-variables.CANONICAL_REDIRECT_HOSTS="${APEX_DOMAIN:-}"
     environment-variables.DEFAULT_FROM_EMAIL="$DEFAULT_FROM_EMAIL"
     environment-variables.ZEPTOMAIL_API_URL="${ZEPTOMAIL_API_URL:-https://api.zeptomail.eu/v1.1/email}"
     environment-variables.ADMIN_EMAIL="${ADMIN_EMAIL:-}"
