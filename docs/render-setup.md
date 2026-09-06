@@ -1,4 +1,12 @@
-# Deploying Extralessons on Render
+# Deploying Extralessons on Render (legacy)
+
+> **Superseded.** Production runs on Scaleway again — see
+> [scaleway-setup.md](scaleway-setup.md), and
+> [migration-render-to-scaleway.md](migration-render-to-scaleway.md) for how
+> the data came back. Nothing here is triggered automatically any more:
+> `.github/workflows/deploy-render.yml` only runs from *Actions → Run
+> workflow*. `render.yaml` and this file are kept while the Render services
+> exist as the fallback, and go together when they are deleted.
 
 End-to-end setup, from a Render account to a deploying-on-green pipeline.
 Everything runs in Render's `frankfurt` region, which keeps the data in the EU.

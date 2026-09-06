@@ -1,14 +1,14 @@
 """Production settings.
 
-Written for a managed container platform (Render today, Scaleway Serverless
-before it) and deliberately neutral between them: the platform is described by
+Written for a managed container platform (Scaleway Serverless today, Render
+in between) and deliberately neutral between them: the platform is described by
 environment variables, not by code. The same module serves all three roles —
 web, migrate, notifier — because they are the same image with a different
 start command. Everything that differs between them is an argument, not a
 setting.
 
 The database section is shaped by managed PostgreSQL offerings that front or
-cap connections; see docs/render-setup.md for the reasoning.
+cap connections; see docs/scaleway-setup.md for the reasoning.
 """
 from .base import *  # noqa: F401,F403
 from .base import ALLOWED_HOSTS, DATABASES, MEDIA_MAX_AGE, STORAGES, env, is_postgres
@@ -17,10 +17,12 @@ DEBUG = False
 
 # --- Hosts ---
 # Django 400s any Host it was not told about, so the platform's generated
-# hostname has to be listed alongside any custom domain. Render passes its
-# generated hostname in as RENDER_EXTERNAL_HOSTNAME; picking it up here means a
-# fresh service answers on *.onrender.com before anyone has configured DNS,
-# and keeps answering there after they have.
+# hostname has to be listed alongside any custom domain. On Scaleway that is
+# done explicitly (deploy/scaleway-env.lib.sh puts the generated endpoint in
+# ALLOWED_HOSTS). Render passes its generated hostname in as
+# RENDER_EXTERNAL_HOSTNAME; picking it up here means a fresh Render service
+# answers on *.onrender.com before anyone has configured DNS. Harmless where
+# the variable is absent.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 _platform_host = env("RENDER_EXTERNAL_HOSTNAME", default="")
 if _platform_host:

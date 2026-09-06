@@ -2,8 +2,8 @@
 #
 # One-shot provisioning of the Scaleway estate described in
 # docs/scaleway-setup.md: two IAM applications, a Serverless SQL Database, a
-# media bucket, a container registry, the web container, and the migrate and
-# notifier jobs.
+# container registry, the web container, and the migrate and notifier jobs.
+# Uploaded images live in the database (apps/media), so there is no bucket.
 #
 # It is idempotent and resumable. Every step looks for the resource before
 # creating it, and everything it learns is appended to deploy/.scaleway-state
@@ -13,7 +13,11 @@
 #   cp deploy/scaleway.env.example deploy/scaleway.env   # edit it
 #   ./deploy/provision.sh
 #
-# Re-run it as often as you like; completed steps are skipped.
+# Re-run it as often as you like; completed steps are skipped and the
+# environment of the container and jobs is converged to deploy/scaleway-env.lib.sh.
+#
+# For an estate that already exists, .github/workflows/scaleway-configure.yml
+# does the environment part from GitHub Actions without this script.
 
 set -euo pipefail
 
@@ -28,6 +32,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$HERE")"
 CONFIG="$HERE/scaleway.env"
 STATE="$HERE/.scaleway-state"
+# shellcheck disable=SC1091
+. "$HERE/scaleway-env.lib.sh"
 
 # --- Output -----------------------------------------------------------------
 
@@ -57,13 +63,15 @@ command -v docker >/dev/null || die "docker not found."
 # generates for the container, which is only knowable after the container
 # exists — so the host-dependent settings are applied in a second pass below.
 : "${DOMAIN:=}"
+: "${APEX_DOMAIN:=}"
+: "${ADMIN_EMAIL:=}"
 : "${TIME_ZONE:=Europe/Malta}"
 : "${REGION:=fr-par}"
-: "${BUCKET:=$APP_NAME-media}"
-: "${EMAIL_HOST:=smtp.tem.scw.cloud}"
-: "${EMAIL_PORT:=587}"
 : "${DEFAULT_FROM_EMAIL:=School Activities <notifications@${DOMAIN:-example.com}>}"
-: "${SMTP_PASSWORD:=}"
+: "${ZEPTOMAIL_SEND_MAIL_TOKEN:=}"
+: "${ZEPTOMAIL_API_URL:=https://api.zeptomail.eu/v1.1/email}"
+: "${MIN_SCALE:=0}"
+export TIME_ZONE DEFAULT_FROM_EMAIL ZEPTOMAIL_API_URL ADMIN_EMAIL ZEPTOMAIL_SEND_MAIL_TOKEN
 
 export SCW_DEFAULT_REGION="$REGION"
 
@@ -120,17 +128,14 @@ if [ -z "${RUNTIME_APP_ID:-}" ]; then
     remember RUNTIME_APP_ID "$id"; ok "created $id"
     scwj iam policy create name="$APP_NAME-runtime" application-id="$id" \
       rules.0.project-ids.0="$PROJECT_ID" \
-      rules.0.permission-set-names.0=ServerlessSQLDatabaseReadWrite \
-      rules.1.project-ids.0="$PROJECT_ID" \
-      rules.1.permission-set-names.0=ObjectStorageFullAccess >/dev/null
-    ok "policy attached (SQL read/write + object storage)"
+      rules.0.permission-set-names.0=ServerlessSQLDatabaseReadWrite >/dev/null
+    ok "policy attached (SQL read/write)"
   fi
 else
   skip "$APP_NAME-runtime ($RUNTIME_APP_ID)"
 fi
 
 if [ -z "${RUNTIME_SECRET_KEY:-}" ]; then
-  # default-project-id is what makes this key usable for Object Storage.
   key="$(scwj iam api-key create application-id="$RUNTIME_APP_ID" \
     default-project-id="$PROJECT_ID" description="$APP_NAME runtime")"
   remember RUNTIME_ACCESS_KEY "$(echo "$key" | jq -r '.access_key')"
@@ -156,7 +161,7 @@ if [ -z "${CI_APP_ID:-}" ]; then
       rules.1.permission-set-names.0=ContainersFullAccess \
       rules.2.project-ids.0="$PROJECT_ID" \
       rules.2.permission-set-names.0=ServerlessJobsFullAccess >/dev/null
-    ok "policy attached (registry + containers + jobs, deliberately no DB)"
+    ok "policy attached (registry + containers + jobs, deliberately no DB or IAM)"
   fi
 else
   skip "$APP_NAME-ci ($CI_APP_ID)"
@@ -195,18 +200,7 @@ else
 fi
 
 DATABASE_URL="postgres://${RUNTIME_APP_ID}:${RUNTIME_SECRET_KEY}@${DB_HOST}:5432/${APP_NAME}?sslmode=require"
-
-# --- 3. Object Storage ------------------------------------------------------
-
-step "Object Storage bucket: $BUCKET"
-if scwj object bucket get "$BUCKET" region="$REGION" >/dev/null 2>&1; then
-  skip "$BUCKET"
-else
-  # Bucket names are globally unique across all Scaleway users.
-  scwj object bucket create "$BUCKET" region="$REGION" >/dev/null \
-    || die "could not create bucket '$BUCKET' — the name may be taken. Set BUCKET in $CONFIG."
-  ok "created $BUCKET"
-fi
+export DATABASE_URL
 
 # --- 4. Container Registry --------------------------------------------------
 
@@ -249,14 +243,23 @@ fi
 # --- 6. Shared application secrets ------------------------------------------
 
 step "Application secrets"
+# Both may be given in scaleway.env — copying SECRET_KEY from a previous host
+# keeps every session and password-reset link valid across a move — and are
+# generated otherwise. openssl is present wherever docker is.
 if [ -z "${SECRET_KEY:-}" ]; then
-  # openssl is present wherever docker is; no python dependency on the host.
   remember SECRET_KEY "$(openssl rand -base64 64 | tr -d '\n=+/' | cut -c1-64)"
   ok "generated Django SECRET_KEY"
 else
   skip "SECRET_KEY"
 fi
-[ -n "$SMTP_PASSWORD" ] || warn "SMTP_PASSWORD empty — sends will fail and retry; the outbox keeps them"
+if [ -z "${MCP_API_TOKEN:-}" ]; then
+  remember MCP_API_TOKEN "$(openssl rand -base64 48 | tr -d '\n=+/' | cut -c1-48)"
+  ok "generated MCP_API_TOKEN (the Claude connector's key; read it from the state file)"
+else
+  skip "MCP_API_TOKEN"
+fi
+export SECRET_KEY MCP_API_TOKEN
+[ -n "$ZEPTOMAIL_SEND_MAIL_TOKEN" ] || warn "ZEPTOMAIL_SEND_MAIL_TOKEN empty — sends will fail and retry; the outbox keeps them"
 
 # --- 7. The web container ---------------------------------------------------
 
@@ -281,30 +284,15 @@ else
   skip "namespace ($CONTAINER_NAMESPACE_ID)"
 fi
 
-# Everything except the three host-dependent settings, which are not knowable
-# until the container exists when no custom DOMAIN was given. Held in an array
-# because both the create below and the second pass afterwards need the full
-# set: `container update` replaces the environment map wholesale rather than
-# merging into it, so a partial update would silently drop the rest.
-container_env() { # container_env PUBLIC_HOST ALLOWED_HOSTS
-  CONTAINER_ENV=(
-    environment-variables.DJANGO_SETTINGS_MODULE=config.settings.prod
-    environment-variables.TIME_ZONE="$TIME_ZONE"
-    environment-variables.S3_BUCKET="$BUCKET"
-    environment-variables.S3_REGION="$REGION"
-    environment-variables.S3_ENDPOINT_URL="https://s3.${REGION}.scw.cloud"
-    environment-variables.EMAIL_HOST="$EMAIL_HOST"
-    environment-variables.EMAIL_PORT="$EMAIL_PORT"
-    environment-variables.DEFAULT_FROM_EMAIL="$DEFAULT_FROM_EMAIL"
-    environment-variables.ALLOWED_HOSTS="${2:-$1}"
-    environment-variables.CSRF_TRUSTED_ORIGINS="https://$1"
-    environment-variables.SITE_URL="https://$1"
-    secret-environment-variables.SECRET_KEY="$SECRET_KEY"
-    secret-environment-variables.DATABASE_URL="$DATABASE_URL"
-    secret-environment-variables.S3_ACCESS_KEY_ID="$RUNTIME_ACCESS_KEY"
-    secret-environment-variables.S3_SECRET_ACCESS_KEY="$RUNTIME_SECRET_KEY"
-    secret-environment-variables.EMAIL_HOST_PASSWORD="$SMTP_PASSWORD"
-  )
+# The environment comes from deploy/scaleway-env.lib.sh, shared with the
+# GitHub Actions configure workflow. The three host-dependent settings are not
+# knowable until the container exists when no custom DOMAIN was given, so they
+# are applied in a second pass below. `container update` replaces the plain
+# environment map wholesale, which is why every pass sends the full set.
+container_env() { # container_env GENERATED_HOST
+  GENERATED_HOST="$1" scw_host_settings
+  scw_plain_env; scw_container_secrets
+  CONTAINER_ENV=("${PLAIN_ENV[@]}" "${CONTAINER_SECRETS[@]}")
 }
 
 step "Web container: $APP_NAME-web"
@@ -317,7 +305,7 @@ if [ -z "${CONTAINER_ID:-}" ]; then
     # A wrong ALLOWED_HOSTS here is survivable on purpose: config/health.py
     # answers /_health before host validation, so the container still reaches
     # "ready" and we can read its generated endpoint back off it.
-    container_env "${DOMAIN:-placeholder.invalid}"
+    container_env "placeholder.invalid"
     # Argument names track scaleway-cli v2.61: `image` (not registry-image),
     # `memory-limit-bytes` in G/GB units (not memory-limit in MiB),
     # `mvcpu-limit` (not cpu-limit), `https-connections-only` (not
@@ -329,7 +317,7 @@ if [ -z "${CONTAINER_ID:-}" ]; then
     id="$(scwj container container create \
       namespace-id="$CONTAINER_NAMESPACE_ID" name="$APP_NAME-web" \
       image="$IMAGE" port=8080 \
-      min-scale=0 max-scale=5 \
+      min-scale="$MIN_SCALE" max-scale=5 \
       memory-limit-bytes=1GB mvcpu-limit=1000 \
       scaling-option.concurrent-requests-threshold=8 \
       timeout=60s privacy=public https-connections-only=true \
@@ -368,21 +356,10 @@ done
 [ -n "$GENERATED_HOST" ] || die "container has no endpoint after five minutes; check 'scw container container get $CONTAINER_ID'."
 ok "endpoint $GENERATED_HOST"
 
-WEB_HOST="${DOMAIN:-$GENERATED_HOST}"
-SITE_URL="https://$WEB_HOST"
-
-if [ -n "$DOMAIN" ]; then
-  # Both hostnames must be accepted: the platform routes health probes and any
-  # direct traffic over the generated endpoint even once a domain is attached.
-  ALLOWED="$DOMAIN,$GENERATED_HOST"
-else
-  ALLOWED="$GENERATED_HOST"
-fi
-
-container_env "$WEB_HOST" "$ALLOWED"
+container_env "$GENERATED_HOST"
 scwj container container update "$CONTAINER_ID" "${CONTAINER_ENV[@]}" >/dev/null
 remember WEB_HOST "$WEB_HOST"
-ok "ALLOWED_HOSTS=$ALLOWED"
+ok "ALLOWED_HOSTS=$ALLOWED_HOSTS"
 ok "SITE_URL=$SITE_URL"
 
 # --- 8. The two jobs --------------------------------------------------------
@@ -393,6 +370,11 @@ ok "SITE_URL=$SITE_URL"
 # Unlike every other list command here, `jobs definition list` takes no name=
 # filter, so the whole list comes back and jq does the matching.
 find_job() { scwj jobs definition list | jq -r --arg n "$1" '.[]? | select(.name==$n) | .id' | head -1; }
+
+# Jobs take plain environment variables only. scw_job_env is the shared plain
+# set plus the secrets the two jobs need; see the Secret Manager note in
+# docs/scaleway-setup.md for keeping those out of the definition.
+scw_job_env
 
 step "Job: $APP_NAME-migrate"
 if [ -z "${JOB_MIGRATE_ID:-}" ]; then
@@ -405,15 +387,15 @@ if [ -z "${JOB_MIGRATE_ID:-}" ]; then
       local-storage-capacity=1024 job-timeout=600s \
       startup-command.0=python startup-command.1=manage.py \
       args.0=migrate args.1=--noinput \
-      environment-variables.DJANGO_SETTINGS_MODULE=config.settings.prod \
-      environment-variables.SECRET_KEY="$SECRET_KEY" \
-      environment-variables.DATABASE_URL="$DATABASE_URL" \
+      "${JOB_ENV[@]}" \
       | jq -r '.id')"
     remember JOB_MIGRATE_ID "$id"; ok "created $id (no cron; deploy-driven)"
   fi
 else
   skip "migrate job ($JOB_MIGRATE_ID)"
 fi
+scwj jobs definition update "$JOB_MIGRATE_ID" "${JOB_ENV[@]}" >/dev/null
+ok "environment converged"
 
 step "Job: $APP_NAME-notifier"
 if [ -z "${JOB_NOTIFIER_ID:-}" ]; then
@@ -427,21 +409,15 @@ if [ -z "${JOB_NOTIFIER_ID:-}" ]; then
       cron-schedule.schedule="0 3 * * *" cron-schedule.timezone="$TIME_ZONE" \
       startup-command.0=python startup-command.1=manage.py \
       args.0=run_notifier args.1=--drain args.2=--max-seconds args.3=240 \
-      environment-variables.DJANGO_SETTINGS_MODULE=config.settings.prod \
-      environment-variables.SITE_URL="$SITE_URL" \
-      environment-variables.TIME_ZONE="$TIME_ZONE" \
-      environment-variables.EMAIL_HOST="$EMAIL_HOST" \
-      environment-variables.EMAIL_PORT="$EMAIL_PORT" \
-      environment-variables.DEFAULT_FROM_EMAIL="$DEFAULT_FROM_EMAIL" \
-      environment-variables.EMAIL_HOST_PASSWORD="$SMTP_PASSWORD" \
-      environment-variables.SECRET_KEY="$SECRET_KEY" \
-      environment-variables.DATABASE_URL="$DATABASE_URL" \
+      "${JOB_ENV[@]}" \
       | jq -r '.id')"
     remember JOB_NOTIFIER_ID "$id"; ok "created $id (nightly 03:00 $TIME_ZONE)"
   fi
 else
   skip "notifier job ($JOB_NOTIFIER_ID)"
 fi
+scwj jobs definition update "$JOB_NOTIFIER_ID" "${JOB_ENV[@]}" >/dev/null
+ok "environment converged"
 
 # --- 9. First migration -----------------------------------------------------
 
@@ -456,6 +432,14 @@ else
   state="$(scwj jobs run get "$run_id" | jq -r '.state // "unknown"')"
   if [ "$state" = "succeeded" ]; then
     ok "migrations applied"
+    # Contextual args apply to this run only: same job, different command.
+    # Creates the ADMIN_EMAIL superuser and emails it a set-password link;
+    # finds it and does nothing on every later run.
+    run_id="$(scwj jobs definition start "$JOB_MIGRATE_ID" args.0=ensure_admin | jq -r '.job_runs[0].id // .id')"
+    scw jobs run wait "$run_id" >/dev/null 2>&1 || true
+    [ "$(scwj jobs run get "$run_id" | jq -r '.state')" = "succeeded" ] \
+      && ok "admin account ensured for ${ADMIN_EMAIL:-<ADMIN_EMAIL unset: skipped>}" \
+      || warn "ensure_admin finished oddly; inspect with: scw jobs run get $run_id"
   else
     warn "migration run finished in state '$state'"
     warn "inspect with: scw jobs run get $run_id"
@@ -471,6 +455,7 @@ ${B}1. Point DNS at the container$N
 
    Once it resolves, attach the domain so Scaleway issues the certificate:
    scw container domain create container-id=$CONTAINER_ID hostname=$DOMAIN
+   (APEX_DOMAIN: an ALIAS/ANAME record at the apex, then the same command for it)
 EOF
 )"
 else
@@ -499,10 +484,12 @@ $B Provisioned.$N Secrets and IDs are in $STATE (keep it, do not commit it).
 
 $DNS_SECTION
 
-${B}2. Create the first admin user$N
-   scw jobs definition start $JOB_MIGRATE_ID \\
-     args.0=shell args.1=-c \\
-     args.2="from django.contrib.auth import get_user_model; U=get_user_model(); U.objects.create_superuser(email='${ADMIN_EMAIL:-you@example.com}', password='CHANGE-ME')"
+${B}2. Log in$N
+   ${ADMIN_EMAIL:-ADMIN_EMAIL} has been emailed a set-password link (if ADMIN_EMAIL and the
+   ZeptoMail token were set). Otherwise use "Forgotten your password?" once email
+   works, or: scw jobs definition start $JOB_MIGRATE_ID args.0=ensure_admin args.1=--send-reset
+
+   The Claude connector key is MCP_API_TOKEN in $STATE.
 
 ${B}3. GitHub Actions — Settings → Secrets and variables → Actions$N
 

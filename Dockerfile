@@ -6,9 +6,10 @@
 # keep in step, and a migration that ran against code the web tier does not
 # have is exactly the failure this avoids.
 #
-# Render builds this file with no --target, which yields the *last* stage, so
-# `runtime` must stay last. The platform passes PORT in at run time (Render
-# uses 10000); the ENV below is only the default for local runs and CI.
+# Scaleway's deploy builds `--target runtime`; a build with no --target yields
+# the *last* stage, so `runtime` must stay last for platforms that build it that
+# way (Render did). The platform may pass PORT in at run time; the ENV below is
+# the default Scaleway uses (port=8080 on the container) and what CI runs.
 # Production is linux/amd64: build with `docker buildx build --platform
 # linux/amd64` on an ARM machine when you need a faithful local image.
 

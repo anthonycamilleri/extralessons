@@ -1,0 +1,181 @@
+name: "Scaleway: configure the estate"
+
+# Brings the existing Scaleway estate (web container, migrate job, notifier
+# job) up to the production configuration this repository expects, copying the
+# application secrets from Render so no human ever handles them:
+#
+#   SECRET_KEY                 kept identical so every parent's session and
+#                              every outstanding password-reset or invitation
+#                              link survives the move
+#   ZEPTOMAIL_SEND_MAIL_TOKEN  email keeps flowing from the same Mail Agent
+#   MCP_API_TOKEN              the Claude connector keeps working unchanged
+#   DATABASE_URL               stays what it is: the Scaleway database's own
+#
+# Uploaded images live in the database (apps/media), so the S3_* variables of
+# the old estate are dropped: S3_BUCKET absent is what selects database storage.
+#
+# Idempotent — run it as often as the configuration changes. The environment
+# is described once, in deploy/scaleway-env.lib.sh, and applied identically to
+# the container and both jobs. Every secret is masked in the log.
+#
+# Run with dry_run (the default) first: it prints what it would set and changes
+# nothing. Then run it again with dry_run unticked.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only show the configuration that would be applied"
+        type: boolean
+        default: true
+      domain:
+        description: "Public hostname parents use (sets SITE_URL)"
+        type: string
+        default: www.esljparents.eu
+      apex_domain:
+        description: "Bare domain to accept alongside (empty = none)"
+        type: string
+        default: esljparents.eu
+      min_scale:
+        description: "Container min-scale (empty = leave as is; 1 = always warm, no cold starts)"
+        type: string
+        default: ""
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+      JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
+      JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
+      RENDER_WEB_SERVICE_NAME: extralessons-web
+      RENDER_ENV_GROUP_NAME: extralessons-shared
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required configuration is present
+        run: |
+          missing=""
+          for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID RENDER_API_KEY \
+                   CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          [ -z "$missing" ] || { echo "::error::Missing secrets/variables:$missing"; exit 1; }
+
+      - name: Install the Scaleway CLI
+        run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+
+      - name: Read the application secrets from Render
+        id: render
+        run: |
+          set -euo pipefail
+          get() { curl -fsS "https://api.render.com/v1$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
+          web="$(deploy/render-service-id.sh "$RENDER_WEB_SERVICE_NAME")"
+          service_env="$(get "/services/$web/env-vars?limit=100")"
+          group_id="$(get "/env-groups?limit=50" | jq -r --arg n "$RENDER_ENV_GROUP_NAME" '.[].envGroup | select(.name==$n) | .id')"
+          [ -n "$group_id" ] || { echo "::error::no Render env group named $RENDER_ENV_GROUP_NAME"; exit 1; }
+          group_env="$(get "/env-groups/$group_id")"
+          value() { # value KEY -> from the service, else from the group
+            local v; v="$(jq -r --arg k "$1" '.[].envVar | select(.key==$k) | .value' <<<"$service_env")"
+            [ -n "$v" ] || v="$(jq -r --arg k "$1" '.envVars[] | select(.key==$k) | .value' <<<"$group_env")"
+            printf '%s' "$v"
+          }
+          for k in SECRET_KEY ZEPTOMAIL_SEND_MAIL_TOKEN MCP_API_TOKEN; do
+            v="$(value $k)"
+            [ -n "$v" ] || { echo "::error::Render holds no value for $k"; exit 1; }
+            echo "::add-mask::$v"
+            echo "$k=$v" >> "$GITHUB_OUTPUT"
+            echo "read $k from Render (${#v} characters)"
+          done
+          for k in ADMIN_EMAIL DEFAULT_FROM_EMAIL ZEPTOMAIL_API_URL TIME_ZONE DB_POOL_MAX_SIZE; do
+            v="$(value $k)"; echo "$k=$v" >> "$GITHUB_OUTPUT"; echo "read $k = $v"
+          done
+
+      - name: Read what the Scaleway estate already has
+        id: scw
+        run: |
+          set -euo pipefail
+          # The database credentials live only on Scaleway: as a secret on the
+          # container (unreadable) and as a plain variable on the jobs.
+          db="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json | jq -r '.environment_variables.DATABASE_URL // empty')"
+          [ -n "$db" ] || { echo "::error::the migrate job carries no DATABASE_URL"; exit 1; }
+          echo "::add-mask::$db"
+          echo "DATABASE_URL=$db" >> "$GITHUB_OUTPUT"
+          cjson="$(scw container container get "$CONTAINER_ID" -o json)"
+          host="$(jq -r '(.public_endpoint // .domain_name // "") | sub("^https?://";"")' <<<"$cjson")"
+          [ -n "$host" ] || { echo "::error::container has no endpoint yet"; exit 1; }
+          echo "GENERATED_HOST=$host" >> "$GITHUB_OUTPUT"
+          echo "container endpoint: $host"
+          echo "container status:   $(jq -r .status <<<"$cjson"), scale $(jq -r .min_scale <<<"$cjson")..$(jq -r .max_scale <<<"$cjson"), image $(jq -r '.registry_image // .image' <<<"$cjson")"
+          echo "plain env keys now: $(jq -r '.environment_variables | keys | join(",")' <<<"$cjson")"
+
+      - name: Apply the production configuration
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          DOMAIN: ${{ inputs.domain }}
+          APEX_DOMAIN: ${{ inputs.apex_domain }}
+          MIN_SCALE: ${{ inputs.min_scale }}
+          GENERATED_HOST: ${{ steps.scw.outputs.GENERATED_HOST }}
+          DATABASE_URL: ${{ steps.scw.outputs.DATABASE_URL }}
+          SECRET_KEY: ${{ steps.render.outputs.SECRET_KEY }}
+          ZEPTOMAIL_SEND_MAIL_TOKEN: ${{ steps.render.outputs.ZEPTOMAIL_SEND_MAIL_TOKEN }}
+          MCP_API_TOKEN: ${{ steps.render.outputs.MCP_API_TOKEN }}
+          ADMIN_EMAIL: ${{ steps.render.outputs.ADMIN_EMAIL }}
+          DEFAULT_FROM_EMAIL: ${{ steps.render.outputs.DEFAULT_FROM_EMAIL }}
+          ZEPTOMAIL_API_URL: ${{ steps.render.outputs.ZEPTOMAIL_API_URL }}
+          TIME_ZONE: ${{ steps.render.outputs.TIME_ZONE }}
+          DB_POOL_MAX_SIZE: ${{ steps.render.outputs.DB_POOL_MAX_SIZE }}
+        run: |
+          set -euo pipefail
+          . deploy/scaleway-env.lib.sh
+          scw_host_settings
+          scw_plain_env; scw_container_secrets; scw_job_env
+          scale=(); [ -n "$MIN_SCALE" ] && scale=(min-scale="$MIN_SCALE")
+
+          echo "## container $CONTAINER_ID"
+          printf '  %s\n' "${PLAIN_ENV[@]}" "${scale[@]}"
+          printf '  %s\n' "${CONTAINER_SECRETS[@]}" | sed -E 's/=.*/=<secret>/'
+          echo "## jobs $JOB_MIGRATE_ID, $JOB_NOTIFIER_ID"
+          printf '  %s\n' "${JOB_ENV[@]}" | sed -E 's/^(environment-variables\.(SECRET_KEY|DATABASE_URL|ZEPTOMAIL_SEND_MAIL_TOKEN))=.*/\1=<secret>/'
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo; echo "Dry run: nothing changed. Re-run with dry_run unticked to apply."
+            exit 0
+          fi
+
+          scw container container update "$CONTAINER_ID" \
+            "${PLAIN_ENV[@]}" "${CONTAINER_SECRETS[@]}" "${scale[@]}" -o json > /dev/null
+          echo "container updated; redeploying"
+          scw jobs definition update "$JOB_MIGRATE_ID"  "${JOB_ENV[@]}" -o json > /dev/null
+          scw jobs definition update "$JOB_NOTIFIER_ID" "${JOB_ENV[@]}" -o json > /dev/null
+          echo "jobs updated"
+
+          # An environment change redeploys the container; wait for it.
+          sleep 10
+          for attempt in $(seq 1 60); do
+            status="$(scw container container get "$CONTAINER_ID" -o json | jq -r .status)"
+            echo "attempt $attempt: $status"
+            [ "$status" = "ready" ] && break
+            [ "$status" = "error" ] && { echo "::error::container in error"; exit 1; }
+            sleep 5
+          done
+          [ "$status" = "ready" ] || { echo "::error::container not ready after five minutes"; exit 1; }
+
+      - name: Smoke test the generated endpoint
+        if: ${{ !inputs.dry_run }}
+        run: deploy/smoke.sh "https://${{ steps.scw.outputs.GENERATED_HOST }}"

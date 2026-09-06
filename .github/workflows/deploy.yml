@@ -1,18 +1,19 @@
-name: Deploy to Scaleway (legacy, manual)
+name: Deploy to Scaleway
 
-# LEGACY. Production moved to Render — see render.yaml, deploy-render.yml and
-# docs/render-setup.md. This workflow is kept so the Scaleway estate can still
-# be rolled forward or back by hand while it exists, but it no longer runs on
-# push: trigger it from Actions → Run workflow, on whichever ref you choose.
-# Delete it, deploy/provision.sh and docs/scaleway-setup.md together once the
-# Scaleway project has been torn down.
+# Production. Runs after CI has passed on main: build once, migrate, then roll
+# the container. The image is tagged with the commit SHA rather than a moving
+# `latest`: Serverless Containers redeploy on a changed image reference, so an
+# immutable tag is what makes a deploy deterministic and a rollback a one-line
+# change. Set-up and operations: docs/scaleway-setup.md.
 #
-# Build once, migrate, then roll the container. The image is tagged with the
-# commit SHA rather than a moving `latest`: Serverless Containers redeploy on a
-# changed image reference, so an immutable tag is what makes a deploy
-# deterministic and a rollback a one-line change.
+# Roll back with Actions → Run workflow → image_tag set to an earlier commit's
+# SHA (it skips the build and repoints everything at that image).
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       image_tag:
@@ -33,12 +34,21 @@ env:
 
 jobs:
   deploy:
+    # workflow_run fires for every CI conclusion; only a green one deploys.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     environment: production
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On a workflow_run event github.sha is the head of main at the time
+          # the event fired, not necessarily the commit CI just tested.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Check required configuration is present
         # Failing here with a readable message beats a cryptic 404 from the API
@@ -68,7 +78,7 @@ jobs:
       - name: Resolve image reference
         id: image
         run: |
-          tag="${{ inputs.image_tag || github.sha }}"
+          tag="${{ inputs.image_tag || github.event.workflow_run.head_sha || github.sha }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "ref=${REGISTRY_HOST}/${{ vars.SCW_REGISTRY_NAMESPACE }}/${IMAGE_NAME}:${tag}" >> "$GITHUB_OUTPUT"
           echo "Deploying ${REGISTRY_HOST}/${{ vars.SCW_REGISTRY_NAMESPACE }}/${IMAGE_NAME}:${tag}"
@@ -123,27 +133,10 @@ jobs:
           set -euo pipefail
           scw jobs definition update "${{ vars.SCW_JOB_MIGRATE_ID }}" \
             image-uri="$IMAGE_REF" -o json > /dev/null
-
-          # The response is {"job_runs":[{...}]}, not a bare run object, so the
-          # id lives one level down. Reading `.id` here yields null and the
-          # `jobs run wait` that follows fails on a malformed UUID.
-          run_id=$(scw jobs definition start "${{ vars.SCW_JOB_MIGRATE_ID }}" -o json \
-            | jq -r '.job_runs[0].id // .id')
-          echo "Migration run: $run_id"
-
-          # `wait` blocks until the run reaches a stable state; it is not the
-          # authority on which state that was, so read it back explicitly.
-          scw jobs run wait "$run_id" > /dev/null 2>&1 || true
-          scw jobs run get "$run_id" -o json > /tmp/run.json
-          state=$(jq -r '.state // "unknown"' /tmp/run.json)
-          echo "Final state: $state"
-
-          if [ "$state" != "succeeded" ]; then
-            echo "::error::Migration job finished in state '$state' — not deploying."
-            jq . /tmp/run.json
-            echo "Logs: scw jobs run get $run_id, or Cockpit."
-            exit 1
-          fi
+          deploy/scw-run-job.sh "${{ vars.SCW_JOB_MIGRATE_ID }}"
+          # First deploy of a fresh estate: creates the ADMIN_EMAIL account and
+          # emails a set-password link. Every later deploy: finds it, does nothing.
+          deploy/scw-run-job.sh "${{ vars.SCW_JOB_MIGRATE_ID }}" args.0=ensure_admin
 
       - name: Point the notifier job at the new image
         env:

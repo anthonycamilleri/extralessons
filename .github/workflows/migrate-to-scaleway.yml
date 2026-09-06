@@ -1,0 +1,227 @@
+name: "Scaleway: move production from Render"
+
+# Copies the live database from Render into the Scaleway Serverless SQL
+# Database and proves the copy (deploy/migrate-db.sh), from a GitHub runner, so
+# nobody needs database credentials on a laptop. Three modes:
+#
+#   rehearsal  Copy while Render stays live. Render's data is unchanged; the
+#              Scaleway database ends up as a snapshot you can test against on
+#              the generated endpoint. Repeatable.
+#   cutover    Suspend the Render web service and cron job (an instant, fully
+#              reversible freeze: nothing can write), copy, verify, run the
+#              migrations on Scaleway, smoke-test it, and print the DNS records
+#              to change. Render stays suspended as the fallback.
+#   rollback   Resume the Render services. Point DNS back at Render if it was
+#              already moved. Scaleway is left as it is.
+#
+# Prerequisites: "Scaleway: configure the estate" has been applied, and the
+# deploy workflow has put the current image on Scaleway (a push to main does).
+#
+# The Render database is opened to this runner's IP for the duration of the
+# copy and closed again afterwards, whatever happens. No dump is kept: it
+# holds families' personal data, and Render remains the backup until you tear
+# it down.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to do"
+        type: choice
+        options: [rehearsal, cutover, rollback]
+        default: rehearsal
+      confirm:
+        description: "Type the mode again to confirm (cutover and rollback only)"
+        type: string
+        default: ""
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_API: https://api.render.com/v1
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+      JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
+      JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
+      RENDER_WEB: extralessons-web
+      RENDER_CRON: extralessons-notifier
+      RENDER_DB: extralessons-db
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the request
+        run: |
+          if [ "$MODE" != rehearsal ] && [ "${{ inputs.confirm }}" != "$MODE" ]; then
+            echo "::error::$MODE changes what parents see; type '$MODE' in the confirm box."
+            exit 1
+          fi
+          missing=""
+          for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID RENDER_API_KEY CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          [ -z "$missing" ] || { echo "::error::Missing secrets/variables:$missing"; exit 1; }
+
+      - name: Install tools
+        run: |
+          curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16 > /dev/null
+          pg_dump --version
+
+      - name: Resolve the Render resources
+        id: render
+        run: |
+          set -euo pipefail
+          get() { curl -fsS "$RENDER_API$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
+          web="$(deploy/render-service-id.sh "$RENDER_WEB")"
+          cron="$(deploy/render-service-id.sh "$RENDER_CRON")"
+          db="$(get "/postgres?name=$RENDER_DB&limit=20" | jq -r --arg n "$RENDER_DB" '.[].postgres | select(.name==$n) | .id')"
+          [ -n "$db" ] || { echo "::error::no Render database named $RENDER_DB"; exit 1; }
+          echo "web=$web" >> "$GITHUB_OUTPUT"; echo "cron=$cron" >> "$GITHUB_OUTPUT"; echo "db=$db" >> "$GITHUB_OUTPUT"
+          echo "web $web, cron $cron, database $db"
+          get "/postgres/$db" | jq -r '"database: \(.status), plan \(.plan), PostgreSQL \(.version), allow list \(.ipAllowList | tostring)"'
+          get "/services/$web" | jq -r '"web service: suspended=\(.suspended)  url=\(.serviceDetails.url)"'
+
+      # ---------------------------------------------------------------- rollback
+      - name: Resume the Render services
+        if: ${{ inputs.mode == 'rollback' }}
+        run: |
+          set -euo pipefail
+          post() { curl -fsS -X POST "$RENDER_API$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
+          post "/services/${{ steps.render.outputs.web }}/resume" > /dev/null && echo "web service resumed"
+          post "/services/${{ steps.render.outputs.cron }}/resume" > /dev/null && echo "cron job resumed"
+          url="$(deploy/render-service-id.sh --url "$RENDER_WEB")"
+          for attempt in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url/_health" || true)
+            [ "$code" = "200" ] && { echo "Render answers again at $url"; break; }
+            echo "attempt $attempt: HTTP $code"; sleep 10
+          done
+          echo
+          echo "If DNS was already moved, point it back:"
+          echo "  www.esljparents.eu  CNAME  ${url#https://}"
+          echo "and re-enable Render's custom domain if it was removed."
+
+      # ------------------------------------------------------ rehearsal, cutover
+      - name: Freeze Render (cutover only)
+        if: ${{ inputs.mode == 'cutover' }}
+        run: |
+          set -euo pipefail
+          post() { curl -fsS -X POST "$RENDER_API$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
+          # Suspending is instant, needs no deploy, and is undone by `resume`
+          # (mode: rollback). The cron job goes too, so tonight's drain cannot
+          # write to the database we are copying.
+          post "/services/${{ steps.render.outputs.cron }}/suspend" > /dev/null && echo "cron job suspended"
+          post "/services/${{ steps.render.outputs.web }}/suspend" > /dev/null && echo "web service suspended"
+          url="$(deploy/render-service-id.sh --url "$RENDER_WEB")"
+          for attempt in $(seq 1 18); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url/_health" || true)
+            [ "$code" != "200" ] && { echo "Render is no longer serving (HTTP $code); the database is quiescent"; break; }
+            echo "attempt $attempt: still answering"; sleep 10
+          done
+          # A few seconds more for in-flight requests to finish committing.
+          sleep 15
+
+      - name: Open the Render database to this runner
+        if: ${{ inputs.mode != 'rollback' }}
+        id: allow
+        run: |
+          set -euo pipefail
+          ip="$(curl -fsS https://api.ipify.org)"
+          echo "runner ip $ip"
+          curl -fsS -X PATCH "$RENDER_API/postgres/${{ steps.render.outputs.db }}" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+            -d "{\"ipAllowList\":[{\"cidrBlock\":\"$ip/32\",\"description\":\"github-actions migration (temporary)\"}]}" > /dev/null
+          echo "opened=true" >> "$GITHUB_OUTPUT"
+          src="$(curl -fsS "$RENDER_API/postgres/${{ steps.render.outputs.db }}/connection-info" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json" | jq -r '.externalConnectionString')"
+          [ -n "$src" ] && [ "$src" != null ] || { echo "::error::no external connection string"; exit 1; }
+          echo "::add-mask::$src"
+          echo "SOURCE_DATABASE_URL=$src" >> "$GITHUB_OUTPUT"
+          for attempt in $(seq 1 24); do
+            psql "$src" -Atc "select 1" > /dev/null 2>&1 && { echo "Render database reachable"; exit 0; }
+            echo "attempt $attempt: allow list not yet effective"; sleep 10
+          done
+          echo "::error::could not reach the Render database after four minutes"; exit 1
+
+      - name: Read the Scaleway database credentials
+        if: ${{ inputs.mode != 'rollback' }}
+        id: scw
+        run: |
+          set -euo pipefail
+          tgt="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json | jq -r '.environment_variables.DATABASE_URL // empty')"
+          [ -n "$tgt" ] || { echo "::error::the migrate job carries no DATABASE_URL"; exit 1; }
+          echo "::add-mask::$tgt"
+          echo "TARGET_DATABASE_URL=$tgt" >> "$GITHUB_OUTPUT"
+          host="$(scw container container get "$CONTAINER_ID" -o json | jq -r '(.public_endpoint // .domain_name // "") | sub("^https?://";"")')"
+          echo "GENERATED_HOST=$host" >> "$GITHUB_OUTPUT"
+          psql "$tgt" -Atc "select version()" | cut -c1-40
+
+      - name: Copy and verify the database
+        if: ${{ inputs.mode != 'rollback' }}
+        env:
+          SOURCE_DATABASE_URL: ${{ steps.allow.outputs.SOURCE_DATABASE_URL }}
+          TARGET_DATABASE_URL: ${{ steps.scw.outputs.TARGET_DATABASE_URL }}
+          FORCE: "true"
+        run: deploy/migrate-db.sh
+
+      - name: Close the Render database again
+        if: ${{ always() && steps.allow.outputs.opened == 'true' }}
+        run: |
+          curl -fsS -X PATCH "$RENDER_API/postgres/${{ steps.render.outputs.db }}" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+            -d '{"ipAllowList":[]}' > /dev/null && echo "allow list emptied"
+          rm -rf deploy/dumps
+
+      - name: Bring the schema up to the deployed image
+        if: ${{ inputs.mode != 'rollback' }}
+        # The restored rows carry Render's migration ledger. If the image on
+        # Scaleway is newer than what Render last deployed, this applies the
+        # difference; otherwise it is a no-op that proves the ledger is sane.
+        run: deploy/scw-run-job.sh "$JOB_MIGRATE_ID"
+
+      - name: Smoke test Scaleway
+        if: ${{ inputs.mode != 'rollback' }}
+        run: deploy/smoke.sh "https://${{ steps.scw.outputs.GENERATED_HOST }}"
+
+      - name: What is left for a human
+        if: ${{ inputs.mode == 'cutover' }}
+        run: |
+          cat <<EOF
+
+          Scaleway holds a verified copy of production and answers at
+            https://${{ steps.scw.outputs.GENERATED_HOST }}
+          Render is suspended (nothing lost: mode=rollback resumes it).
+
+          1. DNS — at the registrar for esljparents.eu:
+               www.esljparents.eu   CNAME  ${{ steps.scw.outputs.GENERATED_HOST }}
+               esljparents.eu       ALIAS/ANAME  ${{ steps.scw.outputs.GENERATED_HOST }}
+                                    (or a registrar-level redirect to https://www.esljparents.eu
+                                     if the provider offers no ALIAS record at the apex)
+             Lower the TTL to 300 first if it is long.
+
+          2. Once both names resolve to the new host, attach them so Scaleway
+             issues certificates (a few minutes each):
+               scw container domain create container-id=$CONTAINER_ID hostname=www.esljparents.eu
+               scw container domain create container-id=$CONTAINER_ID hostname=esljparents.eu
+             or run "Scaleway: attach domains" from Actions.
+
+          3. Run deploy/smoke.sh https://www.esljparents.eu and log in.
+
+          4. After a quiet week: delete the Render services and database
+             (docs/migration-render-to-scaleway.md, "Decommissioning Render").
+          EOF

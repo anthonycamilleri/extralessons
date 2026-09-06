@@ -42,23 +42,27 @@ images in the database (`apps/media`, served at `/media/` with immutable
 caching; an S3 bucket is a one-variable switch), email through Zoho
 ZeptoMail's API.
 
-The whole thing runs on Render, as one image in three roles, all declared in
-[`render.yaml`](render.yaml):
+The whole thing runs on Scaleway Serverless in `fr-par`, as one image in three
+roles:
 
 | Role | Runs as | Command |
 |------|---------|---------|
-| `web` | Web service (Docker) | `gunicorn --config deploy/gunicorn.conf.py config.wsgi` |
-| `migrate` | The web service's pre-deploy command, once per deploy | `manage.py migrate --noinput` |
-| `notifier` | Cron job, nightly | `manage.py run_notifier --drain` |
+| `web` | Serverless Container `extralessons-web` | `gunicorn --config deploy/gunicorn.conf.py config.wsgi` |
+| `migrate` | Serverless Job `extralessons-migrate`, once per deploy | `manage.py migrate --noinput`, then `manage.py ensure_admin` |
+| `notifier` | Serverless Job `extralessons-notifier`, cron, nightly | `manage.py run_notifier --drain` |
 
 Three roles rather than three images: a migration that ran against code the web
-tier does not have is exactly the failure that arrangement avoids. Locally the
-same code runs from `docker-compose.yml`, or with no services at all against
-SQLite.
+tier does not have is exactly the failure that arrangement avoids. The database
+is a Serverless SQL Database (PostgreSQL 16). Locally the same code runs from
+`docker-compose.yml`, or with no services at all against SQLite.
 
-Full deployment instructions: [docs/render-setup.md](docs/render-setup.md).
-(The previous Scaleway Serverless setup is kept, un-triggered, under
-[docs/scaleway-setup.md](docs/scaleway-setup.md).)
+Full deployment instructions: [docs/scaleway-setup.md](docs/scaleway-setup.md).
+The estate was on Render for a while in between; how it came back, and the
+workflows that did it, are in
+[docs/migration-render-to-scaleway.md](docs/migration-render-to-scaleway.md).
+The Render files ([`render.yaml`](render.yaml), `deploy-render.yml`,
+[docs/render-setup.md](docs/render-setup.md)) stay until the Render services
+are deleted.
 
 **Transactional outbox.** State changes never talk to SMTP or the WhatsApp API
 directly. Instead, `Notification` rows are queued inside the same database
@@ -266,11 +270,11 @@ The web service serves the same tools over HTTPS at `/mcp`
 to the hosted app as a **custom connector**. Nothing to install, and the
 database stays private.
 
-1. In the Render dashboard, open the web service → **Environment** and copy
-   the value of `MCP_API_TOKEN` (Render generated it from `render.yaml`).
+1. Get the value of `MCP_API_TOKEN`: it is in `deploy/.scaleway-state` on the
+   machine that ran `deploy/provision.sh`, or in the Scaleway console under the
+   container's secret environment variables.
 2. In Claude: **Settings → Connectors → Add custom connector**. Name it
-   `Extralessons`, URL `https://extralessons-web.onrender.com/mcp` (or the
-   custom domain once attached). Set **Authentication** to **None** (the
+   `Extralessons`, URL `https://www.esljparents.eu/mcp`. Set **Authentication** to **None** (the
    dialog may say it detected OAuth; it did not, it saw a 401). Under
    **Additional request headers** add one header: `X-API-Key` with the token
    as its value (`Authorization: Bearer <token>` also works if the dialog
@@ -279,8 +283,9 @@ database stays private.
    overview.
 
 The token grants everything the tools can do, which includes publishing
-classes to parents; treat it like an office login. Rotate it by clearing the
-value in Render and re-syncing the Blueprint, then updating the connector.
+classes to parents; treat it like an office login. Rotate it by setting a new
+`MCP_API_TOKEN` on the container (and in `deploy/scaleway.env` so a re-run of
+`provision.sh` keeps it), then updating the connector.
 
 ### Local: run the server on your machine
 
@@ -376,20 +381,21 @@ transports expose it.
 ### Environment variables
 
 Copy `.env.example` to `.env` for local development. In production these are
-set on the Render services instead of in a file, most of them from
-`render.yaml` — see [docs/render-setup.md](docs/render-setup.md).
+set on the Scaleway container and jobs instead of in a file, from the one list
+in `deploy/scaleway-env.lib.sh` — see [docs/scaleway-setup.md](docs/scaleway-setup.md).
 
 | Variable | Purpose |
 |---|---|
 | `DJANGO_SETTINGS_MODULE` | `config.settings.prod` in production, `config.settings.dev` locally |
 | `SECRET_KEY` | Django secret key — set to a long random string |
 | `DEBUG` | Keep `false` outside development |
-| `ALLOWED_HOSTS` | Comma-separated hostnames the app serves. On Render the generated `*.onrender.com` hostname is added automatically |
-| `CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. `https://activities.example.com` (the Render hostname is added automatically) |
-| `SITE_URL` | Absolute base URL used in notification links. Defaults to the Render URL until a custom domain is set |
+| `ALLOWED_HOSTS` | Comma-separated hostnames the app serves: the custom domain(s) and the endpoint Scaleway generated for the container |
+| `CSRF_TRUSTED_ORIGINS` | Comma-separated origins, e.g. `https://www.esljparents.eu` |
+| `SITE_URL` | Absolute base URL used in notification links |
+| `MAINTENANCE_MODE` / `MAINTENANCE_MESSAGE` / `MAINTENANCE_RETRY_AFTER` | Freeze the site: every request but the health probe gets a 503 (`config/maintenance.py`). For copying the database elsewhere |
 | `TIME_ZONE` | Default `Europe/Malta` |
 | `LOG_LEVEL` | Root log level; everything goes to stdout |
-| `DATABASE_URL` | Unset = SQLite. On Render, wired from the database by `render.yaml` |
+| `DATABASE_URL` | Unset = SQLite. On Scaleway: `postgres://<runtime application id>:<its secret key>@<id>.pg.sdb.fr-par.scw.cloud:5432/extralessons?sslmode=require` |
 | `DB_SSLMODE` | Default `require`; `prefer` if the database offers no TLS on the private network |
 | `DB_POOL` / `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | Client-side connection pool (PostgreSQL only). Raise `DB_POOL_MAX_SIZE` and the instance count together |
 | `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT_URL` | Optional S3-compatible bucket for uploaded class images. Unset = stored in the database (production) or on local disk (development) |
@@ -405,7 +411,7 @@ set on the Render services instead of in a file, most of them from
 | `WHATSAPP_ENABLED` | `false` = log WhatsApp messages instead of sending (stub) |
 | `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_API_VERSION` | Meta WhatsApp Cloud API credentials |
 | `ADMIN_EMAIL` | First administrator. `manage.py ensure_admin` (run by the pre-deploy step) creates the superuser and emails a set-password link |
-| `MCP_API_TOKEN` | Bearer token for the `/mcp` custom-connector endpoint. Empty = endpoint off. Generated by Render |
+| `MCP_API_TOKEN` | Bearer token for the `/mcp` custom-connector endpoint. Empty = endpoint off. Generated by `deploy/provision.sh` |
 | `NOTIFIER_BATCH_SIZE` | Notifications delivered per worker cycle (default 20) |
 | `NOTIFIER_MAX_ATTEMPTS` | Retries before a notification is marked failed (default 5) |
 | `NOTIFIER_DRAIN_MAX_SECONDS` | Time budget for `run_notifier --drain` (default 300) |
@@ -475,24 +481,27 @@ With `WHATSAPP_ENABLED=false` (the default, and always in dev settings) a stub a
 
 ## Deployment
 
-Production runs on Render, described end to end by `render.yaml`. Push to
-`main`; once `CI` is green, `.github/workflows/deploy-render.yml` asks Render
-to deploy that commit: Render builds the image from the `Dockerfile`, runs
-`manage.py migrate` and `manage.py ensure_admin` as the web service's
-pre-deploy command, and switches traffic only when the new version answers
-`/_health`. The workflow finishes by smoke-testing `/_health` itself. The
-notifier cron job is rebuilt by Render on its own once CI is green, because
-Render's API cannot deploy cron jobs.
+Production runs on Scaleway Serverless. Push to `main`; once `CI` is green,
+`.github/workflows/deploy.yml` builds the image for `linux/amd64`, pushes it to
+the Scaleway registry tagged with the commit SHA, runs the migrate job
+(`manage.py migrate`, then `manage.py ensure_admin`) and waits for it, points
+the notifier job at the new image, rolls the container and smoke-tests
+`/_health`.
 
-A rollback is *Actions → Deploy to Render → Run workflow* with `commit_sha` set
-to an earlier commit (or *Rollback* on the deploy in the Render dashboard).
+A rollback is *Actions → Deploy to Scaleway → Run workflow* with `image_tag`
+set to an earlier commit's SHA: it skips the build and repoints everything at
+that image.
 
-One-time setup — connecting the GitHub repo, creating the Blueprint, secrets,
-domain, object storage, the first admin — is in
-**[docs/render-setup.md](docs/render-setup.md)**, along with backups, costs and
-how to move the data over from Scaleway. The old Scaleway pipeline
-(`deploy.yml`, `deploy/provision.sh`, `docs/scaleway-setup.md`) is kept but
-only runs by hand.
+One-time setup — IAM, the database, registry, container and jobs — is scripted
+in `deploy/provision.sh` and explained in
+**[docs/scaleway-setup.md](docs/scaleway-setup.md)**, along with operating
+notes. The environment the container and jobs run with is described once, in
+`deploy/scaleway-env.lib.sh`, and applied by that script or by the *Scaleway:
+configure the estate* workflow. Other operator workflows under *Actions*:
+*Inspect hosting estate* (read-only), *Scaleway: move production from Render*
+(the data copy, rehearsal or cutover), *Scaleway: attach domains*. The Render
+pipeline (`deploy-render.yml`, `render.yaml`, `docs/render-setup.md`) is kept
+but only runs by hand.
 
 ## Project layout
 
@@ -505,15 +514,22 @@ config/
     test.py           # pytest settings (SQLite or Postgres via DATABASE_URL)
   health.py           # /_health middleware, ahead of ALLOWED_HOSTS and the HTTPS redirect
   urls.py             # /admin/, /accounts/, /me/, /provider/, /admin-tools/ (redirects to /admin/), catalogue at /
-render.yaml           # Render Blueprint: web service, notifier cron job, Postgres, shared env
+config/maintenance.py # MAINTENANCE_MODE: freeze the site with a 503 while its database moves
+render.yaml           # legacy Render Blueprint, kept while the Render services exist
 deploy/
   gunicorn.conf.py    # tuned for a small, horizontally scaled container (1 process, threads, preload)
-  render-deploy.sh    # deploy one commit to one Render service via the API and wait for it
-  render-github-config.sh  # write the Render API key and service IDs into GitHub Actions
-  provision.sh, github-config.sh, scaleway.env.example   # legacy Scaleway provisioning
+  provision.sh        # build the whole Scaleway estate from an empty project; idempotent
+  scaleway-env.lib.sh # the production environment, once, for the container and both jobs
+  scaleway.env.example, github-config.sh   # its configuration; write the Actions secrets with gh
+  scw-run-job.sh      # start a Serverless Job and wait for it to succeed
+  migrate-db.sh       # pg_dump one PostgreSQL database into another and prove the copy
+  smoke.sh            # check a deployment from outside: probe, pages, statics, headers, /mcp
+  pre-deploy.sh       # migrate + ensure_admin for platforms with one pre-deploy command
+  render-deploy.sh, render-service-id.sh, render-github-config.sh   # legacy Render
 docs/
-  render-setup.md     # one-time setup: GitHub connection, Blueprint, secrets, domain, storage
-  scaleway-setup.md   # legacy: the previous Scaleway Serverless estate
+  scaleway-setup.md   # one-time setup and operations on Scaleway Serverless
+  migration-render-to-scaleway.md  # the runbook that brought production back, and its tests
+  render-setup.md     # legacy: the Render estate
 apps/
   accounts/           # custom email-login User (roles: ADMIN/PROVIDER/PARENT),
                       # Child, Guardian, GuardianInvite, SiteConfig singleton,
@@ -552,6 +568,8 @@ tests/                # pytest suite (services, capacity race, notifications, vi
 .mcp.json             # Claude Code picks up the MCP server from here
 .github/workflows/
   ci.yml              # tests on SQLite + Postgres, deploy checks, image build
-  deploy-render.yml   # after CI: deploy web (migrates first) → deploy notifier → smoke test
-  deploy.yml          # legacy Scaleway deploy, manual trigger only
+  deploy.yml          # after CI on main: build → migrate job → notifier job → container → smoke test
+  scaleway-configure.yml, migrate-to-scaleway.yml, scaleway-domains.yml, estate-inspect.yml
+                      # operator workflows: environment, data copy, TLS domains, read-only inspection
+  deploy-render.yml   # legacy Render deploy, manual trigger only
 ```

@@ -1,10 +1,14 @@
-name: Deploy to Render
+name: Deploy to Render (legacy, manual)
 
+# LEGACY. Production moved back to Scaleway — see deploy.yml and
+# docs/scaleway-setup.md. This workflow no longer runs on push; it is kept so
+# the Render estate can be rolled forward by hand while it exists as the
+# fallback (Actions → Run workflow). Delete it, render.yaml and
+# docs/render-setup.md together once the Render services have been deleted.
+#
 # Render builds the image from the Dockerfile itself, runs the migrations as
 # the web service's pre-deploy command, and only switches traffic once the new
-# version answers /_health. What this workflow adds is the *when*: a deploy
-# happens only after CI has passed on the commit, and a rollback is a re-run
-# of this workflow with an earlier commit.
+# version answers /_health.
 #
 # Only the web service is deployed here. Render's API has no deploy trigger
 # for cron jobs, so the notifier uses Render's own "checksPass" trigger in
@@ -15,10 +19,6 @@ name: Deploy to Render
 # workflow at all; see the note at the top of render.yaml.
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       commit_sha:
@@ -34,10 +34,6 @@ concurrency:
 
 jobs:
   deploy:
-    # workflow_run fires for every CI conclusion; only a green one deploys.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     # A hard stop above the deploy script's own 30-minute limit, so a hung
     # step can never hold the deploy-production concurrency group for hours.

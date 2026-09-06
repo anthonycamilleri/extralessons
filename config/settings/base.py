@@ -3,7 +3,7 @@
 Everything here is environment-driven so the same image runs unchanged as a
 web service, as a pre-deploy migration step, as a nightly cron job, and on
 a laptop against SQLite. Environment-specific modules layer on top:
-`dev` (local), `prod` (Render), `test` (pytest).
+`dev` (local), `prod` (Scaleway), `test` (pytest).
 """
 from pathlib import Path
 
@@ -202,12 +202,12 @@ ADMIN_EMAIL = env("ADMIN_EMAIL", default="")
 # --- Remote MCP (apps.catalog.mcp_http) ---
 # Bearer token for the /mcp endpoint that lets Claude Desktop, Cowork and
 # claude.ai populate the catalogue as a custom connector. Empty = endpoint off.
-# It carries the trust of a school-office login; Render generates it.
+# It carries the trust of a school-office login; deploy/provision.sh generates it.
 MCP_API_TOKEN = env("MCP_API_TOKEN", default="")
 
 # --- Logging ---
 # A managed platform has no `docker compose logs`: stdout is the only channel,
-# and it is what Render collects. Django's default console handler is gated
+# and it is what the platform (Cockpit on Scaleway) collects. Django's default console handler is gated
 # behind DEBUG, so without this every logger.info in the notifier disappears in
 # production.
 LOG_LEVEL = env("LOG_LEVEL", default="INFO").upper()

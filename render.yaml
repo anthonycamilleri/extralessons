@@ -1,4 +1,7 @@
-# Render Blueprint: the production estate as code.
+# Render Blueprint: the estate as code. LEGACY — production moved back to
+# Scaleway (docs/scaleway-setup.md, docs/migration-render-to-scaleway.md).
+# Kept, with deploy-render.yml and docs/render-setup.md, while the Render
+# services exist as the fallback; delete all three together afterwards.
 #
 # Created once from the dashboard (New → Blueprint → connect this repository →
 # branch `main` → Deploy Blueprint); from then on Render keeps the resources

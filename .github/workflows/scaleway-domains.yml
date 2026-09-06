@@ -1,0 +1,59 @@
+name: "Scaleway: attach domains"
+
+# Attaches the public hostnames to the web container so Scaleway issues and
+# renews their Let's Encrypt certificates. Run it once DNS points each name at
+# the container's generated endpoint — Scaleway checks the record at creation
+# and refuses a hostname that does not resolve to it yet. Idempotent: a name
+# that is already attached is reported, not re-created.
+
+on:
+  workflow_dispatch:
+    inputs:
+      hostnames:
+        description: "Comma-separated hostnames"
+        type: string
+        default: www.esljparents.eu,esljparents.eu
+
+permissions:
+  contents: read
+
+jobs:
+  domains:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+    steps:
+      - name: Install the Scaleway CLI
+        run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+      - name: Attach
+        run: |
+          set -euo pipefail
+          endpoint="$(scw container container get "$CONTAINER_ID" -o json | jq -r '(.public_endpoint // .domain_name // "") | sub("^https?://";"")')"
+          echo "container endpoint: $endpoint"
+          existing="$(scw container domain list container-id="$CONTAINER_ID" -o json)"
+          IFS=, read -ra names <<< "${{ inputs.hostnames }}"
+          failed=0
+          for h in "${names[@]}"; do
+            h="$(echo "$h" | tr -d ' ')"; [ -n "$h" ] || continue
+            echo "## $h"
+            echo "   resolves to: $(dig +short CNAME "$h" | tr '\n' ' ')$(dig +short A "$h" | tr '\n' ' ')"
+            if jq -e --arg h "$h" '.[] | select(.hostname==$h)' <<<"$existing" > /dev/null; then
+              jq -r --arg h "$h" '.[] | select(.hostname==$h) | "   already attached: status=\(.status)"' <<<"$existing"
+              continue
+            fi
+            if out="$(scw container domain create container-id="$CONTAINER_ID" hostname="$h" -o json 2>&1)"; then
+              echo "   attached: $(jq -r '.status' <<<"$out")"
+            else
+              echo "   ::warning::could not attach $h: $out"; failed=$((failed+1))
+            fi
+          done
+          echo
+          echo "Certificate status (pending → ready takes a few minutes):"
+          scw container domain list container-id="$CONTAINER_ID" -o json | jq -r '.[] | "  \(.hostname)  \(.status)  \(.error_message // "")"'
+          exit $failed
