@@ -148,11 +148,17 @@ www.esljparents.eu   CNAME         extralessons8c9979e8-extralessons-web.functio
 esljparents.eu       ALIAS/ANAME   extralessons8c9979e8-extralessons-web.functions.fnc.fr-par.scw.cloud
 ```
 
-An apex cannot be a CNAME. If the provider offers no ALIAS/ANAME record, use
-its HTTP redirect feature to send `esljparents.eu` to
-`https://www.esljparents.eu`, or move the zone to Scaleway Domains and DNS,
-which does support ALIAS. Lower the TTL to 300 seconds beforehand if it is
-long; raise it again a day later.
+An apex cannot be a CNAME, hence ALIAS/ANAME. Once it points at the
+container and is attached (step 7), the app itself answers `esljparents.eu`
+with a permanent redirect to `https://www.esljparents.eu` — the same path,
+same query — because `CANONICAL_REDIRECT_HOSTS` names it
+(`config/canonical.py`). On Render this redirect was done by Render's edge,
+which had added the apex alongside the declared `www`; now it is the app's,
+so it works the same on any host. If the provider offers no ALIAS/ANAME
+record, use its HTTP redirect feature to send `esljparents.eu` to
+`https://www.esljparents.eu` instead (plain-HTTP only on most registrars), or
+move the zone to Scaleway Domains and DNS, which does support ALIAS. Lower the
+TTL to 300 seconds beforehand if it is long; raise it again a day later.
 
 Until DNS moves, parents who reach Render see its suspended page. That is the
 gap to keep short, and it is why the cutover happens at night.
@@ -194,6 +200,7 @@ Against the generated endpoint after a rehearsal, and against
 **Automated**
 
 - [ ] `deploy/smoke.sh <url>` reports 0 failures.
+- [ ] After DNS and domains: `curl -sI https://esljparents.eu/classes/` answers `301` with `Location: https://www.esljparents.eu/classes/`.
 - [ ] The migration workflow's *Copy and verify* step ended with "The target is a complete copy."
 
 **As a parent** (use a real family account; nothing here sends email except where noted)
