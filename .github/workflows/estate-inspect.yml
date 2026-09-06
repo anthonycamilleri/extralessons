@@ -8,6 +8,10 @@ name: Inspect hosting estate
 
 on:
   workflow_dispatch:
+  # Also runs when this file itself changes, which is what registers a new
+  # workflow with GitHub so it can be dispatched from a branch at all.
+  push:
+    paths: [".github/workflows/estate-inspect.yml"]
 
 permissions:
   contents: read
