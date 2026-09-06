@@ -42,6 +42,9 @@ MIDDLEWARE = [
     # First on purpose: the platform's health probe must be answered before
     # ALLOWED_HOSTS validation and before any HTTPS redirect. See config.health.
     "config.health.HealthCheckMiddleware",
+    # Second on purpose: with MAINTENANCE_MODE=true every other request is
+    # answered with a 503 before it can touch the session or the database.
+    "config.maintenance.MaintenanceModeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -53,6 +56,14 @@ MIDDLEWARE = [
 ]
 
 HEALTH_CHECK_PATH = env("HEALTH_CHECK_PATH", default="/_health")
+
+# --- Maintenance mode ---
+# Flip on to freeze the site while its database is copied to another host: every
+# request but the health probe gets a 503 (config/maintenance.py). Off by
+# default; set it as an environment variable on the platform, not here.
+MAINTENANCE_MODE = env.bool("MAINTENANCE_MODE", default=False)
+MAINTENANCE_MESSAGE = env("MAINTENANCE_MESSAGE", default="")
+MAINTENANCE_RETRY_AFTER = env.int("MAINTENANCE_RETRY_AFTER", default=600)
 
 ROOT_URLCONF = "config.urls"
 
