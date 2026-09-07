@@ -49,8 +49,17 @@ jobs:
             echo "## $h"
             echo "   resolves to: $(dig +short CNAME "$h" | tr '\n' ' ')$(dig +short A "$h" | tr '\n' ' ')"
             if jq -e --arg h "$h" '.[] | select(.hostname==$h)' <<<"$existing" > /dev/null; then
-              jq -r --arg h "$h" '.[] | select(.hostname==$h) | "   already attached: status=\(.status)"' <<<"$existing"
-              continue
+              status="$(jq -r --arg h "$h" '.[] | select(.hostname==$h) | .status' <<<"$existing")"
+              if [ "$status" != "error" ]; then
+                echo "   already attached: status=$status"
+                continue
+              fi
+              # Scaleway's own remedy for a failed certificate is to delete the
+              # entry and create it again once DNS points at the container.
+              did="$(jq -r --arg h "$h" '.[] | select(.hostname==$h) | .id' <<<"$existing")"
+              echo "   attached but in error; deleting $did and re-creating"
+              scw container domain delete "$did" -o json > /dev/null 2>&1 || true
+              sleep 5
             fi
             if out="$(scw container domain create container-id="$CONTAINER_ID" hostname="$h" -o json 2>&1)"; then
               echo "   attached: $(jq -r '.status' <<<"$out")"
