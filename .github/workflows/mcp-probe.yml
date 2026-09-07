@@ -1,0 +1,204 @@
+name: Probe the MCP endpoint
+
+# Read-only diagnosis of the live /mcp endpoint, from outside the app.
+#
+# Answers one question: does the deployed code match this repository? The
+# endpoint's 401 is the tell. Before dfd6d3c it carried a WWW-Authenticate
+# header and accepted only `Authorization: Bearer`; after it, the 401 is bare
+# and `X-API-Key` works too. A WWW-Authenticate header on the live 401 is an
+# MCP client's cue to start OAuth discovery, which is exactly what makes
+# Claude's connector dialog report "authentication always required" and offer
+# a Connect button that can never complete.
+#
+# Prints no secret: the anonymous job sends no credentials, and the
+# authenticated job reports status codes only. Run it from Actions →
+# Run workflow on any branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Site to probe"
+        type: string
+        default: "https://www.esljparents.eu"
+  # Also runs when this file itself changes, which is what registers a new
+  # workflow with GitHub so it can be dispatched from a branch at all.
+  push:
+    paths: [".github/workflows/mcp-probe.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------- #
+  # No credentials needed: everything here is an anonymous request.
+  # --------------------------------------------------------------------- #
+  endpoint:
+    name: What the endpoint says anonymously
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe
+        env:
+          BASE: ${{ inputs.base_url || 'https://www.esljparents.eu' }}
+        run: |
+          set -u
+          BASE="${BASE%/}"
+          echo "probing $BASE/mcp"
+          echo
+
+          # --- The 401 and its headers: the version tell --------------------
+          hdr="$(mktemp)"
+          code="$(curl -sS -o /dev/null -D "$hdr" -w '%{http_code}' --max-time 30 \
+            -X POST "$BASE/mcp" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' || echo 000)"
+          echo "## POST /mcp anonymous -> $code"
+          tr -d '\r' < "$hdr" | sed 's/^/    /'
+          echo
+
+          if grep -qi '^WWW-Authenticate:' "$hdr"; then
+            echo "::error::WWW-Authenticate present. The deployed code PREDATES dfd6d3c:"
+            echo "::error::it advertises OAuth (hence the connector's Connect button) and"
+            echo "::error::does not accept X-API-Key. Fix = redeploy, not a connector setting."
+            verdict="STALE"
+          elif [ "$code" = 401 ]; then
+            echo "Bare 401, no WWW-Authenticate: deployed code includes dfd6d3c. Good."
+            verdict="CURRENT"
+          elif [ "$code" = 404 ]; then
+            echo "::error::404 - either MCP_API_TOKEN is empty on the container, or the"
+            echo "::error::running image predates the /mcp route entirely (3e37bf8)."
+            verdict="MISSING"
+          else
+            echo "::warning::unexpected status $code"
+            verdict="UNKNOWN"
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_ENV"
+          echo
+
+          # --- Method handling ---------------------------------------------
+          for m in GET OPTIONS DELETE; do
+            c="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X "$m" "$BASE/mcp" || echo 000)"
+            echo "## $m /mcp -> $c"
+          done
+          echo "    (GET/DELETE 405 is correct and spec-legal: no SSE stream, no sessions)"
+          echo "    (OPTIONS 405 with no CORS headers breaks only browser-side clients)"
+          echo
+
+          # --- Does anything redirect, losing the header on the way? -------
+          eff="$(curl -sS -o /dev/null -L -w '%{num_redirects} redirect(s) -> %{url_effective}' \
+            --max-time 30 -X POST "$BASE/mcp" \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' || echo '?')"
+          echo "## redirect chain: $eff"
+          echo "    (any redirect here is a problem: clients drop auth headers across hops)"
+          echo
+
+          # --- OAuth discovery: what a client finds when it goes looking ----
+          for p in /.well-known/oauth-protected-resource \
+                   /.well-known/oauth-authorization-server \
+                   /.well-known/mcp; do
+            c="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$BASE$p" || echo 000)"
+            echo "## GET $p -> $c"
+          done
+          echo "    (404 is what we want: nothing for a client to latch onto)"
+
+      - name: Verdict
+        run: |
+          echo "### MCP probe: $verdict" >> "$GITHUB_STEP_SUMMARY"
+          case "$verdict" in
+            STALE)   echo "Deployed code predates \`dfd6d3c\`. Redeploy \`main\`." >> "$GITHUB_STEP_SUMMARY" ;;
+            CURRENT) echo "Endpoint is current; auth failure is elsewhere." >> "$GITHUB_STEP_SUMMARY" ;;
+            MISSING) echo "No \`/mcp\`, or \`MCP_API_TOKEN\` unset on the container." >> "$GITHUB_STEP_SUMMARY" ;;
+            *)       echo "Unexpected response; see the log." >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+  # --------------------------------------------------------------------- #
+  # Which commit is actually running. The image tag is the commit SHA
+  # (deploy.yml), so this names the deployed code exactly.
+  # --------------------------------------------------------------------- #
+  deployed_image:
+    name: Which commit is live
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install the Scaleway CLI
+        run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+
+      - name: Compare the running image against this repository
+        run: |
+          set -u
+          [ -n "$CONTAINER_ID" ] || { echo "::error::vars.SCW_CONTAINER_ID is unset"; exit 1; }
+          cjson="$(scw container container get "$CONTAINER_ID" -o json)"
+          image="$(jq -r '.registry_image // .image // ""' <<<"$cjson")"
+          echo "container status: $(jq -r .status <<<"$cjson")"
+          echo "running image:    $image"
+          echo "plain env keys:   $(jq -r '.environment_variables | keys | join(",")' <<<"$cjson")"
+          # Secret values are never returned by the API; the key list still
+          # tells us whether MCP_API_TOKEN is configured at all.
+          echo "secret env keys:  $(jq -r '(.secret_environment_variables // []) | map(.key) | join(",")' <<<"$cjson")"
+          echo
+
+          sha="${image##*:}"
+          if git cat-file -e "$sha^{commit}" 2>/dev/null; then
+            echo "that tag is commit: $(git log -1 --format='%h %s' "$sha")"
+            if git merge-base --is-ancestor dfd6d3c "$sha" 2>/dev/null; then
+              echo "✓ the running image CONTAINS dfd6d3c (X-API-Key + no WWW-Authenticate)"
+            else
+              echo "::error::the running image does NOT contain dfd6d3c."
+              echo "::error::It advertises OAuth and rejects X-API-Key. Redeploy main."
+            fi
+          else
+            echo "::warning::image tag '$sha' is not a commit in this clone (rollback tag?)"
+          fi
+
+  # --------------------------------------------------------------------- #
+  # Optional: proves the key itself. Skipped unless the token is available
+  # as a secret, so the workflow is useful without one.
+  # --------------------------------------------------------------------- #
+  authenticated:
+    name: Whether the key is accepted
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Try each header spelling
+        env:
+          BASE: ${{ inputs.base_url || 'https://www.esljparents.eu' }}
+          TOKEN: ${{ secrets.MCP_API_TOKEN }}
+        run: |
+          set -u
+          BASE="${BASE%/}"
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::notice::secrets.MCP_API_TOKEN is not set in the production environment;"
+            echo "::notice::skipping. Add it to have this job prove the key end to end."
+            exit 0
+          fi
+          echo "::add-mask::$TOKEN"
+          body='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+          try() { # try LABEL HEADER...
+            local label="$1"; shift
+            local c
+            c="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$BASE/mcp" \
+              -H 'Content-Type: application/json' "$@" -d "$body" || echo 000)"
+            printf '%-28s -> %s\n' "$label" "$c"
+          }
+          try "X-API-Key bare"       -H "X-API-Key: $TOKEN"
+          try "Authorization Bearer" -H "Authorization: Bearer $TOKEN"
+          try "X-API-Key w/ Bearer"  -H "X-API-Key: Bearer $TOKEN"
+          try "Authorization bare"   -H "Authorization: $TOKEN"
+          echo
+          echo "expected on current code: 200, 200, 401, 401"
+          echo "expected on pre-dfd6d3c:  401, 200, 401, 401"
