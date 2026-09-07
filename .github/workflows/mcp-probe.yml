@@ -149,7 +149,9 @@ jobs:
           echo "plain env keys:   $(jq -r '.environment_variables | keys | join(",")' <<<"$cjson")"
           # Secret values are never returned by the API; the key list still
           # tells us whether MCP_API_TOKEN is configured at all.
-          echo "secret env keys:  $(jq -r '(.secret_environment_variables // []) | map(.key) | join(",")' <<<"$cjson")"
+          # The CLI renders these as bare strings in some versions and as
+          # {key,value} objects in others; accept either.
+          echo "secret env keys:  $(jq -r '(.secret_environment_variables // []) | map(if type=="object" then .key else tostring end) | join(",")' <<<"$cjson")"
           echo
 
           sha="${image##*:}"
