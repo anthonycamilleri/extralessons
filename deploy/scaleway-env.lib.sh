@@ -8,12 +8,26 @@
 # Each function fills a bash array with `scw` arguments from the variables
 # named in its comment. Callers export those variables first.
 #
-# Two things to know about `scw container container update`:
-#   * `environment-variables.*` replaces the plain map wholesale, so every
-#     call must pass the complete set — which is what these functions emit;
-#   * `secret-environment-variables.*` merges: keys not mentioned are kept.
-#     Nothing here ever needs to delete a secret; S3_BUCKET (plain) is the
-#     switch that decides whether the S3_* secrets are read at all.
+# One thing to know about `scw container container update`, and it applies to
+# both maps: `environment-variables.*` AND `secret-environment-variables.*`
+# are replaced wholesale, so every call must pass the complete set — which is
+# what these functions emit. Never hand it a single key.
+#
+# An earlier version of this comment claimed the secret map merged and that
+# keys left out were kept. It does not. An update passing only MCP_API_TOKEN
+# took the container from four secrets to one, dropping SECRET_KEY,
+# DATABASE_URL and ZEPTOMAIL_SEND_MAIL_TOKEN. Nothing looked wrong at the
+# time, because a warm instance keeps serving the environment it booted with;
+# the loss would have surfaced as a site-wide failure at the next cold start,
+# with Django coming up on no database and a fallback signing key.
+#
+# Recovery, should it happen again: the jobs carry SECRET_KEY, DATABASE_URL
+# and ZEPTOMAIL_SEND_MAIL_TOKEN as plain variables (see scw_job_env below), so
+# `scw jobs definition get <id>` reads them back even though the container's
+# own copies are hashed and unreadable.
+#
+# Nothing here ever needs to delete a secret; S3_BUCKET (plain) is the switch
+# that decides whether the S3_* secrets are read at all.
 #
 # Jobs take plain variables only, so their secrets are plain too. Anyone who
 # can read a job definition can read them; docs/scaleway-setup.md describes
