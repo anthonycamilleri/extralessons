@@ -149,9 +149,9 @@ jobs:
           echo "plain env keys:   $(jq -r '.environment_variables | keys | join(",")' <<<"$cjson")"
           # Secret values are never returned by the API; the key list still
           # tells us whether MCP_API_TOKEN is configured at all.
-          # The CLI renders these as bare strings in some versions and as
-          # {key,value} objects in others; accept either.
-          echo "secret env keys:  $(jq -r '(.secret_environment_variables // []) | map(if type=="object" then .key else tostring end) | join(",")' <<<"$cjson")"
+          # This CLI returns the hashed values, not the names, and a hash of a
+          # secret is still worth keeping out of a log. The count is enough.
+          echo "secret env count: $(jq -r '(.secret_environment_variables // []) | length' <<<"$cjson")"
           echo
 
           sha="${image##*:}"
@@ -263,3 +263,62 @@ jobs:
           echo
           echo "  200 direct + 401 via the domain = the domain serves a DIFFERENT app"
           echo "  401 on both = the container is not picking up the rotated secret"
+
+  # --------------------------------------------------------------------- #
+  # Is the container's MCP_API_TOKEN the string we think it is?
+  #
+  # Routing is fine and the image is current, yet the token written by the
+  # rotation is refused at the container's own endpoint. Either the write
+  # never landed or the app is not reading it. Scaleway returns each secret
+  # as a salted argon2 hash, which cannot be read back but CAN be verified
+  # against a candidate -- so the question is answerable without ever
+  # printing a secret.
+  # --------------------------------------------------------------------- #
+  secret_identity:
+    name: Does the stored secret match ours
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+      TOKEN: ${{ secrets.MCP_API_TOKEN }}
+    steps:
+      - name: Install the Scaleway CLI and argon2
+        run: |
+          curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+          pip install --quiet argon2-cffi
+
+      - name: Verify our token against each stored secret hash
+        run: |
+          set -u
+          [ -n "${TOKEN:-}" ] || { echo "::error::secrets.MCP_API_TOKEN is empty"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          scw container container get "$CONTAINER_ID" -o json \
+            | jq -r '(.secret_environment_variables // [])[] | if type=="object" then .value else . end' \
+            > /tmp/hashes.txt
+          echo "stored secrets: $(wc -l < /tmp/hashes.txt)"
+          python3 - <<'PY'
+          import os
+          from argon2 import PasswordHasher
+          ph = PasswordHasher()
+          token = os.environ["TOKEN"]
+          hashes = [h for h in open("/tmp/hashes.txt").read().split() if h.startswith("$argon2")]
+          print(f"parseable argon2 hashes: {len(hashes)}")
+          matched = []
+          for i, h in enumerate(hashes, 1):
+              try:
+                  ph.verify(h, token)
+                  matched.append(i)
+              except Exception:
+                  pass
+          if matched:
+              print(f"MATCH: our token is stored on the container (slot {matched})")
+              print("So the write landed and the app is not reading it.")
+          else:
+              print("NO MATCH: none of the stored secrets equals our token.")
+              print("So the rotation did not actually change MCP_API_TOKEN.")
+          PY
