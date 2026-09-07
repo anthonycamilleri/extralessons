@@ -1,0 +1,201 @@
+name: "MCP: does a secret write reach the app"
+
+# One question, asked so the answer cannot be argued with: when a new
+# MCP_API_TOKEN is written to the container, does the running app start using
+# it? Every earlier round confused "the write did not land" with "the value we
+# hold is wrong", because a 401 looks identical either way.
+#
+# Phase A writes a token generated inside this run -- a value nothing else has
+# ever held -- and immediately calls /mcp with it. A 200 proves writes reach
+# the app, which means the token in secrets.MCP_API_TOKEN is simply not the
+# string the endpoint wants. A 401 proves the opposite: the app is serving an
+# environment it will not let go of, and no value we set will ever work.
+#
+# Phase B then puts secrets.MCP_API_TOKEN back and tries that, so the run ends
+# with the intended value in place either way. Both phases report each token's
+# length and the first 8 hex of its SHA-256, which identifies a value without
+# revealing it -- enough to tell "wrong string" from "not picked up", and
+# enough for a human to compare against what they typed.
+#
+# Every update passes all four secrets, because the secret map is REPLACED,
+# not merged, whatever deploy/scaleway-env.lib.sh says.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "probe" to confirm'
+        required: true
+        type: string
+      base_url:
+        description: "Site to test against"
+        type: string
+        default: "https://www.esljparents.eu"
+  push:
+    paths: [".github/workflows/mcp-env-pickup.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  pickup:
+    if: github.event_name == 'workflow_dispatch'
+    name: Write a fresh token and see if it takes
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+      JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
+      JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
+      TOKEN: ${{ secrets.MCP_API_TOKEN }}
+      BASE: ${{ inputs.base_url || 'https://www.esljparents.eu' }}
+    steps:
+      - name: Confirm
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -u
+          [ "$CONFIRM" = "probe" ] || { echo "::error::type 'probe' to confirm"; exit 1; }
+          [ -n "${TOKEN:-}" ] || { echo "::error::secrets.MCP_API_TOKEN is empty"; exit 1; }
+
+      - name: Install the Scaleway CLI
+        run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+
+      - name: Recover the other three secrets so no update drops them
+        id: recover
+        run: |
+          set -euo pipefail
+          jdef="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json)"
+          for k in SECRET_KEY DATABASE_URL ZEPTOMAIL_SEND_MAIL_TOKEN; do
+            v="$(jq -r --arg k "$k" '.environment_variables[$k] // empty' <<<"$jdef")"
+            if [ -z "$v" ] && [ -n "${JOB_NOTIFIER_ID:-}" ]; then
+              v="$(scw jobs definition get "$JOB_NOTIFIER_ID" -o json \
+                | jq -r --arg k "$k" '.environment_variables[$k] // empty')"
+            fi
+            [ -n "$v" ] || { echo "::error::cannot recover $k"; exit 1; }
+            echo "::add-mask::$v"
+            echo "$k=$v" >> "$GITHUB_OUTPUT"
+          done
+          echo "recovered all three"
+
+      - name: Fingerprint the token we were given
+        run: |
+          set -u
+          echo "secrets.MCP_API_TOKEN: ${#TOKEN} characters, sha256 starts $(printf '%s' "$TOKEN" | sha256sum | cut -c1-8)"
+          # A value that round-trips through a shell or a CLI unchanged should
+          # keep this fingerprint; a mangled one will not.
+          case "$TOKEN" in
+            *[!A-Za-z0-9_-]*) echo "::warning::contains characters outside [A-Za-z0-9_-]; provision.sh generates urlsafe base64 only" ;;
+            *) echo "charset: urlsafe base64, as provision.sh generates" ;;
+          esac
+
+      - name: Phase A - write a token invented in this run, then use it
+        id: phase_a
+        env:
+          SECRET_KEY: ${{ steps.recover.outputs.SECRET_KEY }}
+          DATABASE_URL: ${{ steps.recover.outputs.DATABASE_URL }}
+          ZEPTOMAIL_SEND_MAIL_TOKEN: ${{ steps.recover.outputs.ZEPTOMAIL_SEND_MAIL_TOKEN }}
+        run: |
+          set -uo pipefail
+          fresh="$(python3 -c 'import secrets; print(secrets.token_urlsafe(36))')"
+          echo "::add-mask::$fresh"
+          echo "fresh token: ${#fresh} characters, sha256 starts $(printf '%s' "$fresh" | sha256sum | cut -c1-8)"
+          scw container container update "$CONTAINER_ID" \
+            secret-environment-variables.SECRET_KEY="$SECRET_KEY" \
+            secret-environment-variables.DATABASE_URL="$DATABASE_URL" \
+            secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
+            secret-environment-variables.MCP_API_TOKEN="$fresh" -o json \
+            | jq -r '"update: \(.status)"'
+          for i in $(seq 1 40); do
+            s="$(scw container container get "$CONTAINER_ID" -o json | jq -r .status)"
+            [ "$s" = ready ] && { echo "ready after $i check(s)"; break; }
+            [ "$s" = error ] && { echo "::error::container status=error"; exit 1; }
+            sleep 10
+          done
+          body='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+          got=000
+          for _ in 1 2 3 4 5 6; do
+            got="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+              -X POST "${BASE%/}/mcp" -H 'Content-Type: application/json' \
+              -H "X-API-Key: $fresh" -d "$body" || echo 000)"
+            [ "$got" = 200 ] && break
+            sleep 10
+          done
+          echo "fresh token against /mcp -> $got"
+          echo "result=$got" >> "$GITHUB_OUTPUT"
+
+      - name: Phase B - put the intended token back and try it
+        id: phase_b
+        env:
+          SECRET_KEY: ${{ steps.recover.outputs.SECRET_KEY }}
+          DATABASE_URL: ${{ steps.recover.outputs.DATABASE_URL }}
+          ZEPTOMAIL_SEND_MAIL_TOKEN: ${{ steps.recover.outputs.ZEPTOMAIL_SEND_MAIL_TOKEN }}
+        run: |
+          set -uo pipefail
+          scw container container update "$CONTAINER_ID" \
+            secret-environment-variables.SECRET_KEY="$SECRET_KEY" \
+            secret-environment-variables.DATABASE_URL="$DATABASE_URL" \
+            secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
+            secret-environment-variables.MCP_API_TOKEN="$TOKEN" -o json \
+            | jq -r '"update: \(.status)"'
+          for i in $(seq 1 40); do
+            s="$(scw container container get "$CONTAINER_ID" -o json | jq -r .status)"
+            [ "$s" = ready ] && { echo "ready after $i check(s)"; break; }
+            [ "$s" = error ] && { echo "::error::container status=error"; exit 1; }
+            sleep 10
+          done
+          body='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+          got=000
+          for _ in 1 2 3 4 5 6; do
+            got="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+              -X POST "${BASE%/}/mcp" -H 'Content-Type: application/json' \
+              -H "X-API-Key: $TOKEN" -d "$body" || echo 000)"
+            [ "$got" = 200 ] && break
+            sleep 10
+          done
+          echo "intended token against /mcp -> $got"
+          echo "result=$got" >> "$GITHUB_OUTPUT"
+
+      - name: Verdict, and leave the site provably working
+        env:
+          A: ${{ steps.phase_a.outputs.result }}
+          B: ${{ steps.phase_b.outputs.result }}
+        run: |
+          set -u
+          n="$(scw container container get "$CONTAINER_ID" -o json \
+            | jq -r '(.secret_environment_variables // []) | length')"
+          echo "secrets on the container: $n"
+          for path in / /accounts/login/; do
+            c="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "${BASE%/}$path" || echo 000)"
+            echo "  GET $path -> $c"
+          done
+          echo
+          echo "phase A (token invented here): $A"
+          echo "phase B (secrets.MCP_API_TOKEN): $B"
+          echo
+          {
+            echo "### Does a secret write reach the app?"
+            echo ""
+            echo "| phase | token | /mcp |"
+            echo "|---|---|---|"
+            echo "| A | invented in this run | $A |"
+            echo "| B | secrets.MCP_API_TOKEN | $B |"
+            echo ""
+            if [ "$A" = 200 ] && [ "$B" = 200 ]; then
+              echo "Both work. The endpoint is healthy and the intended token is live."
+            elif [ "$A" = 200 ] && [ "$B" != 200 ]; then
+              echo "Writes reach the app, but **secrets.MCP_API_TOKEN is not the"
+              echo "string the endpoint accepts** even when it is the string stored."
+              echo "Something mangles it between the secret and the container."
+            elif [ "$A" != 200 ]; then
+              echo "**The app never picks up a written secret.** A token invented"
+              echo "seconds earlier is refused, so no value set this way can work;"
+              echo "the container is serving an environment it will not release."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$n" = 4 ] || { echo "::error::expected 4 secrets, found $n"; exit 1; }
