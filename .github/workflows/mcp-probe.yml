@@ -204,3 +204,62 @@ jobs:
           echo
           echo "expected on current code: 200, 200, 401, 401"
           echo "expected on pre-dfd6d3c:  401, 200, 401, 401"
+
+  # --------------------------------------------------------------------- #
+  # Where the public hostname actually lands. The rotation wrote a token to
+  # container cef3d3c3 and the same run was then refused it by www, which is
+  # only possible if the two are not the same app.
+  # --------------------------------------------------------------------- #
+  routing:
+    name: Where the domain points
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+      TOKEN: ${{ secrets.MCP_API_TOKEN }}
+      BASE: ${{ inputs.base_url || 'https://www.esljparents.eu' }}
+    steps:
+      - name: Install the Scaleway CLI
+        run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+
+      - name: Every container in the project
+        run: |
+          set -u
+          scw container container list -o json \
+            | jq -r '.[] | "\(.name)  id=\(.id)  status=\(.status)\n    endpoint=\(.domain_name // .public_endpoint // "?")\n    image=\(.registry_image // .image // "?")"'
+
+      - name: Hostnames attached to the configured container
+        run: |
+          set -u
+          scw container domain list container-id="$CONTAINER_ID" -o json \
+            | jq -r 'if length==0 then "  (none attached)" else .[] | "  \(.hostname)  status=\(.status)" end'
+
+      - name: What DNS says
+        run: |
+          set -u
+          host="${BASE#https://}"; host="${host%%/*}"
+          echo "## $host"
+          echo "   CNAME: $(dig +short CNAME "$host" | tr '\n' ' ')"
+          echo "   A:     $(dig +short A "$host" | tr '\n' ' ')"
+
+      - name: The same token against the container endpoint and the domain
+        run: |
+          set -u
+          echo "::add-mask::$TOKEN"
+          direct="$(scw container container get "$CONTAINER_ID" -o json \
+            | jq -r '(.domain_name // .public_endpoint // "") | sub("^https?://";"")')"
+          [ -n "$direct" ] || { echo "::error::container has no endpoint"; exit 1; }
+          body='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+          for target in "https://$direct" "${BASE%/}"; do
+            c="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$target/mcp" \
+              -H 'Content-Type: application/json' -H "X-API-Key: $TOKEN" -d "$body" || echo 000)"
+            printf '  %-60s -> %s\n' "$target/mcp" "$c"
+          done
+          echo
+          echo "  200 direct + 401 via the domain = the domain serves a DIFFERENT app"
+          echo "  401 on both = the container is not picking up the rotated secret"
