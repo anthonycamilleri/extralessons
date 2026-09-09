@@ -1,0 +1,24 @@
+{% comment %}
+The HTML half of a rich-text announcement email. Everything the message needs
+is an inline style: Outlook and several webmail clients drop <style> blocks,
+so the one below is only a courtesy for clients that keep it. Single centred
+column, no tables, system fonts — nothing to download, nothing to break.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title></title>
+<style>
+  body { margin: 0; padding: 0; background: #f4f4f5; }
+  img { max-width: 100%; height: auto; }
+  a { color: #0072bb; }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<div style="max-width:600px;margin:0 auto;padding:24px 20px;background:#ffffff;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#1b1b1b;">
+{{ content }}
+</div>
+</body>
+</html>

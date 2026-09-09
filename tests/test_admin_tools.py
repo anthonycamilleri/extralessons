@@ -31,16 +31,82 @@ class TestAdminBroadcast:
             {
                 "scope": "ALL_CLASSES",
                 "subject": "School closed Friday",
-                "body": "Public holiday.",
+                "body_html": "<p>Public <strong>holiday</strong>.</p>",
                 "_save": "1",
             },
         )
 
         assert response.status_code == 302
-        assert Notification.objects.filter(
-            event=Event.BROADCAST, recipient=parent
-        ).exists()
-        assert Broadcast.objects.get().sender == admin
+        row = Notification.objects.get(
+            event=Event.BROADCAST, recipient=parent, channel=Notification.Channel.EMAIL
+        )
+        assert "<strong>holiday</strong>" in row.rendered_html
+        assert "Public holiday." in row.rendered_body
+        broadcast = Broadcast.objects.get()
+        assert broadcast.sender == admin
+        assert broadcast.body == "Public holiday."
+        assert broadcast.body_html == "<p>Public <strong>holiday</strong>.</p>"
+
+    def test_message_is_cleaned_before_it_is_stored(self, client):
+        client.force_login(SuperAdminFactory())
+        client.post(
+            reverse("admin:notifications_broadcast_add"),
+            {
+                "scope": "ALL_CLASSES",
+                "subject": "Kit",
+                "body_html": '<p onclick="x()">Boots</p><script>alert(1)</script>'
+                '<img src="data:image/png;base64,AAA">',
+                "_save": "1",
+            },
+        )
+        broadcast = Broadcast.objects.get()
+        assert broadcast.body_html == "<p>Boots</p>"
+        assert broadcast.body == "Boots"
+
+    def test_empty_message_is_refused(self, client):
+        client.force_login(SuperAdminFactory())
+        response = client.post(
+            reverse("admin:notifications_broadcast_add"),
+            {"scope": "ALL_CLASSES", "subject": "Kit", "body_html": "<p><br></p>", "_save": "1"},
+        )
+        assert response.status_code == 200
+        assert b"Write a message." in response.content
+        assert not Broadcast.objects.exists()
+
+    def test_composer_loads_the_editor(self, client):
+        client.force_login(SuperAdminFactory())
+        response = client.get(reverse("admin:notifications_broadcast_add"))
+        assert b"vendor/quill/quill.js" in response.content
+        assert b"js/richtext.js" in response.content
+        assert b'data-richtext="1"' in response.content
+        assert reverse("announcement_image_upload").encode() in response.content
+
+    def test_sent_announcement_shows_its_formatting(self, client):
+        admin = SuperAdminFactory()
+        client.force_login(admin)
+        broadcast = Broadcast.objects.create(
+            sender=admin,
+            scope="ALL_CLASSES",
+            subject="Kit",
+            body="Bring boots",
+            body_html="<p>Bring <strong>boots</strong></p>",
+        )
+        response = client.get(
+            reverse("admin:notifications_broadcast_change", args=[broadcast.pk])
+        )
+        assert response.status_code == 200
+        assert b"<p>Bring <strong>boots</strong></p>" in response.content
+
+    def test_plain_text_history_keeps_its_line_breaks(self, client):
+        admin = SuperAdminFactory()
+        client.force_login(admin)
+        broadcast = Broadcast.objects.create(
+            sender=admin, scope="ALL_CLASSES", subject="Old", body="Line one\nLine two"
+        )
+        response = client.get(
+            reverse("admin:notifications_broadcast_change", args=[broadcast.pk])
+        )
+        assert b"Line one<br>Line two" in response.content
 
     def test_selected_scope_requires_classes(self, client):
         admin = AdminFactory()
@@ -48,7 +114,7 @@ class TestAdminBroadcast:
         client.force_login(admin)
         response = client.post(
             reverse("admin:notifications_broadcast_add"),
-            {"scope": "SELECTED_CLASSES", "subject": "x", "body": "y", "_save": "1"},
+            {"scope": "SELECTED_CLASSES", "subject": "x", "body_html": "<p>y</p>", "_save": "1"},
         )
         assert response.status_code == 200
         assert b"Pick at least one class" in response.content

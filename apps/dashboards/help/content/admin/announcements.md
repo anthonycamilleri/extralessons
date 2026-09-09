@@ -20,10 +20,24 @@ Click **Send announcement** at the top of any admin page, or go to
 - **Selected classes** — tick the ones you mean. Only classes in the active
   term are listed.
 
-**Subject** is the email subject line. **Message** is the body: plain text,
-written as you would write it to a parent. Each family sees it opening with
-their own name and signed off with the school's sender name, so start with
-what you want to say.
+**Subject** is the email subject line. **Message** is the body, written as
+you would write it to a parent. Each family sees it opening with their own
+name and signed off with the school's sender name, so start with what you
+want to say.
+
+The message has a small formatting toolbar: bold, italic and underline, two
+heading sizes, numbered and bulleted lists, links, and pictures. Keep it to
+that — it is exactly what email programs show reliably, and anything pasted
+in from elsewhere is reduced to the same set before it is sent.
+
+To add a picture, press the picture button and choose a file, or paste or
+drag one into the message. It is uploaded straight away (up to 5 MB, shrunk
+to a sensible size for an email) and appears where your cursor was. The
+email links to the hosted copy rather than attaching it.
+
+> The email keeps your formatting and pictures. The WhatsApp message carries
+> the words only — a picture becomes its description, a link its address — so
+> never let a picture carry the whole point.
 
 ## Who actually gets it {#recipients}
 

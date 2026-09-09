@@ -8,7 +8,7 @@ from apps.enrollments import services as enrollment_services
 from apps.enrollments.models import Enrollment
 from apps.notifications import worker
 from apps.notifications.channels.base import ChannelError
-from apps.notifications.models import Event, Notification, NotificationTemplate
+from apps.notifications.models import Broadcast, Event, Notification, NotificationTemplate
 from apps.notifications.services import queue_broadcast, queue_event
 
 from .factories import ActivityClassFactory, AdminFactory, ChildFactory, UserFactory
@@ -90,8 +90,6 @@ class TestQueueing:
 
 class TestBroadcast:
     def test_broadcast_reaches_guardians_of_selected_classes_once(self):
-        from apps.notifications.models import Broadcast
-
         parent1, parent2 = UserFactory(), UserFactory()
         cls = ActivityClassFactory()
         other_cls = ActivityClassFactory()
@@ -118,6 +116,91 @@ class TestBroadcast:
         assert recipients == {parent1.pk, parent2.pk}
         broadcast.refresh_from_db()
         assert broadcast.sent_at is not None
+
+    def test_rich_text_broadcast_sends_html_and_plain_text(self):
+        from django.core import mail
+
+        from apps.notifications.services import create_broadcast
+
+        parent = UserFactory(first_name="Paula", phone_e164="+35699000000", notify_whatsapp=True)
+        cls = ActivityClassFactory()
+        enrollment_services.register(ChildFactory(parent=parent), cls)
+
+        broadcast, count = create_broadcast(
+            sender=AdminFactory(),
+            scope=Broadcast.Scope.SELECTED_CLASSES,
+            subject="Trip",
+            body_html='<h1>Kit</h1><p class="ql-align-center">Bring <b>boots</b>.</p>'
+            '<p><img src="https://x.org/a.jpg" alt="Boots"></p><script>x()</script>',
+            classes=[cls],
+        )
+
+        assert count == 1
+        assert broadcast.body_html == (
+            '<h2>Kit</h2><p>Bring <b>boots</b>.</p><p><img src="https://x.org/a.jpg" alt="Boots"></p>'
+        )
+        assert broadcast.body == "Kit\n\nBring boots.\n\n[Boots]"
+
+        email = Notification.objects.get(
+            event=Event.BROADCAST, channel=Notification.Channel.EMAIL
+        )
+        assert "Hi Paula" in email.rendered_body
+        assert "Bring boots." in email.rendered_body
+        assert "<b>" not in email.rendered_body
+        assert email.rendered_html.lstrip().startswith("<!DOCTYPE html>")
+        assert "Hi Paula" in email.rendered_html
+        assert "Bring <b>boots</b>." in email.rendered_html
+        assert 'src="https://x.org/a.jpg"' in email.rendered_html
+        assert "max-width:100%" in email.rendered_html
+
+        whatsapp = Notification.objects.get(
+            event=Event.BROADCAST, channel=Notification.Channel.WHATSAPP
+        )
+        assert "<" not in "".join(whatsapp.wa_params)
+        assert any("Bring boots." in param for param in whatsapp.wa_params)
+
+        # Delivery: one multipart email, text and HTML.
+        worker.deliver(email)
+        assert len(mail.outbox) == 1
+        sent = mail.outbox[0]
+        assert "Bring boots." in sent.body
+        assert sent.alternatives[0][1] == "text/html"
+        assert "Bring <b>boots</b>." in sent.alternatives[0][0]
+
+    def test_plain_text_broadcast_stays_text_only(self):
+        from django.core import mail
+
+        from apps.notifications.services import create_broadcast
+
+        parent = UserFactory()
+        cls = ActivityClassFactory()
+        enrollment_services.register(ChildFactory(parent=parent), cls)
+
+        create_broadcast(
+            sender=AdminFactory(),
+            scope=Broadcast.Scope.SELECTED_CLASSES,
+            subject="Old style",
+            body="Just words.",
+            classes=[cls],
+        )
+        email = Notification.objects.get(
+            event=Event.BROADCAST, channel=Notification.Channel.EMAIL
+        )
+        assert email.rendered_html == ""
+        worker.deliver(email)
+        assert mail.outbox[0].alternatives == []
+
+    def test_empty_rich_text_is_refused(self):
+        from apps.notifications.services import create_broadcast
+
+        with pytest.raises(ValueError):
+            create_broadcast(
+                sender=AdminFactory(),
+                scope=Broadcast.Scope.ALL_CLASSES,
+                subject="Nothing",
+                body_html="<p><br></p>",
+            )
+        assert not Broadcast.objects.exists()
 
 
 class TestWorker:

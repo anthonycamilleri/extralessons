@@ -1,7 +1,7 @@
 import smtplib
 
 from django.conf import settings
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMultiAlternatives
 
 from ..backends.zeptomail import REQUEST_ID_HEADER, ZeptoMailError
 from .base import ChannelError
@@ -28,7 +28,7 @@ class EmailAdapter:
     def send(self, notification):
         if not notification.recipient_email:
             raise ChannelError("No email address for recipient", permanent=True)
-        message = EmailMessage(
+        message = EmailMultiAlternatives(
             subject=notification.rendered_subject,
             body=notification.rendered_body,
             from_email=settings.DEFAULT_FROM_EMAIL,
@@ -38,6 +38,11 @@ class EmailAdapter:
             reply_to=[notification.reply_to] if notification.reply_to else None,
             connection=self.connection,
         )
+        if notification.rendered_html:
+            # multipart/alternative: the text stays for clients that want it,
+            # the HTML is what most people see. ZeptoMail maps this to
+            # htmlbody + textbody; SMTP sends the MIME as is.
+            message.attach_alternative(notification.rendered_html, "text/html")
         try:
             message.send(fail_silently=False)
         except smtplib.SMTPRecipientsRefused as exc:

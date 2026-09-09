@@ -289,7 +289,7 @@ class TestAnnouncementsScope:
         assert "All my classes" in content
 
         response = self._send(
-            client, {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Chess news."}
+            client, {"scope": "ALL_CLASSES", "subject": "Hello", "body_html": "<p>Chess news.</p>"}
         )
 
         assert response.status_code == 302
@@ -310,7 +310,7 @@ class TestAnnouncementsScope:
 
         response = self._send(
             client,
-            {"scope": "SELECTED_CLASSES", "classes": [theirs.pk], "subject": "x", "body": "y"},
+            {"scope": "SELECTED_CLASSES", "classes": [theirs.pk], "subject": "x", "body_html": "<p>y</p>"},
         )
 
         assert response.status_code == 200  # rejected by the form, not sent
@@ -325,7 +325,7 @@ class TestAnnouncementsScope:
         content = client.get(reverse("admin:notifications_broadcast_add")).content.decode()
         assert "All published classes" in content
 
-        self._send(client, {"scope": "ALL_CLASSES", "subject": "Hello", "body": "Everyone."})
+        self._send(client, {"scope": "ALL_CLASSES", "subject": "Hello", "body_html": "<p>Everyone.</p>"})
 
         assert Broadcast.objects.get().scope == Broadcast.Scope.ALL_CLASSES
         assert Notification.objects.filter(
@@ -337,7 +337,7 @@ class TestAnnouncementsScope:
         mine = _assign(ActivityClassFactory(), admin)
         services.register(ChildFactory(), mine)
         client.force_login(admin)
-        self._send(client, {"scope": "ALL_CLASSES", "subject": "Hello", "body": "News."})
+        self._send(client, {"scope": "ALL_CLASSES", "subject": "Hello", "body_html": "<p>News.</p>"})
         broadcast = Broadcast.objects.get()
 
         page = client.get(reverse("admin:notifications_broadcast_change", args=[broadcast.pk]))

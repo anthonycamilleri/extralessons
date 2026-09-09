@@ -130,7 +130,7 @@ def test_full_lifecycle(client):
     # --- Provider messages the class; worker delivers everything ------------
     client.post(
         reverse("provider_broadcast"),
-        {"classes": [cls.pk], "subject": "First session!", "body": "See you Monday."},
+        {"classes": [cls.pk], "subject": "First session!", "body_html": "<p>See you Monday.</p>"},
     )
     client.post(reverse("logout"))
 

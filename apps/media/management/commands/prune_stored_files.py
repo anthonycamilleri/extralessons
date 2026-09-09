@@ -1,4 +1,8 @@
-"""Delete stored files that no model field refers to any more.
+"""Delete stored files that nothing refers to any more.
+
+A reference is a FileField value, or a picture embedded in a rich-text
+announcement (Broadcast.body_html): those images are only ever named inside
+the HTML, and an email that has been sent must keep loading them.
 
 Replacing a class image saves a new row and leaves the old one behind, on
 purpose: the old URL may still be cached or open in a tab, and a storage that
@@ -9,9 +13,11 @@ now and then (the web service's Shell tab, or a cron job) to reclaim the space.
   manage.py prune_stored_files --dry-run  # only report them
   manage.py prune_stored_files --min-age-hours 0
 """
+import re
 from datetime import timedelta
 
 from django.apps import apps
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db.models import FileField
 from django.utils import timezone
@@ -21,7 +27,8 @@ from apps.media.storage import DatabaseStorage
 
 
 def referenced_names():
-    """Every value held by a FileField backed by DatabaseStorage."""
+    """Every FileField value backed by DatabaseStorage, plus every stored
+    image an announcement embeds."""
     names = set()
     for model in apps.get_models():
         for field in model._meta.get_fields():
@@ -35,11 +42,28 @@ def referenced_names():
                 .values_list(field.attname, flat=True)
             )
             names.update(values)
+    names.update(announcement_image_names())
+    return names
+
+
+def announcement_image_names():
+    """Stored-file names referenced by <img src> in rich-text announcements.
+
+    The editor inserts the served URL (SITE_URL + MEDIA_URL + name), so the
+    name is whatever follows MEDIA_URL up to the closing quote.
+    """
+    from apps.notifications.models import Broadcast
+
+    media_url = re.escape("/" + settings.MEDIA_URL.strip("/") + "/")
+    pattern = re.compile(rf'src="[^"]*?{media_url}([^"]+)"')
+    names = set()
+    for html in Broadcast.objects.exclude(body_html="").values_list("body_html", flat=True):
+        names.update(pattern.findall(html))
     return names
 
 
 class Command(BaseCommand):
-    help = "Delete database-stored files that no FileField references."
+    help = "Delete database-stored files that no FileField or announcement references."
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="Report, do not delete.")

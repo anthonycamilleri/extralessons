@@ -115,7 +115,11 @@ class TestProviderBroadcast:
 
         response = client.post(
             reverse("provider_broadcast"),
-            {"classes": [cls.pk], "subject": "Kit reminder", "body": "Bring boots."},
+            {
+                "classes": [cls.pk],
+                "subject": "Kit reminder",
+                "body_html": "<p>Bring <em>boots</em>.</p>",
+            },
         )
 
         assert response.status_code == 302
@@ -123,6 +127,24 @@ class TestProviderBroadcast:
             event=Event.BROADCAST, recipient=parent, channel="EMAIL"
         )
         assert "Kit reminder" in row.rendered_subject
+        assert "Bring boots." in row.rendered_body
+        assert "<em>boots</em>" in row.rendered_html
+
+    def test_composer_loads_the_editor_and_refuses_an_empty_message(self, client):
+        provider_user, cls = provider_with_class()
+        client.force_login(provider_user)
+
+        page = client.get(reverse("provider_broadcast"))
+        assert b"vendor/quill/quill.js" in page.content
+        assert b'data-richtext="1"' in page.content
+
+        response = client.post(
+            reverse("provider_broadcast"),
+            {"classes": [cls.pk], "subject": "Kit", "body_html": "<p><br></p>"},
+        )
+        assert response.status_code == 200
+        assert b"Write a message." in response.content
+        assert not Notification.objects.filter(event=Event.BROADCAST).exists()
 
     def test_broadcast_form_rejects_other_providers_class(self, client):
         provider_user, _ = provider_with_class()
@@ -131,7 +153,7 @@ class TestProviderBroadcast:
 
         response = client.post(
             reverse("provider_broadcast"),
-            {"classes": [other_cls.pk], "subject": "Hijack", "body": "nope"},
+            {"classes": [other_cls.pk], "subject": "Hijack", "body_html": "<p>nope</p>"},
         )
 
         assert response.status_code == 200  # form redisplayed with errors

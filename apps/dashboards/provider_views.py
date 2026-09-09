@@ -8,6 +8,7 @@ from apps.accounts.permissions import provider_required
 from apps.catalog.models import ActivityClass, ClassSession
 from apps.enrollments.models import Attendance, Enrollment
 from apps.notifications import services as notification_services
+from apps.notifications.forms import RichTextField
 from apps.notifications.models import Broadcast
 
 
@@ -105,7 +106,7 @@ class ProviderBroadcastForm(forms.Form):
         label="Send to families of",
     )
     subject = forms.CharField(max_length=200)
-    body = forms.CharField(widget=forms.Textarea, label="Message")
+    body_html = RichTextField()
 
     def __init__(self, user, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -123,7 +124,7 @@ def broadcast(request):
             sender=request.user,
             scope=Broadcast.Scope.SELECTED_CLASSES,
             subject=form.cleaned_data["subject"],
-            body=form.cleaned_data["body"],
+            body_html=form.cleaned_data["body_html"],
             classes=form.cleaned_data["classes"],
         )
         messages.success(

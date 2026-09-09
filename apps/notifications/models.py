@@ -76,7 +76,12 @@ class Broadcast(models.Model):
     scope = models.CharField(max_length=20, choices=Scope.choices)
     classes = models.ManyToManyField("catalog.ActivityClass", blank=True, related_name="broadcasts")
     subject = models.CharField(max_length=200)
+    # The plain-text message: what WhatsApp gets, the text/plain half of the
+    # email, and the whole story for announcements sent before rich text.
     body = models.TextField()
+    # The formatted message, already reduced to the email-safe allowlist
+    # (apps.notifications.richtext.clean_html). Empty for plain-text sends.
+    body_html = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
 
@@ -136,6 +141,9 @@ class Notification(models.Model):
     # Rendered snapshot at queue time — later edits never change what was sent.
     rendered_subject = models.CharField(max_length=300, blank=True)
     rendered_body = models.TextField(blank=True)
+    # The HTML half of the email, when there is one (rich-text announcements).
+    # Empty means a plain-text email, which is every other event today.
+    rendered_html = models.TextField(blank=True, default="")
     wa_template_name = models.CharField(max_length=100, blank=True)
     wa_language = models.CharField(max_length=10, blank=True)
     wa_params = models.JSONField(default=list, blank=True)

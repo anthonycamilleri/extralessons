@@ -9,10 +9,10 @@ MAX_DIMENSION = 1600
 JPEG_QUALITY = 82
 
 
-def optimize_image(uploaded_file):
+def optimize_image(uploaded_file, max_dimension=MAX_DIMENSION):
     """Return an optimized ContentFile for an uploaded image.
 
-    Resizes so the longest side is at most MAX_DIMENSION, fixes EXIF rotation,
+    Resizes so the longest side is at most `max_dimension`, fixes EXIF rotation,
     flattens transparency onto white, and re-encodes as JPEG. Keeps uploads of
     any size/format from bloating the media volume and slowing the catalogue.
     """
@@ -27,7 +27,7 @@ def optimize_image(uploaded_file):
     elif image.mode != "RGB":
         image = image.convert("RGB")
 
-    image.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.LANCZOS)
+    image.thumbnail((max_dimension, max_dimension), Image.LANCZOS)
 
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)

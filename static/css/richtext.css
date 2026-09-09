@@ -1,0 +1,36 @@
+/* The announcement editor (static/js/richtext.js over Quill's snow theme) and
+   the read-only rendering of a sent announcement in the admin. Colours are
+   fixed rather than inherited so the editor stays a white page under the
+   admin's dark theme as well as on the provider dashboard. */
+
+.richtext-field {
+  flex: 1 1 auto;
+  max-width: 48rem;
+  min-width: 0;
+}
+.richtext-editor {
+  background: #fff;
+  color: #1b1b1b;
+}
+.richtext-editor .ql-editor {
+  min-height: 16rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.richtext-editor .ql-editor img { max-width: 100%; height: auto; }
+.richtext-editor .ql-editor.ql-blank::before { color: #6b7280; font-style: normal; }
+/* The Django admin (and main.css) style headings and lists for their own
+   pages; inside the editor they must look like the email will. */
+.richtext-editor .ql-editor h2,
+.richtext-editor .ql-editor h3 {
+  background: none; color: inherit; padding: 0; text-transform: none;
+  letter-spacing: normal; font-weight: 700; line-height: 1.3;
+}
+.richtext-editor .ql-editor h2 { font-size: 1.375rem; margin: 0.6em 0 0.3em; }
+.richtext-editor .ql-editor h3 { font-size: 1.125rem; margin: 0.6em 0 0.3em; }
+.richtext-editor .ql-editor a { color: #0072bb; }
+.richtext-field .ql-toolbar.ql-snow { background: #fff; border-radius: 4px 4px 0 0; }
+.richtext-field .ql-container.ql-snow { border-radius: 0 0 4px 4px; }
+
+.richtext-error { color: #b42318; margin: 0.5rem 0 0; }
+.richtext-error[hidden] { display: none; }

@@ -96,3 +96,22 @@
   background: var(--darkened-bg); border: 1px solid var(--hairline-color);
   color: var(--body-quiet-color);
 }
+
+/* A sent announcement on its history page, as the families saw it. The
+   composer's editor styles live in richtext.css, loaded by the widget. */
+.readonly-richtext { max-width: 42rem; line-height: 1.5; }
+.readonly-richtext p { margin: 0 0 1em; }
+.readonly-richtext h2,
+.readonly-richtext h3 {
+  background: none; color: inherit; padding: 0; text-transform: none;
+  letter-spacing: normal; font-weight: 700; line-height: 1.3; margin: 0.6em 0 0.3em;
+}
+.readonly-richtext h2 { font-size: 1.375rem; }
+.readonly-richtext h3 { font-size: 1.125rem; }
+.readonly-richtext ul, .readonly-richtext ol { margin: 0 0 1em; padding-left: 1.4em; }
+.readonly-richtext ul { list-style: disc; }
+.readonly-richtext ol { list-style: decimal; }
+.readonly-richtext img { max-width: 100%; height: auto; display: block; margin: 12px 0; }
+.readonly-richtext blockquote {
+  margin: 0 0 1em; padding: 0 0 0 1em; border-left: 3px solid #d0d5dd;
+}

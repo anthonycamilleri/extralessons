@@ -2,11 +2,14 @@ from django import forms
 from django.contrib import admin
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.html import escape, format_html, linebreaks
+from django.utils.safestring import mark_safe
 
 from apps.accounts.admin_permissions import SchoolAdminPermissionMixin
 from apps.catalog.models import ActivityClass
 
-from . import services
+from . import richtext, services
+from .forms import RichTextField
 from .models import Broadcast, Notification, NotificationTemplate
 
 
@@ -23,9 +26,13 @@ class BroadcastAdminForm(forms.ModelForm):
 
     request = None  # injected per request by BroadcastAdmin.get_form
 
+    # The formatted message. Cleaned to the email-safe allowlist on the way
+    # in; the plain-text `body` is derived from it by the service.
+    body_html = RichTextField()
+
     class Meta:
         model = Broadcast
-        fields = ["scope", "classes", "subject", "body"]
+        fields = ["scope", "classes", "subject", "body_html"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -55,8 +62,6 @@ class BroadcastAdminForm(forms.ModelForm):
             classes.required = False
             classes.label = "Classes (when audience is 'Selected classes')"
             classes.help_text = ""
-        if "body" in self.fields:
-            self.fields["body"].label = "Message"
 
     def clean(self):
         cleaned = super().clean()
@@ -106,8 +111,10 @@ class BroadcastAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
 
     def get_fields(self, request, obj=None):
         if obj is None:
-            return ["scope", "classes", "subject", "body"]
-        return ["sender", "scope", "classes", "subject", "body", "created_at", "sent_at", "recipients"]
+            return ["scope", "classes", "subject", "body_html"]
+        return [
+            "sender", "scope", "classes", "subject", "message", "created_at", "sent_at", "recipients",
+        ]
 
     def get_readonly_fields(self, request, obj=None):
         return [] if obj is None else self.get_fields(request, obj)
@@ -123,17 +130,31 @@ class BroadcastAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
     def recipients(self, obj):
         return obj.notifications.count()
 
+    @admin.display(description="Message")
+    def message(self, obj):
+        """The sent message as the families saw it.
+
+        Stored HTML is already clean; cleaning it again on the way out costs
+        nothing and makes the mark_safe below true by construction. Older,
+        plain-text announcements keep their line breaks.
+        """
+        if obj.body_html:
+            html = richtext.clean_html(obj.body_html)
+        else:
+            html = linebreaks(escape(obj.body))
+        return format_html('<div class="readonly-richtext">{}</div>', mark_safe(html))
+
     def save_model(self, request, obj, form, change):
         scope, classes = form.audience()
         broadcast, count = services.create_broadcast(
             sender=request.user,
             scope=scope,
             subject=obj.subject,
-            body=obj.body,
+            body_html=form.cleaned_data["body_html"],
             classes=classes,
         )
         # The service saved the row; let the admin's logging and redirect see it.
-        for field in ("pk", "id", "sender", "scope", "created_at", "sent_at"):
+        for field in ("pk", "id", "sender", "scope", "body", "body_html", "created_at", "sent_at"):
             setattr(obj, field, getattr(broadcast, field))
         obj._state.adding = False
         obj._state.db = broadcast._state.db

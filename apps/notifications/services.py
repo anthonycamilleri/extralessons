@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from apps.accounts.models import SiteConfig, User
 
+from . import richtext
 from .models import Broadcast, Event, Notification, NotificationTemplate
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,19 @@ class _CompiledTemplate:
     def render_body(self, context):
         return self._body.render(Context(context, autoescape=False))
 
+    def render_html(self, context, body_html):
+        """The HTML email for a rich-text body.
+
+        The plain-text template stays the single source of wording: it is
+        rendered with a token where {{ body }} goes, and the cleaned HTML is
+        dropped in afterwards. The author's HTML never meets the template
+        engine, so nothing in it is parsed or escaped twice.
+        """
+        text = self._body.render(
+            Context({**context, "body": richtext.BODY_TOKEN}, autoescape=False)
+        )
+        return richtext.compose_email_html(text, body_html)
+
     def wa_params(self, context):
         return [str(context.get(key, "")) for key in self.row.wa_param_order]
 
@@ -134,7 +148,7 @@ def enrollment_context(enrollment, parent=None, **extra):
     return context
 
 
-def _email_row(template, context, *, recipient=None, email="", **row_fields):
+def _email_row(template, context, *, recipient=None, email="", html="", **row_fields):
     """Build (not save) one email Notification with rendered content."""
     row = Notification(
         channel=Notification.Channel.EMAIL,
@@ -142,6 +156,7 @@ def _email_row(template, context, *, recipient=None, email="", **row_fields):
         recipient_email=email or (recipient.email if recipient else ""),
         rendered_subject=template.render_subject(context),
         rendered_body=template.render_body(context),
+        rendered_html=html,
         **row_fields,
     )
     if recipient is not None and not recipient.notify_email:
@@ -178,9 +193,9 @@ def _whatsapp_row(template, context, recipient, **row_fields):
     return row
 
 
-def _rows_for_user(user, template, context, **row_fields):
+def _rows_for_user(user, template, context, html="", **row_fields):
     return [
-        _email_row(template, context, recipient=user, **row_fields),
+        _email_row(template, context, recipient=user, html=html, **row_fields),
         _whatsapp_row(template, context, user, **row_fields),
     ]
 
@@ -290,17 +305,28 @@ def queue_guardian_invite(invite):
     schedule_delivery()
 
 
-def create_broadcast(sender, scope, subject, body, classes=None):
+def create_broadcast(sender, scope, subject, body="", classes=None, *, body_html=""):
     """Create a Broadcast and queue it, atomically with its outbox rows.
 
     Returns (broadcast, family_count). Shared by the admin and provider
     composers so the send flow exists exactly once.
+
+    A rich-text message arrives as `body_html`; it is cleaned again here (the
+    forms already did, but a shell or MCP caller may not have) and its plain
+    text derived for `body`, which WhatsApp and the text/plain part use. A
+    plain `body` on its own is still accepted and sends a text-only email.
     """
     from django.db import transaction
 
+    if body_html:
+        body_html = richtext.clean_html(body_html)
+        body = body or richtext.html_to_text(body_html)
+    if not body and richtext.is_blank(body_html):
+        raise ValueError("An announcement needs a message.")
+
     with transaction.atomic():
         broadcast = Broadcast.objects.create(
-            sender=sender, scope=scope, subject=subject, body=body
+            sender=sender, scope=scope, subject=subject, body=body, body_html=body_html
         )
         if scope == Broadcast.Scope.SELECTED_CLASSES:
             broadcast.classes.set(classes)
@@ -337,6 +363,8 @@ def queue_broadcast(broadcast):
 
     # The broadcast context is deliberately class-agnostic: a guardian may be
     # in several targeted classes, so per-class fields would be arbitrary.
+    # `body` stays the plain text even for a rich-text announcement: it is
+    # what the WhatsApp template parameter and the text/plain part carry.
     rows = []
     for guardian in recipients.values():
         context = base_context(
@@ -346,8 +374,9 @@ def queue_broadcast(broadcast):
             body=broadcast.body,
             action_url=_absolute(reverse("parent_home")),
         )
+        html = template.render_html(context, broadcast.body_html) if broadcast.body_html else ""
         rows += _rows_for_user(
-            guardian, template, context, event=Event.BROADCAST, broadcast=broadcast
+            guardian, template, context, html=html, event=Event.BROADCAST, broadcast=broadcast
         )
     Notification.objects.bulk_create(rows, batch_size=500)
     schedule_delivery()

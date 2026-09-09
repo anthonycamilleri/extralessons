@@ -13,6 +13,9 @@ dependencies = [
     "requests~=2.32",
     # Renders the admin-edited Terms & Conditions (apps.accounts.SiteConfig).
     "markdown~=3.7",
+    # Sanitises the rich-text announcements (apps.notifications.richtext):
+    # an allowlist of email-safe tags, nothing else survives.
+    "nh3~=0.3",
     "django-storages[s3]~=1.14",
     # The MCP SDK ships in the runtime image: the web service serves the
     # catalogue tools at /mcp (apps.catalog.mcp_http) as well as over stdio.
