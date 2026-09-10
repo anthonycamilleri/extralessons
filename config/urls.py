@@ -6,7 +6,7 @@ from django.urls import include, path
 from apps.accounts.views import PasswordChangeView
 from apps.catalog.mcp_http import mcp_endpoint
 from apps.media.views import serve_stored_file
-from apps.notifications.views import upload_announcement_image
+from apps.notifications.views import send_test_announcement, upload_announcement_image
 
 urlpatterns = [
     # Ahead of the admin so its "Change password" link lands on our view, which
@@ -21,12 +21,14 @@ urlpatterns = [
     path("me/", include("apps.dashboards.parent_urls")),
     path("provider/", include("apps.dashboards.provider_urls")),
     path("admin-tools/", include("apps.dashboards.admintools_urls")),
-    # Pictures dropped into the announcement editor (admin and provider).
+    # The announcement editor's helpers (admin and provider): pictures dropped
+    # into a message, and the "send me a test email" button.
     path(
         "announcements/upload-image/",
         upload_announcement_image,
         name="announcement_image_upload",
     ),
+    path("announcements/send-test/", send_test_announcement, name="announcement_test_send"),
     path("", include("apps.catalog.urls")),
 ]
 

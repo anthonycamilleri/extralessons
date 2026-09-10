@@ -28,6 +28,7 @@ class RichTextWidget(forms.Textarea):
         attrs = {**(attrs or {}), "data-richtext": "1"}
         # Reversed at render time: the widget module must not import URLs.
         attrs["data-upload-url"] = reverse("announcement_image_upload")
+        attrs["data-test-url"] = reverse("announcement_test_send")
         return super().get_context(name, value, attrs)
 
 

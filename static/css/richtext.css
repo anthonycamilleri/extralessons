@@ -34,3 +34,19 @@
 
 .richtext-error { color: #b42318; margin: 0.5rem 0 0; }
 .richtext-error[hidden] { display: none; }
+
+/* "Send me a test email", under the editor in both composers. */
+.richtext-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+  margin: 0.6rem 0 0;
+}
+.richtext-test {
+  font: inherit; font-size: 0.9375rem; font-weight: 600; line-height: 1.2;
+  padding: 0.45rem 0.9rem; border-radius: 999px; cursor: pointer;
+  color: #0072bb; background: #fff; border: 1.5px solid #0072bb;
+  text-transform: none; text-decoration: none;
+}
+.richtext-test:hover { background: #eef6fc; }
+.richtext-test:disabled { opacity: 0.6; cursor: wait; }
+.richtext-status { font-size: 0.9375rem; color: #1e7f43; }
+.richtext-status.is-error { color: #b42318; }

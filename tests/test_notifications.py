@@ -190,6 +190,34 @@ class TestBroadcast:
         worker.deliver(email)
         assert mail.outbox[0].alternatives == []
 
+    def test_test_send_goes_to_the_author_and_stores_nothing(self):
+        from django.core import mail
+
+        from apps.notifications.services import send_test_broadcast
+
+        author = AdminFactory(first_name="Sam", last_name="Office")
+        sent_to = send_test_broadcast(author, "Trip", "<p>Bring <b>boots</b>.</p>")
+
+        assert sent_to == author.email
+        assert not Broadcast.objects.exists()
+        assert not Notification.objects.exists()
+        [message] = mail.outbox
+        assert message.to == [author.email]
+        assert message.subject == "[Test] Trip"
+        assert "Hi Sam Office" in message.body and "Bring boots." in message.body
+        assert "Bring <b>boots</b>." in message.alternatives[0][0]
+
+    def test_test_send_refuses_a_blank_message_and_a_disabled_template(self):
+        from apps.notifications.services import send_test_broadcast
+
+        author = AdminFactory()
+        with pytest.raises(ValueError, match="Write a message"):
+            send_test_broadcast(author, "Trip", "<p><br></p>")
+        NotificationTemplate.objects.filter(event=Event.BROADCAST).update(enabled=False)
+        with pytest.raises(ValueError, match="template is disabled"):
+            send_test_broadcast(author, "Trip", "<p>Words</p>")
+        assert mail.outbox == []
+
     def test_empty_rich_text_is_refused(self):
         from apps.notifications.services import create_broadcast
 

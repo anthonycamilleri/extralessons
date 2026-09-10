@@ -57,11 +57,16 @@ picked gets one email.
 
 ## Sending {#send}
 
-Press save and it goes. You are told how many families it reached:
+First, press **Send me a test email** under the message. The email arrives in
+your own inbox exactly as a family will see it — opening with your name where
+theirs will be — so you can check the wording, the pictures and how it looks
+on your phone. Send yourself as many tests as you like; nothing is recorded.
+
+Then press save and it goes. You are told how many families it reached:
 *Announcement queued for 24 families.*
 
-> There is no draft, no preview and no unsend. Read it once more before you
-> press the button.
+> There is no draft and no unsend. The test email is your preview: read it
+> once more before you press the button.
 
 Sent announcements are kept as a record. You can open one to see who it went
 to and when, but you cannot edit it.

@@ -80,6 +80,7 @@ class TestAdminBroadcast:
         assert b"js/richtext.js" in response.content
         assert b'data-richtext="1"' in response.content
         assert reverse("announcement_image_upload").encode() in response.content
+        assert reverse("announcement_test_send").encode() in response.content
 
     def test_sent_announcement_shows_its_formatting(self, client):
         admin = SuperAdminFactory()

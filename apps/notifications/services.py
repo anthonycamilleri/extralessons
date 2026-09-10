@@ -334,6 +334,57 @@ def create_broadcast(sender, scope, subject, body="", classes=None, *, body_html
     return broadcast, count
 
 
+def _broadcast_context(guardian, subject, body):
+    """The template context for one recipient of an announcement.
+
+    Deliberately class-agnostic: a guardian may be in several targeted
+    classes, so per-class fields would be arbitrary. `body` is the plain text
+    even for a rich-text announcement: it is what the WhatsApp template
+    parameter and the text/plain part carry.
+    """
+    return base_context(
+        parent_name=guardian.get_full_name() or guardian.email,
+        parent_first_name=guardian.first_name or guardian.email,
+        subject=subject,
+        body=body,
+        action_url=_absolute(reverse("parent_home")),
+    )
+
+
+def send_test_broadcast(user, subject, body_html):
+    """Email the announcement to its author, exactly as a family would get it.
+
+    Nothing is stored: no Broadcast, no Notification row. The message goes
+    straight through the configured email channel so the author sees the
+    result now, and the delivery log stays a record of real sends. The
+    greeting carries the author's own name, where a parent would see theirs.
+    Raises ValueError for a message that cannot be sent at all and lets the
+    channel's ChannelError through for a delivery failure. Returns the address
+    it went to.
+    """
+    from .channels.base import get_adapter
+
+    body_html = richtext.clean_html(body_html)
+    if richtext.is_blank(body_html):
+        raise ValueError("Write a message.")
+    template = _get_template(Event.BROADCAST)
+    if template is None:
+        raise ValueError("The announcement email template is disabled.")
+
+    context = _broadcast_context(user, subject, richtext.html_to_text(body_html))
+    row = Notification(
+        channel=Notification.Channel.EMAIL,
+        event=Event.BROADCAST,
+        recipient=user,
+        recipient_email=user.email,
+        rendered_subject="[Test] " + template.render_subject(context),
+        rendered_body=template.render_body(context),
+        rendered_html=template.render_html(context, body_html),
+    )
+    get_adapter(Notification.Channel.EMAIL).send(row)
+    return user.email
+
+
 def queue_broadcast(broadcast):
     """Fan a broadcast out to guardians of children active in the target classes."""
     from apps.catalog.models import ActivityClass
@@ -361,19 +412,9 @@ def queue_broadcast(broadcast):
         for guardian in enrollment.child.guardians.all():
             recipients.setdefault(guardian.pk, guardian)
 
-    # The broadcast context is deliberately class-agnostic: a guardian may be
-    # in several targeted classes, so per-class fields would be arbitrary.
-    # `body` stays the plain text even for a rich-text announcement: it is
-    # what the WhatsApp template parameter and the text/plain part carry.
     rows = []
     for guardian in recipients.values():
-        context = base_context(
-            parent_name=guardian.get_full_name() or guardian.email,
-            parent_first_name=guardian.first_name or guardian.email,
-            subject=broadcast.subject,
-            body=broadcast.body,
-            action_url=_absolute(reverse("parent_home")),
-        )
+        context = _broadcast_context(guardian, broadcast.subject, broadcast.body)
         html = template.render_html(context, broadcast.body_html) if broadcast.body_html else ""
         rows += _rows_for_user(
             guardian, template, context, html=html, event=Event.BROADCAST, broadcast=broadcast

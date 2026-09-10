@@ -9,6 +9,10 @@
  * The formats offered here are exactly the ones the server keeps
  * (apps.notifications.richtext.ALLOWED_TAGS); anything else pasted in is
  * removed before the message is stored, so what you see is what is sent.
+ *
+ * "Send me a test email" posts the draft (subject and message) to
+ * data-test-url; the server emails it to the logged-in account only and
+ * answers with the address, shown beside the button.
  */
 (function () {
   "use strict";
@@ -137,6 +141,65 @@
     quill.on("text-change", sync);
     if (form) form.addEventListener("submit", sync);
     sync();
+
+    var testUrl = textarea.getAttribute("data-test-url");
+    if (testUrl && form) addTestButton(wrapper, form, testUrl, sync);
+  }
+
+  function addTestButton(wrapper, form, testUrl, sync) {
+    var row = document.createElement("div");
+    row.className = "richtext-actions";
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "richtext-test";
+    button.textContent = "Send me a test email";
+    var status = document.createElement("span");
+    status.className = "richtext-status";
+    status.setAttribute("role", "status");
+    row.appendChild(button);
+    row.appendChild(status);
+    wrapper.appendChild(row);
+
+    function show(text, isError) {
+      status.textContent = text;
+      status.classList.toggle("is-error", !!isError);
+    }
+
+    button.addEventListener("click", function () {
+      sync();
+      var subject = form.querySelector('[name="subject"]');
+      var textarea = wrapper.previousSibling;
+      var body = new FormData();
+      body.append("subject", subject ? subject.value : "");
+      body.append("body_html", textarea.value);
+      button.disabled = true;
+      show("Sending…", false);
+      fetch(testUrl, {
+        method: "POST",
+        body: body,
+        credentials: "same-origin",
+        headers: { "X-CSRFToken": csrfToken(form) },
+      })
+        .then(function (response) {
+          return response
+            .json()
+            .catch(function () {
+              return {};
+            })
+            .then(function (data) {
+              if (!response.ok || !data.sent_to) {
+                throw new Error(data.error || "The test could not be sent.");
+              }
+              show("Test sent to " + data.sent_to + " — check your inbox.", false);
+            });
+        })
+        .catch(function (error) {
+          show(error.message, true);
+        })
+        .then(function () {
+          button.disabled = false;
+        });
+    });
   }
 
   function init() {

@@ -137,6 +137,7 @@ class TestProviderBroadcast:
         page = client.get(reverse("provider_broadcast"))
         assert b"vendor/quill/quill.js" in page.content
         assert b'data-richtext="1"' in page.content
+        assert reverse("announcement_test_send").encode() in page.content
 
         response = client.post(
             reverse("provider_broadcast"),
