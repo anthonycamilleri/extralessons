@@ -353,3 +353,155 @@ def test_delete_term_only_when_empty(calendar):
     with pytest.raises(ValueError, match="still has 1 class"):
         tools.delete_term("Autumn")
     assert Term.objects.filter(name="Autumn").exists()
+
+
+# --------------------------------------------------------------------------- #
+# Registrations: who is registered for what
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def registrations():
+    """One class in every state a place can be in, and a child in two classes.
+
+    Chess Club: Ada enrolled (and her family has asked to leave), Bo holding an
+    offer, Cy and Di waiting in that order, Eve's request awaiting review, Fay
+    cancelled. Ada is in Judo as well.
+    """
+    now = timezone.now()
+    chess = ActivityClassFactory(title="Chess Club", capacity=1)
+    judo = ActivityClassFactory(title="Judo", capacity=5, term=chess.term)
+
+    def child(first, last, school_class, **fields):
+        return ChildFactory(
+            first_name=first, last_name=last, school_class=school_class, **fields
+        )
+
+    ada = child("Ada", "Byron", "P3E", notes="Peanut allergy")
+    EnrollmentFactory(
+        activity_class=chess,
+        child=ada,
+        status=Enrollment.Status.ENROLLED,
+        enrolled_at=now,
+        cancel_requested_at=now,
+    )
+    EnrollmentFactory(activity_class=judo, child=ada, status=Enrollment.Status.ENROLLED, enrolled_at=now)
+    EnrollmentFactory(
+        activity_class=chess,
+        child=child("Bo", "Peep", "P4S"),
+        status=Enrollment.Status.OFFERED,
+        offered_at=now,
+        offer_expires_at=now + datetime.timedelta(days=2),
+    )
+    for name, hours_ago in (("Cy", 2), ("Di", 1)):
+        EnrollmentFactory(
+            activity_class=chess,
+            child=child(name, "Waiting", "P3E" if name == "Cy" else "S1E"),
+            status=Enrollment.Status.WAITLISTED,
+            waitlisted_at=now - datetime.timedelta(hours=hours_ago),
+        )
+    EnrollmentFactory(activity_class=chess, child=child("Eve", "Asking", "P5E"))
+    EnrollmentFactory(
+        activity_class=chess,
+        child=child("Fay", "Gone", "P5E"),
+        status=Enrollment.Status.CANCELLED,
+        cancelled_at=now,
+        cancel_reason=Enrollment.CancelReason.PARENT,
+    )
+    return chess, judo
+
+
+def test_list_registrations_says_who_is_registered_for_what(registrations):
+    result = tools.list_registrations()
+
+    assert (result["matched"], result["returned"], result["truncated"]) == (6, 6, False)
+    assert {(r["child_name"], r["class"]["title"], r["status"]) for r in result["registrations"]} == {
+        ("Ada Byron", "Chess Club", "ENROLLED"),
+        ("Ada Byron", "Judo", "ENROLLED"),
+        ("Bo Peep", "Chess Club", "OFFERED"),
+        ("Cy Waiting", "Chess Club", "WAITLISTED"),
+        ("Di Waiting", "Chess Club", "WAITLISTED"),
+        ("Eve Asking", "Chess Club", "REQUESTED"),
+    }
+    rows = {(r["child_name"], r["class"]["title"]): r for r in result["registrations"]}
+    # Contact details and the family's notes stay out unless they are asked for.
+    assert all("guardians" not in r and "care_notes" not in r for r in result["registrations"])
+    assert rows[("Ada Byron", "Chess Club")]["cancellation_requested"] is True
+    assert rows[("Ada Byron", "Judo")]["cancellation_requested"] is False
+    assert rows[("Bo Peep", "Chess Club")]["offer_expired"] is False
+    assert rows[("Eve Asking", "Chess Club")]["registered_at"]
+
+
+def test_list_registrations_filters(registrations):
+    chess, judo = registrations
+
+    def names(**filters):
+        return {r["child_name"] for r in tools.list_registrations(**filters)["registrations"]}
+
+    assert names(class_id=judo.id) == {"Ada Byron"}
+    assert names(school_class="p3e") == {"Ada Byron", "Cy Waiting"}
+    assert names(term=chess.term.name) == {"Ada Byron", "Bo Peep", "Cy Waiting", "Di Waiting", "Eve Asking"}
+    assert names(term="Not a term") == set()
+    # A child by part of their name: Ada's two classes, both of them.
+    assert {r["class"]["title"] for r in tools.list_registrations(child="ada byron")["registrations"]} == {
+        "Chess Club",
+        "Judo",
+    }
+
+    waiting = tools.list_registrations(status="waitlisted")["registrations"]
+    assert {r["child_name"]: r["waitlist_position"] for r in waiting} == {"Cy Waiting": 1, "Di Waiting": 2}
+    assert tools.list_registrations(status="ACTIVE")["matched"] == 6
+    with pytest.raises(ValueError, match="Unknown status"):
+        tools.list_registrations(status="pending")
+
+
+def test_list_registrations_on_request_shows_cancelled_places_and_contacts(registrations):
+    assert tools.list_registrations(child="Fay")["matched"] == 0
+
+    result = tools.list_registrations(child="Fay", include_cancelled=True, include_contacts=True)
+
+    row = result["registrations"][0]
+    assert (row["status"], row["cancel_reason"]) == ("CANCELLED", "Withdrawn by parent")
+    assert row["cancelled_at"]
+    assert row["guardians"][0]["email"].endswith("@test.example")
+    assert row["date_of_birth"]
+
+
+def test_list_registrations_truncates_politely(registrations):
+    result = tools.list_registrations(limit=2)
+
+    assert (result["matched"], result["returned"], result["truncated"]) == (6, 2, True)
+    assert "narrow the filters" in result["note"]
+
+
+def test_get_class_register_groups_one_class_in_order(registrations):
+    chess, _ = registrations
+
+    register = tools.get_class_register(chess.id)
+
+    assert register["title"] == "Chess Club"
+    assert [r["child_name"] for r in register["enrolled"]] == ["Ada Byron"]
+    assert [r["child_name"] for r in register["offered"]] == ["Bo Peep"]
+    assert [r["child_name"] for r in register["waitlisted"]] == ["Cy Waiting", "Di Waiting"]
+    assert [r["waitlist_position"] for r in register["waitlisted"]] == [1, 2]
+    assert [r["child_name"] for r in register["requested"]] == ["Eve Asking"]
+    assert register["cancellation_requests"] == 1
+    # Seat counts come from the same annotation list_classes uses.
+    assert (register["enrolled_count"], register["waitlist_count"], register["places_free"]) == (2, 2, 0)
+    # The class is the result itself, so rows do not repeat it.
+    assert "class" not in register["enrolled"][0]
+    assert "care_notes" not in register["enrolled"][0]
+
+
+def test_get_class_register_can_add_what_the_provider_needs(registrations):
+    chess, _ = registrations
+
+    register = tools.get_class_register(chess.id, include_contacts=True, include_care_notes=True)
+
+    ada = register["enrolled"][0]
+    assert ada["care_notes"] == "Peanut allergy"
+    assert ada["may_leave_alone"] is False
+    assert [g["email"] for g in ada["guardians"]]
+
+    with pytest.raises(ValueError, match="No class with id"):
+        tools.get_class_register(999)

@@ -300,7 +300,8 @@ token when the Blueprint was created.
 The endpoint is a plain Django view speaking MCP's stateless Streamable HTTP
 (`apps/catalog/mcp_http.py`); the tools are the same ones the stdio server
 offers. The token grants everything they can do, including publishing classes
-to parents. To rotate it: clear the value in the dashboard, trigger a Blueprint
+to parents and reading who is registered for what, with guardians' contact
+details when asked for; treat it as a school-office credential. To rotate it: clear the value in the dashboard, trigger a Blueprint
 sync (any push to `main` that touches `render.yaml`), then update the
 connector. The README's *Connecting Claude* section has the local, stdio
 alternative for development.

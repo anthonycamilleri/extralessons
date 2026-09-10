@@ -5,6 +5,9 @@ import pytest
 
 from apps.catalog import mcp_server as tools
 from apps.catalog.models import Provider
+from apps.enrollments.models import Enrollment
+
+from .factories import ActivityClassFactory, ChildFactory, EnrollmentFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -167,6 +170,28 @@ def test_tools_call_reads_and_writes_through_the_real_tools(client):
     assert overview["content"][0]["type"] == "text"
     text = overview["content"][0]["text"]
     assert "Chess Club Ltd" in text
+
+
+def test_tools_call_returns_a_register_with_names(client):
+    """The registration tools over the wire: same argument validation, and the
+    rows survive JSON encoding with their personal data intact."""
+    cls = ActivityClassFactory(title="Chess Club")
+    EnrollmentFactory(
+        activity_class=cls,
+        child=ChildFactory(first_name="Ada", last_name="Byron"),
+        status=Enrollment.Status.ENROLLED,
+    )
+
+    result = rpc(client, "tools/call", {
+        "name": "get_class_register",
+        "arguments": {"class_id": cls.id, "include_contacts": True},
+    }).json()["result"]
+
+    assert result.get("isError") is not True
+    register = result["structuredContent"]
+    assert [row["child_name"] for row in register["enrolled"]] == ["Ada Byron"]
+    assert register["enrolled"][0]["guardians"][0]["email"].endswith("@test.example")
+    assert "Ada Byron" in result["content"][0]["text"]
 
 
 def test_tool_call_uses_the_request_connection_not_a_private_one(client):

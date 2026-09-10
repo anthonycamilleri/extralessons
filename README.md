@@ -33,7 +33,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Optional email alerts on new requests and freed seats.
 - Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. See *Who sees what* under Architecture.
 - Everything happens in one place, the Django admin at `/admin/`: a Requests page with one-click approve/reject and a pending-count badge on every page, the class list as the term's dashboard (registrations, confirmed, available, waiting, pending per class), a roster page per class (enrolled, offers, waiting list with "offer seat", pending requests; CSV download), children with their guardians' contacts and every registration, the announcement composer (a small rich-text editor: emphasis, headings, lists, links and uploaded pictures, sent as an HTML email with a plain-text twin, with a "send me a test email" button that delivers the draft to the author first), plus terms, providers, notification templates and site settings.
-- Let Claude do the data entry: a built-in MCP server (`manage.py mcp_server`) lets Claude Code or Claude Desktop set up school years, holidays, terms, providers and classes from a conversation — see [Connecting Claude](#connecting-claude-mcp).
+- Let Claude do the data entry: a built-in MCP server (`manage.py mcp_server`) lets Claude Code or Claude Desktop set up school years, holidays, terms, providers and classes from a conversation, and read back who is registered for what — see [Connecting Claude](#connecting-claude-mcp).
 
 ## Architecture at a glance
 
@@ -265,14 +265,26 @@ it calls the tools below and the results appear in the Django admin.
 What Claude can do through it:
 
 - Read: the school overview, every class with seat counts, a class's session dates.
+- Read who is registered for what: the register of one class (places held,
+  offers out, the waiting list in order, requests awaiting review) or
+  registrations across classes, filtered by class, term, school class or
+  child. Guardians' contact details and the notes the school keeps for
+  providers come only when the question asks for them.
 - Write: school years and their holidays, terms, providers, classes; publish
   (which generates the session calendar), regenerate sessions, archive, cancel.
 
-What it deliberately cannot do: see or change parents, children or individual
-enrolments, approve requests, or send messages. Enrolment figures are
-aggregates only. Every write uses the same validation and service functions
-as the admin, so a class Claude creates skips the school holidays like any
-other.
+What it deliberately cannot do: change anything about a family or a
+registration — approve or reject a request, offer a seat, cancel one place, add
+a child — or send messages. Places are decided in the office; the tools only
+read them. Every write uses the same validation and service functions as the
+admin, so a class Claude creates skips the school holidays like any other.
+
+The registration tools return children's names, and on request their
+guardians' email addresses and phone numbers and the family's notes (which
+routinely mention allergies and medical needs). That is personal data about
+children leaving the building for whatever assistant is connected: it is why
+the connector token below is a school-office credential, and why care notes
+and contacts are behind their own flags rather than in every answer.
 
 ### Hosted: connect to the live site (recommended)
 
@@ -294,7 +306,8 @@ database stays private.
    overview.
 
 The token grants everything the tools can do, which includes publishing
-classes to parents; treat it like an office login. Rotate it by setting a new
+classes to parents and reading who is registered for what, contact details
+included; treat it like an office login. Rotate it by setting a new
 `MCP_API_TOKEN` on the container (and in `deploy/scaleway.env` so a re-run of
 `provision.sh` keeps it), then updating the connector.
 
@@ -353,6 +366,9 @@ once you have looked them over.
 - "Add an Autumn term from 7 September to 18 December and make it the active one."
 - "Here is AllStars' club list for autumn. Add each class under the AllStars provider, ages and times as listed, capacity 16, as drafts."
 - "Which published classes still have free places, and how many sessions does each have?"
+- "Who is on the register for Chess Club, and who is waiting?"
+- "Which clubs is Lena registered for this term?"
+- "List every child from P3E with a place, and which club it is in."
 - "Move Chess Club to Thursdays at 15:45 and regenerate its sessions."
 
 ### Tools
@@ -362,6 +378,8 @@ once you have looked them over.
 | `get_overview` | School name and settings, school years with holidays, terms, providers, class counts by status. Claude calls this first. |
 | `list_classes(term?, status?)` | Classes with their numeric ids and counts: `registrations_count` and `places_available` (what parents see), `confirmed_count`, `offered_count`, `enrolled_count` (seats held), `waitlist_count`, `requested_count`, `places_free` (seats the office can still fill), `session_count`. |
 | `get_class(class_id)` | One class in full: description, practical details, session dates, skipped holidays. |
+| `list_registrations(class_id?, term?, child?, school_class?, status?, include_cancelled?, include_contacts?, limit?)` | Who is registered for what, one row per child per class: status, when they registered, queue position, offer expiry, whether the family has asked to leave. Live places only unless `include_cancelled`; `include_contacts` adds dates of birth and guardians' names, emails and phones. |
+| `get_class_register(class_id, include_contacts?, include_care_notes?)` | One class's register, grouped and in the right order: enrolled, offered, waitlisted (queue order), requested (oldest first), with the class's seat counts. `include_care_notes` adds whether each child may go home alone and the family's notes. |
 | `upsert_school_year(name, start_date, end_date)` | Create or update by name. |
 | `upsert_holiday(school_year, name, start_date, end_date)` | Inclusive dates; existing calendars are re-reconciled immediately. |
 | `upsert_term(name, start_date, end_date, school_year?, is_active?)` | Create or update; `is_active` left out keeps the current flag. |

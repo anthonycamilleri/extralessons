@@ -4,10 +4,18 @@ Served over stdio by ``manage.py mcp_server`` and consumed by Claude Code or
 Claude Desktop. The functions here are plain, synchronous Python so they can
 be unit-tested directly and reused by any other transport later.
 
-Scope is deliberately narrow: the school calendar and the class catalogue can
-be read and written; enrolment figures are read-only aggregates; families,
-children and individual enrolments are never exposed. Every write goes through
-the same model validation and service functions the Django admin uses.
+Scope: the school calendar and the class catalogue can be read and written,
+and the registrations behind the figures can be read. Nothing about a
+registration can be written from here — places are approved, offered and
+cancelled in the office, not by an assistant — and the family's own login,
+passwords and messages are never exposed. Every write goes through the same
+model validation and service functions the Django admin uses.
+
+The registration tools return children's names, and on request their
+guardians' contact details and the notes the school keeps for providers. That
+is personal data about children: the token that reaches these tools carries
+the trust of a school-office login, and results should go no further than the
+question that was asked.
 
 Conventions for callers: dates are ISO ``YYYY-MM-DD``, times ``HH:MM``, weekdays
 ``0`` (Monday) to ``6`` (Sunday). Related records are addressed by name (school
@@ -20,8 +28,9 @@ from functools import wraps
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, IntegerField, OuterRef, Subquery
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from django.utils.text import slugify
 
 from apps.accounts.models import SiteConfig
@@ -50,7 +59,11 @@ SERVER_INSTRUCTIONS = (
     "dates; use cancel_sessions for individual dates that are off, and "
     "regenerate_sessions only when the whole calendar should follow a new "
     "schedule. Ask the user before cancel_class: it cancels every family's "
-    "place and notifies them."
+    "place and notifies them. Who is registered for what is read-only: "
+    "list_registrations across classes, get_class_register for one class's "
+    "register. Those return children's personal data, so ask for contact "
+    "details or care notes only when the task needs them, and keep the "
+    "results to the question at hand."
 )
 
 
@@ -261,6 +274,77 @@ def _class_dict(cls, counts=True):
     return data
 
 
+def _moment(value):
+    """A timestamp as a local ISO string to the minute, or None."""
+    return timezone.localtime(value).isoformat(timespec="minutes") if value else None
+
+
+def _guardian_dict(user):
+    return {
+        "name": user.get_full_name(),
+        "email": user.email,
+        "phone": user.phone_e164,
+    }
+
+
+def _registration_dict(enrollment, *, contacts=False, care_notes=False, with_class=True, position=None):
+    """One child's place in one class. Personal data: see the tool docstrings.
+
+    Only the timestamps that mean something for the current status are
+    included, so a row stays short enough to read at a glance.
+    """
+    child = enrollment.child
+    data = {
+        "enrollment_id": enrollment.id,
+        "status": enrollment.status,
+        "status_label": enrollment.get_status_display(),
+        "child_id": child.id,
+        "child_name": child.full_name,
+        "school_class": child.school_class,
+        "registered_at": _moment(enrollment.created_at),
+        # The child's age at term start when it sits outside the class's
+        # recommended range (the parent confirmed a warning), else None.
+        "age_outside_range": enrollment.age_outside_range,
+        "cancellation_requested": enrollment.cancellation_requested,
+    }
+    if with_class:
+        cls = enrollment.activity_class
+        data["class"] = {
+            "id": cls.id,
+            "title": cls.title,
+            "status": cls.status,
+            "term": cls.term.name,
+            "school_year": cls.term.school_year.name if cls.term.school_year_id else None,
+            "provider": cls.provider.name,
+            "weekday_name": cls.get_weekday_display(),
+            "start_time": cls.start_time.strftime("%H:%M"),
+            "end_time": cls.end_time.strftime("%H:%M"),
+        }
+    status = enrollment.status
+    if status == Enrollment.Status.ENROLLED:
+        data["enrolled_at"] = _moment(enrollment.enrolled_at)
+        data["from_waiting_list"] = enrollment.promoted_from_waitlist
+    elif status == Enrollment.Status.WAITLISTED:
+        data["waitlisted_at"] = _moment(enrollment.waitlisted_at)
+        data["waitlist_position"] = position
+    elif status == Enrollment.Status.OFFERED:
+        data["offered_at"] = _moment(enrollment.offered_at)
+        data["offer_expires_at"] = _moment(enrollment.offer_expires_at)
+        data["offer_expired"] = bool(
+            enrollment.offer_expires_at and enrollment.offer_expires_at < timezone.now()
+        )
+    elif status == Enrollment.Status.CANCELLED:
+        data["cancelled_at"] = _moment(enrollment.cancelled_at)
+        data["cancel_reason"] = enrollment.get_cancel_reason_display() or None
+    if care_notes:
+        data["may_leave_alone"] = child.may_leave_alone
+        data["care_notes"] = child.notes
+    if contacts:
+        data["date_of_birth"] = child.date_of_birth.isoformat()
+        data["guardians"] = [_guardian_dict(g) for g in child.guardians.all()]
+    return data
+
+
 # --------------------------------------------------------------------------- #
 # Read tools
 # --------------------------------------------------------------------------- #
@@ -338,6 +422,182 @@ def get_class(class_id: int) -> dict:
         ],
     )
     return data
+
+
+# --------------------------------------------------------------------------- #
+# Read tools: registrations (personal data — see the module docstring)
+# --------------------------------------------------------------------------- #
+
+
+def _registrations(contacts=False):
+    """Base queryset for the registration tools, joined for the serialiser."""
+    qs = Enrollment.objects.select_related(
+        "child",
+        "activity_class",
+        "activity_class__term",
+        "activity_class__term__school_year",
+        "activity_class__provider",
+    )
+    if contacts:
+        qs = qs.prefetch_related("child__guardians")
+    return qs
+
+
+def _statuses(status, include_cancelled):
+    """The enrolment statuses a registration query should return."""
+    if status:
+        wanted = status.upper()
+        if wanted == "ACTIVE":
+            return list(Enrollment.ACTIVE_STATUSES)
+        if wanted not in Enrollment.Status.values:
+            known = ", ".join(Enrollment.Status.values)
+            raise ValueError(f"Unknown status {status!r}; use ACTIVE or one of {known}.")
+        return [wanted]
+    statuses = list(Enrollment.ACTIVE_STATUSES)
+    if include_cancelled:
+        statuses.append(Enrollment.Status.CANCELLED)
+    return statuses
+
+
+def _waitlist_positions(class_ids):
+    """enrolment id -> 1-based place in the queue, for whole classes at a time.
+
+    Enrollment.waitlist_position() answers for one row with one query, which a
+    list of a hundred registrations cannot afford; this walks the same FIFO
+    order (waitlisted_at, id) once for every class in the result.
+    """
+    positions = {}
+    counter = {}
+    rows = (
+        Enrollment.objects.filter(activity_class_id__in=list(class_ids))
+        .waitlist_fifo()
+        .values_list("id", "activity_class_id")
+    )
+    for enrollment_id, class_id in rows:
+        counter[class_id] = counter.get(class_id, 0) + 1
+        positions[enrollment_id] = counter[class_id]
+    return positions
+
+
+@tool_errors
+def list_registrations(
+    class_id: int | None = None,
+    term: str | None = None,
+    child: str | None = None,
+    school_class: str | None = None,
+    status: str | None = None,
+    include_cancelled: bool = False,
+    include_contacts: bool = False,
+    limit: int = 200,
+) -> dict:
+    """Who is registered for what: one row per child per class, with the status of their place.
+
+    This returns children's names, so treat the result as school office
+    paperwork: use it to answer the question that was asked and do not copy it
+    anywhere else. Contact details are left out unless include_contacts is
+    true, which adds each child's date of birth and their guardians' names,
+    email addresses and phone numbers.
+
+    Filters combine (all optional): class_id for one class, term by name,
+    school_class for a school class code such as "P3E", child for part of a
+    child's name, status for one of REQUESTED, ENROLLED, WAITLISTED, OFFERED,
+    CANCELLED, or ACTIVE for every live one. Cancelled places are left out by
+    default; pass include_cancelled to see them alongside the live ones.
+
+    Rows carry the queue position for waitlisted children, the expiry for
+    outstanding offers, and cancellation_requested for a family that has asked
+    to give up a confirmed place. Use get_class_register for the register of a
+    single class, grouped and in the right order.
+    """
+    qs = _registrations(include_contacts).filter(status__in=_statuses(status, include_cancelled))
+    if class_id is not None:
+        qs = qs.filter(activity_class=_class(class_id))
+    if term:
+        qs = qs.filter(activity_class__term__name=term)
+    if school_class:
+        qs = qs.filter(child__school_class__iexact=school_class)
+    if child:
+        # Each word has to match a name, so "Lena Parent" finds that child and
+        # a bare "parent" everyone in the family.
+        for word in child.split():
+            qs = qs.filter(
+                Q(child__first_name__icontains=word) | Q(child__last_name__icontains=word)
+            )
+    qs = qs.order_by("activity_class__title", "child__first_name", "child__last_name")
+
+    limit = max(1, min(int(limit), 1000))
+    matched = qs.count()
+    rows = list(qs[:limit])
+    positions = _waitlist_positions({r.activity_class_id for r in rows})
+    result = {
+        "matched": matched,
+        "returned": len(rows),
+        "truncated": matched > len(rows),
+        "registrations": [
+            _registration_dict(r, contacts=include_contacts, position=positions.get(r.id))
+            for r in rows
+        ],
+    }
+    if result["truncated"]:
+        result["note"] = (
+            f"Only the first {len(rows)} of {matched} registrations are shown; narrow the "
+            "filters or raise limit."
+        )
+    return result
+
+
+@tool_errors
+def get_class_register(
+    class_id: int, include_contacts: bool = False, include_care_notes: bool = False
+) -> dict:
+    """The register for one class: who holds a place, who has an offer, who is waiting, who is asking.
+
+    The class with its seat counts, plus four lists of children: enrolled (the
+    register the provider takes), offered (a waiting-list place offered and not
+    yet answered), waitlisted (in queue order) and requested (awaiting the
+    office's review, oldest first). Cancelled places are not listed; ask
+    list_registrations with include_cancelled for those.
+
+    Personal data, as list_registrations. include_contacts adds guardians and
+    dates of birth; include_care_notes adds what the school records for the
+    provider — whether the child may go home unaccompanied, and the family's
+    notes, which routinely mention allergies and medical needs. Leave both off
+    unless the answer needs them.
+    """
+    cls = _class(class_id)
+    rows = list(
+        _registrations(include_contacts).filter(
+            activity_class=cls, status__in=Enrollment.ACTIVE_STATUSES
+        )
+    )
+    positions = _waitlist_positions([cls.id])
+
+    def dicts(status, key):
+        chosen = [r for r in rows if r.status == status]
+        chosen.sort(key=key)
+        return [
+            _registration_dict(
+                r,
+                contacts=include_contacts,
+                care_notes=include_care_notes,
+                with_class=False,
+                position=positions.get(r.id),
+            )
+            for r in chosen
+        ]
+
+    def by_name(enrollment):
+        return (enrollment.child.first_name.lower(), enrollment.child.last_name.lower())
+
+    S = Enrollment.Status
+    return {
+        **_class_dict(cls),
+        "enrolled": dicts(S.ENROLLED, by_name),
+        "offered": dicts(S.OFFERED, lambda e: (e.offer_expires_at is None, e.offer_expires_at)),
+        "waitlisted": dicts(S.WAITLISTED, lambda e: positions.get(e.id, 0)),
+        "requested": dicts(S.REQUESTED, lambda e: e.created_at),
+        "cancellation_requests": sum(1 for r in rows if r.cancellation_requested),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -691,6 +951,8 @@ TOOLS = [
     get_overview,
     list_classes,
     get_class,
+    list_registrations,
+    get_class_register,
     upsert_school_year,
     upsert_holiday,
     upsert_term,
