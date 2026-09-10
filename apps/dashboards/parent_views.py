@@ -1,5 +1,3 @@
-import datetime
-
 from django.contrib import messages
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
@@ -10,7 +8,7 @@ from apps.accounts.forms import ChildForm, GuardianInviteForm, ProfileForm
 from apps.accounts.models import Child, Guardian, SiteConfig
 from apps.accounts.permissions import parent_required
 from apps.accounts.redirects import safe_next
-from apps.catalog.models import ActivityClass, ClassSession
+from apps.catalog.models import ActivityClass
 from apps.enrollments import ages
 from apps.enrollments import services as enrollment_services
 from apps.enrollments.models import Attendance, Enrollment
@@ -20,40 +18,6 @@ from apps.notifications import services as notification_services
 
 def _own_children(user):
     return Child.objects.for_guardian(user).prefetch_related("guardians")
-
-
-WEEK_AHEAD_DAYS = 7
-
-
-def _coming_up(enrolled, today):
-    """The family's lessons over the next week, grouped by day.
-
-    Cancelled lessons are listed too, marked as such: "no Chess Club on
-    Wednesday" is exactly what a parent opens the page to find out. Each entry
-    names the children in that class, so siblings in one club share a line.
-    """
-    by_class = {}
-    for enrollment in enrolled:
-        by_class.setdefault(enrollment.activity_class_id, []).append(enrollment.child)
-    sessions = (
-        ClassSession.objects.filter(
-            activity_class_id__in=by_class,
-            date__gte=today,
-            date__lt=today + datetime.timedelta(days=WEEK_AHEAD_DAYS),
-        )
-        .select_related("activity_class__provider")
-        .order_by("date", "activity_class__start_time", "activity_class__title")
-    )
-    days = []
-    for session in sessions:
-        if not days or days[-1]["date"] != session.date:
-            offset = (session.date - today).days
-            label = {0: "Today", 1: "Tomorrow"}.get(offset)
-            days.append({"date": session.date, "label": label, "lessons": []})
-        days[-1]["lessons"].append(
-            {"session": session, "children": by_class[session.activity_class_id]}
-        )
-    return days
 
 
 @parent_required
@@ -94,16 +58,12 @@ def home(request):
         {"child": child, "enrollments": by_child[child.pk]} for child in children
     ]
     offers = [e for e in enrollments if e.status == Enrollment.Status.OFFERED]
-    enrolled = [e for e in enrollments if e.status == Enrollment.Status.ENROLLED]
     return render(
         request,
         "dashboards/parent/home.html",
         {
             "families": families,
             "offers": offers,
-            "has_enrolled": bool(enrolled),
-            "coming_up": _coming_up(enrolled, timezone.localdate()),
-            "week_ahead_days": WEEK_AHEAD_DAYS,
             "window_days": window_days,
         },
     )

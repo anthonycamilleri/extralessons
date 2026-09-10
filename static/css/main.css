@@ -213,6 +213,8 @@ main { padding: 1.75rem 1rem 4rem; flex: 1 0 auto; }
 }
 .site-footer .footer-inner { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; align-items: center; justify-content: space-between; }
 .site-footer strong { color: var(--ink); font-family: var(--font-display); font-weight: 600; }
+.footer-eu { display: inline-flex; align-items: center; gap: .45rem; }
+.footer-eu img { display: block; border-radius: 2px; }
 .footer-dots { display: inline-flex; gap: .3rem; }
 .footer-dots i { width: .55rem; height: .55rem; border-radius: 50%; display: block; }
 .footer-dots i:nth-child(1) { background: var(--brand-orange); }
@@ -347,16 +349,6 @@ form p:has(> input[type=checkbox]) { flex-wrap: wrap; }
 .panel-title { display: flex; justify-content: space-between; align-items: center; gap: .75rem 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .panel-title h1, .panel-title h2 { margin: 0; }
 .plain { list-style: none; padding: 0; margin: 0 0 .6rem; }
-
-/* --- Family page: the week ahead ---------------------------------------- */
-.week-day + .week-day { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-.week-date { margin: 0 0 .4rem; font-size: 1rem; color: var(--muted); font-weight: 600; }
-.week-today .week-date { color: var(--accent-dark); }
-.week-lessons { margin: 0; }
-.week-lesson { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem 1rem; padding: .35rem 0; }
-.week-time { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 7.5rem; }
-.week-what { display: flex; flex-direction: column; flex: 1 1 12rem; }
-.week-cancelled .week-time, .week-cancelled .week-what a { text-decoration: line-through; color: var(--muted); }
 .help-panel summary { cursor: pointer; }
 .help-panel[open] summary { margin-bottom: .75rem; }
 .help-panel ul { margin: 0; padding-left: 1.2rem; }

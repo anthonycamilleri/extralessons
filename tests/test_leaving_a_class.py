@@ -244,39 +244,6 @@ class TestFamilyPage:
         assert "Next class" in content
         assert content.count("No dates yet") == 0
 
-    def test_coming_up_lists_this_weeks_lessons_including_cancelled_ones(self, client):
-        parent = UserFactory()
-        child = ChildFactory(parent=parent, first_name="Ann")
-        today = timezone.localdate()
-        tomorrow = today + datetime.timedelta(days=1)
-        admin = SuperAdminFactory()
-        chess = ActivityClassFactory(title="Chess Club", weekday=today.weekday(), location="Gym")
-        judo = ActivityClassFactory(title="Judo", weekday=tomorrow.weekday())
-        for cls in (chess, judo):
-            generate_sessions(cls)
-            services.approve_request(services.register(child, cls), admin)
-        off = judo.sessions.get(date=tomorrow)
-        off.cancelled, off.notes = True, "Coach away"
-        off.save()
-        client.force_login(parent)
-
-        content = client.get(reverse("parent_home")).content.decode()
-
-        assert "Coming up" in content
-        assert "Today · " in content and "Tomorrow · " in content
-        assert "Ann" in content and "Gym" in content
-        assert "No class — Coach away" in content
-        assert "week-today" in content
-        # A week from today is the next Chess Club: outside the window.
-        assert (today + datetime.timedelta(days=7)).strftime("%A %-d %B") not in content
-
-    def test_coming_up_only_appears_once_something_is_confirmed(self, client):
-        parent = UserFactory()
-        services.register(ChildFactory(parent=parent), ActivityClassFactory())
-        client.force_login(parent)
-        content = client.get(reverse("parent_home")).content.decode()
-        assert "Coming up" not in content
-
     def test_withdraw_button_inside_the_window(self, client):
         parent = UserFactory()
         e = enrolled(parent, registered_days_ago=2)

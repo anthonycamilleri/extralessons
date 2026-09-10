@@ -76,6 +76,11 @@
         · <a href="{% url 'terms' %}">Terms &amp; conditions</a>
       {% endif %}
     </div>
+    {# The flag is a local SVG, like every other asset: no third-party requests. #}
+    <span class="footer-eu">
+      <img src="{% static 'img/eu-flag.svg' %}" width="27" height="18" alt="">
+      Made &amp; Hosted in Europe
+    </span>
     <span class="footer-dots" aria-hidden="true"><i></i><i></i><i></i></span>
   </div>
 </footer>

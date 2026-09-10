@@ -30,40 +30,6 @@
 </div>
 {% endif %}
 
-{% if has_enrolled %}
-<div class="panel week-panel">
-  <div class="panel-title">
-    <h2>📅 Coming up</h2>
-    <span class="muted small">The next {{ week_ahead_days }} days</span>
-  </div>
-  {% for day in coming_up %}
-    <div class="week-day{% if day.label == "Today" %} week-today{% endif %}">
-      <h3 class="week-date">{% if day.label %}{{ day.label }} · {% endif %}{{ day.date|date:"l j F" }}</h3>
-      <ul class="plain week-lessons">
-        {% for lesson in day.lessons %}
-          <li class="week-lesson{% if lesson.session.cancelled %} week-cancelled{% endif %}">
-            <span class="week-time">{{ lesson.session.activity_class.start_time|time:"H:i" }}–{{ lesson.session.activity_class.end_time|time:"H:i" }}</span>
-            <span class="week-what">
-              <a href="{{ lesson.session.activity_class.get_absolute_url }}">{{ lesson.session.activity_class.title }}</a>
-              <span class="muted small">
-                {% for child in lesson.children %}{{ child.first_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if lesson.session.activity_class.location %} · {{ lesson.session.activity_class.location }}{% endif %}
-              </span>
-            </span>
-            {% if lesson.session.cancelled %}
-              <span class="badge badge-bad">No class{% if lesson.session.notes %} — {{ lesson.session.notes }}{% endif %}</span>
-            {% elif lesson.session.notes %}
-              <span class="badge badge-info">{{ lesson.session.notes }}</span>
-            {% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    </div>
-  {% empty %}
-    <p class="muted">No lessons in the next {{ week_ahead_days }} days — school holidays, or the term hasn't started yet. The next date for each class is listed below.</p>
-  {% endfor %}
-</div>
-{% endif %}
-
 {% if not families %}
   <div class="panel">
     <p>Add your children to your family to start enrolling them in activities.</p>

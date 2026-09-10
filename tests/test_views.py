@@ -522,3 +522,11 @@ class TestAdminTools:
         assert waitlisted.status == Enrollment.Status.OFFERED
         assert b"1 seat over capacity" in response.content
         assert b"over its capacity of 1" in response.content
+
+
+class TestSiteFooter:
+    def test_footer_carries_the_made_in_europe_badge(self, client):
+        content = client.get(reverse("catalogue")).content.decode()
+        assert "Made &amp; Hosted in Europe" in content
+        # The flag is one of our own static files, not a third-party request.
+        assert "img/eu-flag.svg" in content
