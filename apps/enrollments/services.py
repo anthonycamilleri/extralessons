@@ -13,10 +13,11 @@ they commit together with the state change and are delivered by the
 run_notifier worker afterwards.
 """
 import datetime
+from typing import NamedTuple
 
 from django.db import transaction
 from django.db.models import Q
-from django.utils import timezone
+from django.utils import formats, timezone
 
 from apps.accounts.models import SiteConfig
 from apps.catalog.models import ActivityClass
@@ -391,6 +392,78 @@ def capacity_increased(activity_class):
             notifications.queue_admin_event(
                 Event.ADMIN_SEAT_FREED, first, waitlist_count=waitlisted.count()
             )
+
+
+class LessonNotice(NamedTuple):
+    """What one batch of cancelled dates announced, for admin feedback.
+
+    `dates` counts the dates actually announced, which is not always the
+    number the office ticked: dates already past are left out.
+    """
+
+    children: int
+    dates: int
+
+
+def _lesson_date(date):
+    """A lesson date as the parent-facing pages write it: "Monday 5 October"."""
+    return formats.date_format(date, "l j F")
+
+
+def notify_lessons_cancelled(activity_class, sessions):
+    """Tell the families in a class that specific lessons are off.
+
+    `sessions` are the dates that have just been marked cancelled. Dates
+    already past are dropped: an office ticking last month's rows is tidying
+    the calendar, not announcing anything. One email covers the whole batch,
+    so calling off a run of dates costs a child one message rather than one
+    per date — and the note against the date travels as the reason. Siblings
+    get one each, naming them, as every other event here does.
+
+    Returns a LessonNotice counting what went out.
+    """
+    today = timezone.localdate()
+    by_date = {}
+    for session in sessions:
+        if session.date >= today:
+            by_date.setdefault(session.date, session)
+    upcoming = [by_date[date] for date in sorted(by_date)]
+    if not upcoming:
+        return LessonNotice(0, 0)
+    notes = {session.notes.strip() for session in upcoming}
+    # One note for the whole batch reads as a single reason; differing notes
+    # belong against their own dates instead.
+    shared = notes.pop() if len(notes) == 1 else ""
+    if shared:
+        lines = [_lesson_date(session.date) for session in upcoming]
+    else:
+        lines = [
+            _lesson_date(session.date)
+            + (f" — {session.notes.strip()}" if session.notes.strip() else "")
+            for session in upcoming
+        ]
+    if len(upcoming) == 1:
+        dates, summary = lines[0], _lesson_date(upcoming[0].date)
+    else:
+        others = len(upcoming) - 1
+        dates = "\n".join(f"· {line}" for line in lines)
+        summary = (
+            f"{_lesson_date(upcoming[0].date)} and {others} more "
+            f"date{'s' if others > 1 else ''}"
+        )
+    context = {
+        "dates": dates,
+        "dates_summary": summary,
+        "date_count": len(upcoming),
+        "reason": shared,
+    }
+    notified = 0
+    for enrollment in activity_class.enrollments.filter(
+        status=Enrollment.Status.ENROLLED
+    ).select_related("child"):
+        notifications.queue_event(Event.LESSON_CANCELLED, enrollment, **context)
+        notified += 1
+    return LessonNotice(notified, len(upcoming))
 
 
 def cancel_class(activity_class):

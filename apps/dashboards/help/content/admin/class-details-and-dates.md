@@ -79,8 +79,20 @@ disappear.
 ## Cancelling one lesson {#cancel-one}
 
 Do not delete the row: regenerating puts it back. Instead, open the class,
-find the date in **Class sessions**, and tick **cancelled**. Add a note if it
-helps. Parents see the lesson marked as cancelled on their family page.
+find the date in **Class sessions**, and tick **cancelled**.
+
+**Whatever you write in the note is emailed to the families**, as the reason
+the lesson is off — so write it for them ("Coach away", not "ask Tina"). Only
+children with a confirmed place are told, and only about dates still to come:
+ticking a date that has already passed emails nobody, so tidying up old rows
+is safe.
+
+Everything you tick in one save goes out as **one email per child** listing
+all of it, so calling off a run of dates does not mean a run of emails (a
+family with two children in the class gets one email for each, naming them). Save
+the page and the green message tells you how many children's families were
+written to, and how many dates they were told about. A date that was already
+cancelled is not announced twice.
 
 ## A lesson during a holiday {#holidays}
 

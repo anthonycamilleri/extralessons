@@ -18,6 +18,7 @@ class Event(models.TextChoices):
     CANCELLATION_CONFIRMED = "CANCELLATION_CONFIRMED", "Cancellation confirmed"
     CANCELLATION_DECLINED = "CANCELLATION_DECLINED", "Cancellation not accepted, place kept"
     CLASS_CANCELLED = "CLASS_CANCELLED", "Class cancelled"
+    LESSON_CANCELLED = "LESSON_CANCELLED", "Lesson cancelled (one or more dates off)"
     GUARDIAN_INVITE = "GUARDIAN_INVITE", "Co-parent invitation"
     BROADCAST = "BROADCAST", "Announcement"
     # Admin-facing (email only)
@@ -38,7 +39,9 @@ class NotificationTemplate(models.Model):
     that includes: school_name, sender_name, contact_email, site_url,
     parent_name, parent_first_name, child_name, child_first_name, class_title,
     provider_name, schedule, term_name, location, subject, body, action_url,
-    offer_expires_at, withdrawal_deadline, cancel_requested_at (where applicable).
+    offer_expires_at, withdrawal_deadline, cancel_requested_at, and — for
+    LESSON_CANCELLED — dates, dates_summary, date_count, reason (where
+    applicable).
 
     WhatsApp business-initiated messages must use templates pre-approved in
     Meta Business Manager: `wa_template_name` names the approved template and

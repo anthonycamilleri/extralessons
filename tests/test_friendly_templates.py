@@ -18,11 +18,13 @@ NEW = importlib.import_module("apps.notifications.migrations.0005_friendly_templ
 # Events introduced after the rewording seed their own default, in the
 # migration that added them.
 LEAVING = importlib.import_module("apps.notifications.migrations.0008_cancellation_events")
+LESSON = importlib.import_module("apps.notifications.migrations.0011_lesson_cancelled_event")
 LATER = {
     importlib.import_module(
         "apps.notifications.migrations.0006_contact_form_messages"
     ).EVENT,
     *LEAVING.TEMPLATES,
+    LESSON.EVENT,
 }
 
 
@@ -48,6 +50,16 @@ def test_leaving_templates_speak_like_the_others():
         if not event.startswith("ADMIN_"):
             assert "{{ sender_name }}" in body, event
             assert "Hi {{ parent_first_name }}" in body, event
+
+
+def test_lesson_cancelled_speaks_like_the_others():
+    assert "Dear " not in LESSON.BODY
+    assert "Hi {{ parent_first_name }}" in LESSON.BODY
+    assert "{{ sender_name }}" in LESSON.BODY
+    # The note the office typed against the date is what makes this email worth
+    # sending, so both halves must carry the payload.
+    assert "{{ reason }}" in LESSON.BODY and "{{ dates }}" in LESSON.BODY
+    assert "{{ dates_summary }}" in LESSON.SUBJECT
 
 
 def test_school_cancellation_wording_is_narrowed_only_if_untouched():

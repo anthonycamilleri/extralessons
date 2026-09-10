@@ -312,6 +312,36 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             readonly.append("administrators")
         return readonly
 
+    def save_formset(self, request, form, formset, change):
+        """Email the families about dates that this save turned off.
+
+        The whole formset is one announcement: ticking three dates sends each
+        family one email listing all three, with the note as the reason. The
+        before/after comparison is done against the database rather than the
+        forms, so a date arriving already cancelled — a new row, an import —
+        counts the same as one ticked here, and a date that was already off
+        stays quiet.
+        """
+        from apps.enrollments.services import notify_lessons_cancelled
+
+        if formset.model is not ClassSession:
+            super().save_formset(request, form, formset, change)
+            return
+        cancelled = ClassSession.objects.filter(
+            activity_class=form.instance, cancelled=True
+        )
+        before = set(cancelled.values_list("pk", flat=True))
+        super().save_formset(request, form, formset, change)
+        notice = notify_lessons_cancelled(
+            form.instance, list(cancelled.exclude(pk__in=before))
+        )
+        if notice.children:
+            self.message_user(
+                request,
+                f"Emailed the families of {notice.children} child(ren) about "
+                f"{notice.dates} cancelled date(s).",
+            )
+
     # -- Dashboard columns (annotations from with_counts) ---------------------
 
     @admin.display(description="registrations", ordering="registrations_count")
@@ -579,3 +609,24 @@ class ClassSessionAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mo
     list_display = ["activity_class", "date", "cancelled", "holiday_override"]
     list_filter = ["activity_class__term", "cancelled", "holiday_override"]
     date_hierarchy = "date"
+
+    def save_model(self, request, obj, form, change):
+        """The one-row screen announces a date the same way the inline does."""
+        from apps.enrollments.services import notify_lessons_cancelled
+
+        was_off = (
+            ClassSession.objects.filter(pk=obj.pk)
+            .values_list("cancelled", flat=True)
+            .first()
+            if change
+            else False
+        )
+        super().save_model(request, obj, form, change)
+        if obj.cancelled and not was_off:
+            notice = notify_lessons_cancelled(obj.activity_class, [obj])
+            if notice.children:
+                self.message_user(
+                    request,
+                    f"Emailed the families of {notice.children} child(ren) about "
+                    "this cancelled date.",
+                )

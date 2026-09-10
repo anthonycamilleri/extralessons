@@ -37,6 +37,7 @@ from apps.catalog.models import (
 from apps.enrollments.models import Enrollment
 from apps.enrollments.services import EnrollmentError
 from apps.enrollments.services import cancel_class as _cancel_class_service
+from apps.enrollments.services import notify_lessons_cancelled
 
 SERVER_NAME = "extralessons"
 SERVER_INSTRUCTIONS = (
@@ -587,8 +588,11 @@ def cancel_sessions(class_id: int, dates: list[str], notes: str = "") -> dict:
 
     The dates stay in the calendar marked as cancelled, so providers and
     parents see that the lesson is off and regenerate_sessions will not bring
-    them back. Optional notes are shown against each cancelled date. Lessons
-    whose attendance has already been recorded cannot be cancelled. Use
+    them back. Optional notes are shown against each cancelled date and are
+    emailed to the enrolled families as the reason, in one message per child
+    covering every date in the call. Dates already past are not announced, so
+    `dates_announced` can be lower than the number cancelled. Lessons whose
+    attendance has already been recorded cannot be cancelled. Use
     restore_sessions to undo.
     """
     cls = _class(class_id)
@@ -599,15 +603,21 @@ def cancel_sessions(class_id: int, dates: list[str], notes: str = "") -> dict:
             f"Attendance has already been recorded for {', '.join(taken)}; those lessons "
             "happened and cannot be cancelled."
         )
+    # Only the dates that were actually on are announced: re-cancelling a date
+    # that is already off must not email anybody a second time.
+    freshly_off = [s for s in sessions if not s.cancelled]
     with transaction.atomic():
         for session in sessions:
             session.cancelled = True
             if notes:
                 session.notes = notes[:200]
             session.save(update_fields=["cancelled", "notes"])
+        notice = notify_lessons_cancelled(cls, freshly_off)
     return {
         "cancelled": [s.date.isoformat() for s in sessions],
         "cancelled_total": cls.sessions.filter(cancelled=True).count(),
+        "children_notified": notice.children,
+        "dates_announced": notice.dates,
         **_class_dict(_class(cls.id)),
     }
 
