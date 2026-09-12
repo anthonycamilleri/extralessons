@@ -177,3 +177,99 @@ Before starting, worth confirming the cheaper option is genuinely unacceptable:
 using a hosted instance with no SSO at all, and giving the office accounts
 there. The entire cost and maintenance argument above buys exactly one thing —
 that people sign in with the password they already have.
+
+---
+
+# If what you want is a wiki
+
+Docs is a *collaborative editor* — two people typing in the same paragraph.
+Most of what made it expensive above comes from that one feature: the Yjs
+WebSocket server that pins the container to a single instance, the Redis it
+needs for sessions and its broker, and a permission model built around
+per-document sharing rather than around who someone is.
+
+A wiki — a handbook, the policies, the how-to pages providers keep asking
+about — needs none of that. The options split cleanly in two.
+
+## The split that matters
+
+Everything that is a separate product costs the same three things, whichever
+one you pick: the OpenID Provider work in this app, a second container to run
+and deploy, and a second permission model to keep in step with ours by hand.
+
+Exactly one class of option avoids all three: a wiki that runs **inside this
+Django app**, where `request.user` is already a parent, provider or school
+admin, and `ActivityClass.objects.managed_by()` already answers who looks after
+what.
+
+## In-process — genuinely "another module"
+
+**django-wiki** (PyPI package `wiki`, 0.13.0, July 2026) is a Django app, not a
+service. Same container, same Serverless SQL database, same deploy. Its
+dependencies are all pure Python — bleach, django-mptt, django-nyt,
+django-sekizai, sorl-thumbnail, markdown, Pillow — so nothing new gets
+provisioned and the idle bill does not move.
+
+Its permission model is the reason to look at it. Each article carries an owner
+(our `User`), a Django group, and unix-style `group_read`/`group_write`/
+`other_read`/`other_write` flags that can be pushed down the page tree
+(`src/wiki/models/article.py`). On top of that, `WIKI_CAN_READ`,
+`WIKI_CAN_WRITE`, `WIKI_CAN_DELETE`, `WIKI_CAN_MODERATE` and `WIKI_CAN_ADMIN`
+are **callables we supply** (`src/wiki/conf/settings.py`). So "providers may
+read, admins may write, super admins may moderate" is a few lines against
+`User.Role` — no claims, no sync, no fork. Attachments go through Django's
+storage API, which means our `DatabaseStorage`/S3 switch already covers them.
+
+Worth checking before committing: their support table lists Django 4.2, 5.0,
+5.1 and 6.0 for 0.13.x and up to 5.2 for 0.12.x, and we are on 5.2 — an odd gap
+that is probably a documentation omission, but confirm it. It also arrives with
+Bootstrap templates that will not look like this site until they are overridden,
+and with django-nyt, its own notification app, which sits awkwardly beside our
+notification outbox and is best left switched off.
+
+**Or write it.** We already have `markdown` and `nh3`, a rich-text editor with
+image upload (`apps/notifications/richtext.py`), Markdown pages rendered from
+the admin (`SiteConfig.terms_html`), and an admin the office already knows. A
+`Page` model with a slug, a body and a visibility choice is a few hundred lines
+in the house style, with no upstream to track and nothing to override. If the
+ask is "somewhere to put the handbook and the policies", this is very likely the
+right answer.
+
+Either way the subdomain still works: attach a second custom domain to the same
+container and switch `request.urlconf` on the Host header — the same shape as
+`config/canonical.py`, a few lines.
+
+## Separate products, lightest first
+
+| | Runtime | Needs | Auth | Verdict |
+|---|---|---|---|---|
+| **Wiki.js** | one Node container | Postgres only — **no Redis**, no S3 (content lives in the database) | Generic OIDC with group mapping | Best standalone fit for this estate |
+| **BookStack** | PHP 8.2 / Laravel 12 | **MySQL or MariaDB**, S3 optional | OIDC, SAML, LDAP | Excellent product, wrong database |
+| **HedgeDoc** | one Node container | Postgres, uploads on local disk | OAuth2/OIDC, can gate on a roles claim | A collaborative pad, not a wiki |
+| **Outline** | Node | Postgres **+ Redis** + S3 | OIDC | Same bill as Docs; BSL licence |
+| **Docmost** | Node | Postgres **+ Redis** | OIDC | Same bill as Docs |
+
+**Wiki.js** is the one to look at if the office wants a real wiki product with
+its own editor and page tree: a single container beside ours, one more database,
+no always-on Redis, and OIDC group mapping so the provider work we would have
+done for Docs is not wasted. Its health is the caveat — 2.5.x is the stable line
+(v2.5.310 is tagged), while the 3.0 rewrite on `main` has no release tag at all
+after years in beta.
+
+**BookStack** is arguably the nicest of these to actually use, MIT licensed,
+with OIDC and SAML built in — but it is MySQL-only, so it means a managed MySQL
+instance next to our PostgreSQL for one application.
+
+**Outline** and **Docmost** reproduce the Docs bill — Postgres, always-on Redis,
+websocket collaboration — without the argument that it is the French
+government's and will be maintained for a decade.
+
+## Recommendation
+
+If this is a wiki: keep it in-process. django-wiki if a page tree, history and
+per-article permissions are wanted; a small handbook app if it is really just
+pages. Neither needs the OpenID Provider, neither adds a container, neither
+moves the monthly bill, and both understand our roles natively.
+
+Reach outside the app only if the office specifically wants a wiki *product* —
+and then Wiki.js, accepting the provider work and one more container.
