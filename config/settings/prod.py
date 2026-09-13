@@ -87,6 +87,10 @@ if is_postgres():
 # S3-compatible bucket instead (S3_ENDPOINT_URL and S3_REGION for your provider;
 # the defaults are Scaleway's).
 S3_BUCKET = env("S3_BUCKET", default="")
+# Private uploads (police conduct certificates) always live in the database,
+# bucket or no bucket: the bucket is configured public-read for class images,
+# and a certificate must only ever leave through the permission-checked view.
+STORAGES["private"] = {"BACKEND": "apps.media.storage.DatabaseStorage"}
 if not S3_BUCKET:
     STORAGES["default"] = {"BACKEND": "apps.media.storage.DatabaseStorage"}
 else:

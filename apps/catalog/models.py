@@ -11,8 +11,29 @@ from django.dispatch import receiver
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.media.storage import private_storage as _private_storage
+
+
+class ProviderQuerySet(models.QuerySet):
+    def managed_by(self, user):
+        """The providers this account runs: the counterpart of
+        ActivityClass.objects.run_by() for the organisation itself. A manager
+        sees every class of the provider and looks after its instructors."""
+        return self.filter(members=user)
+
 
 class Provider(models.Model):
+    """An organisation that runs classes: a sports academy, a tutoring company,
+    a single coach.
+
+    Two kinds of account work under a provider. Its **members** are the
+    provider accounts proper: they see every class, message every family and
+    manage the instructors. Its **instructors** (the Instructor rows) are the
+    people in the room: each sees only the classes assigned to them. One person
+    can be both — a coach who runs the academy and teaches on Tuesdays has a
+    membership and an instructor profile on the same account.
+    """
+
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     contact_email = models.EmailField(blank=True)
@@ -21,14 +42,175 @@ class Provider(models.Model):
         settings.AUTH_USER_MODEL,
         blank=True,
         related_name="provider_orgs",
-        help_text="Provider-role accounts that can manage this provider's classes.",
+        help_text="The provider's own accounts (provider role): they see every class "
+        "of this provider, message its families, and manage its instructors and "
+        "their accounts from the provider dashboard.",
     )
+
+    objects = ProviderQuerySet.as_manager()
 
     class Meta:
         ordering = ["name"]
 
     def __str__(self):
         return self.name
+
+    def is_managed_by(self, user):
+        return self.members.filter(pk=user.pk).exists()
+
+
+class InstructorQuerySet(models.QuerySet):
+    def for_user(self, user):
+        return self.filter(user=user)
+
+    def managed_by(self, user):
+        """Instructors of the providers this account runs."""
+        return self.filter(provider__members=user)
+
+    def visible_to(self, user):
+        """Instructor rows a provider-side account may open: their own, and
+        those of the providers they manage."""
+        return self.filter(Q(user=user) | Q(provider__members=user)).distinct()
+
+
+class Instructor(models.Model):
+    """A person who teaches for a provider: the profile parents see on the
+    class page, the certificate the school checks, and the classes they take.
+
+    The row is the instructor-ness of an account. Without one, a provider
+    member is an organiser who sees everything; with one, an account is put
+    in front of children and gets a profile, a certificate of police conduct
+    to upload, and the classes assigned to them. Deleting the row takes the
+    profile and the certificate with it.
+    """
+
+    provider = models.ForeignKey(Provider, on_delete=models.CASCADE, related_name="instructors")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="instructor_profiles"
+    )
+    bio = models.TextField(
+        "about you",
+        blank=True,
+        max_length=1500,
+        help_text="A few lines parents will read on the class page: what you teach, "
+        "your background, what a session with you is like.",
+    )
+    photo = models.ImageField(
+        upload_to="instructors/",
+        blank=True,
+        help_text="Optional. Shown next to your name on the class page.",
+    )
+    # The certificate is a private document: saved in the private storage,
+    # served only by a view that checks who is asking (never at MEDIA_URL),
+    # and shown to parents only as the fact that the school has checked it.
+    conduct_certificate = models.FileField(
+        "certificate of police conduct",
+        upload_to="private/conduct-certificates/",
+        storage=_private_storage,
+        blank=True,
+        help_text="PDF or a photo of the certificate. Only you, your provider and "
+        "the school office can open it.",
+    )
+    conduct_certificate_issued_on = models.DateField(
+        "certificate issued on", null=True, blank=True
+    )
+    conduct_certificate_uploaded_at = models.DateTimeField(null=True, blank=True, editable=False)
+    conduct_certificate_checked_at = models.DateTimeField(
+        "certificate checked on",
+        null=True,
+        blank=True,
+        help_text="Set by the school office once it has looked at the certificate. "
+        "Parents then see that it has been checked. Cleared automatically when a "
+        "new file is uploaded.",
+    )
+    conduct_certificate_checked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = InstructorQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["user__first_name", "user__last_name", "user__email"]
+        constraints = [
+            models.UniqueConstraint(fields=["provider", "user"], name="uniq_instructor_per_provider"),
+        ]
+
+    def __str__(self):
+        return f"{self.display_name} ({self.provider.name})"
+
+    def save(self, *args, **kwargs):
+        # Same treatment as a class cover image: a fresh upload is shrunk and
+        # re-encoded before it is stored; existing files are left alone.
+        if self.photo and not self.photo._committed:
+            from .images import optimize_image
+
+            self.photo = optimize_image(self.photo, max_dimension=800)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"photo"}
+        super().save(*args, **kwargs)
+
+    @property
+    def display_name(self):
+        return self.user.get_full_name() or self.user.email
+
+    @property
+    def has_certificate(self):
+        return bool(self.conduct_certificate)
+
+    @property
+    def certificate_checked(self):
+        """True once the office has looked at the current file: the one fact
+        about the certificate that parents are shown."""
+        return self.has_certificate and self.conduct_certificate_checked_at is not None
+
+    @property
+    def certificate_status(self):
+        if not self.has_certificate:
+            return "missing"
+        return "checked" if self.certificate_checked else "uploaded"
+
+    def replace_certificate(self, uploaded_file, issued_on=None):
+        """Store a new certificate and forget the old one, check included.
+
+        A new document is a new thing for the office to look at, so the
+        checked stamp does not carry over. The previous file is deleted from
+        the storage: unlike a class picture, nothing links to it.
+        """
+        old_name = self.conduct_certificate.name if self.conduct_certificate else ""
+        self.conduct_certificate = uploaded_file
+        self.conduct_certificate_issued_on = issued_on
+        self.conduct_certificate_uploaded_at = timezone.now()
+        self.conduct_certificate_checked_at = None
+        self.conduct_certificate_checked_by = None
+        self.save()
+        if old_name and old_name != self.conduct_certificate.name:
+            self.conduct_certificate.storage.delete(old_name)
+
+    def mark_certificate_checked(self, by):
+        if not self.has_certificate:
+            return False
+        self.conduct_certificate_checked_at = timezone.now()
+        self.conduct_certificate_checked_by = by
+        self.save(update_fields=["conduct_certificate_checked_at", "conduct_certificate_checked_by"])
+        return True
+
+    def may_be_opened_by(self, user):
+        """Who may read the profile in full, certificate included: the person,
+        a manager of their provider, and the school office."""
+        if not user.is_authenticated:
+            return False
+        if user.pk == self.user_id:
+            return True
+        from apps.accounts.models import User
+
+        if user.role == User.Role.ADMIN and user.is_staff:
+            return True
+        return self.provider.is_managed_by(user)
 
 
 class SchoolYear(models.Model):
@@ -222,6 +404,18 @@ class ActivityClassQuerySet(models.QuerySet):
             return self
         return self.filter(administrators=user)
 
+    def run_by(self, user):
+        """The classes a provider-side account works with.
+
+        Single source of provider scoping, the counterpart of managed_by()
+        for the other side of the desk: the provider dashboard, the attendance
+        pages and the announcement composer all ask this one question. A
+        provider's own accounts (Provider.members) get every class of the
+        provider; an instructor gets the classes assigned to them; someone who
+        is both gets the union.
+        """
+        return self.filter(Q(provider__members=user) | Q(instructors__user=user)).distinct()
+
     def published(self):
         return self.filter(status=ActivityClass.Status.PUBLISHED, term__is_active=True)
 
@@ -267,6 +461,14 @@ class ActivityClass(models.Model):
         help_text="Admins responsible for this class: they see and act on its "
         "requests and receive its alerts. Super admins (superusers) always see "
         "every class; a class with nobody assigned alerts them.",
+    )
+    instructors = models.ManyToManyField(
+        Instructor,
+        blank=True,
+        related_name="classes",
+        help_text="Who teaches this class. Only the provider's own instructors can "
+        "be chosen; they see the class, its register and its attendance on their "
+        "dashboard, and their profiles appear on the class page.",
     )
     title = models.CharField(max_length=200)
     slug = models.SlugField(max_length=220)

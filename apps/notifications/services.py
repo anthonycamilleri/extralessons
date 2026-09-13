@@ -305,6 +305,49 @@ def queue_guardian_invite(invite):
     schedule_delivery()
 
 
+def queue_instructor_invite(instructor, invited_by):
+    """Tell a new instructor their account exists, with a link to set a password.
+
+    The link is Django's own password-reset link, so it lands on the page the
+    "forgotten password" flow already uses, and it stops working once the
+    password has been set (the token is bound to the password hash). It is
+    also how a provider re-sends the invitation to someone who let it lapse.
+    """
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.encoding import force_bytes
+    from django.utils.http import urlsafe_base64_encode
+
+    template = _get_template(Event.INSTRUCTOR_INVITE)
+    if template is None:
+        return
+    user = instructor.user
+    path = reverse(
+        "password_reset_confirm",
+        kwargs={
+            "uidb64": urlsafe_base64_encode(force_bytes(user.pk)),
+            "token": default_token_generator.make_token(user),
+        },
+    )
+    context = base_context(
+        instructor_first_name=user.first_name or user.email,
+        instructor_name=user.get_full_name() or user.email,
+        login_email=user.email,
+        provider_name=instructor.provider.name,
+        inviter_name=invited_by.get_full_name() or invited_by.email,
+        action_url=_absolute(path),
+        login_url=_absolute(reverse("login")),
+    )
+    row = _email_row(template, context, recipient=user, event=Event.INSTRUCTOR_INVITE)
+    # An invitation is the one email a new account must get, whatever its
+    # notification preferences (which nobody has had a chance to set yet).
+    row.status = Notification.Status.PENDING
+    row.skip_reason = ""
+    row.next_attempt_at = timezone.now()
+    row.save()
+    schedule_delivery()
+    return row
+
+
 def create_broadcast(sender, scope, subject, body="", classes=None, *, body_html=""):
     """Create a Broadcast and queue it, atomically with its outbox rows.
 

@@ -1,0 +1,16 @@
+{# One instructor as parents see them. `show_private` adds nothing secret: the certificate itself is never linked here. #}
+<div class="instructor-card">
+  {% if instructor.photo %}
+    <img class="instructor-photo" src="{{ instructor.photo.url }}" alt="" width="96" height="96">
+  {% else %}
+    <div class="instructor-photo placeholder" aria-hidden="true">{{ instructor.display_name|first|upper }}</div>
+  {% endif %}
+  <div>
+    <h3 class="instructor-name">{{ instructor.display_name }}</h3>
+    {% if instructor.certificate_checked %}
+      <span class="badge badge-ok" title="The school office has seen this instructor's certificate of police conduct">✓ Police conduct certificate checked by the school</span>
+    {% endif %}
+    {% if instructor.bio %}<div class="prose small">{{ instructor.bio|linebreaks }}</div>
+    {% elif show_private %}<p class="muted small">No profile text yet.</p>{% endif %}
+  </div>
+</div>

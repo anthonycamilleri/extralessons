@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ instructor.display_name }}{% endblock %}
+{% block content %}
+<div class="panel-title">
+  <h1>{{ instructor.display_name }} <span class="muted">— {{ instructor.provider.name }}</span></h1>
+  <a class="btn btn-secondary btn-small" href="{% url 'provider_instructors' %}">← Instructors</a>
+</div>
+
+<div class="panel">
+  <div class="panel-title">
+    <h2>Profile</h2>
+    <a class="btn btn-small" href="{% url 'provider_instructor_profile' instructor.pk %}">{% if is_self %}Edit my profile{% else %}Edit profile{% endif %}</a>
+  </div>
+  {% include "dashboards/provider/_instructor_card.html" with instructor=instructor show_private=True %}
+  <dl class="kv">
+    <dt>Login</dt>
+    <dd>{{ instructor.user.email }}
+      {% if not instructor.user.is_active %}· <span class="badge badge-bad">Disabled</span>
+      {% elif never_logged_in %}· <span class="badge badge-warn">Has not logged in yet</span>
+      {% else %}· last login {{ instructor.user.last_login|date:"j M Y" }}{% endif %}</dd>
+    <dt>Certificate of police conduct</dt>
+    <dd>{% include "dashboards/provider/_certificate_badge.html" with instructor=instructor %}
+      {% if instructor.has_certificate %}
+        · <a href="{% url 'provider_instructor_certificate' instructor.pk %}">Download</a>
+        {% if instructor.conduct_certificate_issued_on %}· issued {{ instructor.conduct_certificate_issued_on|date:"j M Y" }}{% endif %}
+        {% if instructor.conduct_certificate_uploaded_at %}· uploaded {{ instructor.conduct_certificate_uploaded_at|date:"j M Y" }}{% endif %}
+      {% endif %}</dd>
+  </dl>
+  {% if never_logged_in and instructor.user.is_active and not is_self %}
+  <form method="post" action="{% url 'provider_instructor_resend' instructor.pk %}" class="inline-form">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-secondary btn-small">Send the invitation again</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Classes</h2>
+  <p class="muted small">{{ instructor.display_name }} sees the register and takes attendance for the classes
+     ticked here, and can message their families. Classes from past terms that have been archived stay on record.</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Save classes</button>
+  </form>
+</div>
+
+{% if not is_self %}
+<div class="panel">
+  <h2>Remove</h2>
+  <p class="muted small">Removes {{ instructor.display_name }} from {{ instructor.provider.name }}: their profile,
+     certificate and class assignments are deleted. Their account is switched off unless it is still used
+     by another provider.</p>
+  <form method="post" action="{% url 'provider_instructor_remove' instructor.pk %}"
+        onsubmit="return confirm('Remove {{ instructor.display_name|escapejs }} as an instructor? Their profile and certificate will be deleted.');">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger btn-small">Remove instructor</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

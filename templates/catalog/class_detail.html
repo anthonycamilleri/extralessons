@@ -44,6 +44,17 @@
 
   <div class="prose">{{ cls.description|linebreaks }}</div>
 
+  {% if instructors %}
+    <section class="panel">
+      <h2>Who runs it</h2>
+      <div class="instructor-list">
+        {% for instructor in instructors %}
+          {% include "dashboards/provider/_instructor_card.html" with instructor=instructor %}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
   {% if holidays %}
     <section class="panel">
       <h2>No sessions during</h2>

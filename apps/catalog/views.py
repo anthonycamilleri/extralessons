@@ -143,7 +143,14 @@ def class_detail(request, term_id, slug):
     return render(
         request,
         "catalog/class_detail.html",
-        {"cls": cls, "children": children, "holidays": cls.skipped_holidays()},
+        {
+            "cls": cls,
+            "children": children,
+            "holidays": cls.skipped_holidays(),
+            # Profiles only: the certificate itself never reaches this page,
+            # just whether the school has checked it (Instructor.certificate_checked).
+            "instructors": cls.instructors.select_related("user"),
+        },
     )
 
 

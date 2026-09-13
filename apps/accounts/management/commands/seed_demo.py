@@ -11,6 +11,7 @@ from apps.accounts.models import Child, Guardian, SiteConfig, User
 from apps.catalog.models import (
     ActivityClass,
     Holiday,
+    Instructor,
     Provider,
     SchoolYear,
     Term,
@@ -36,6 +37,11 @@ class Command(BaseCommand):
                            is_staff=True, is_superuser=True)
         coach = self._user("coach@provider.test", User.Role.PROVIDER, "Carlos", "Coach")
         tutor = self._user("tutor@provider.test", User.Role.PROVIDER, "Tina", "Tutor")
+        # An instructor who is not a provider account: sees only the classes
+        # assigned to them (Football Juniors, below).
+        instructor = self._user(
+            "instructor@provider.test", User.Role.PROVIDER, "Ivan", "Instructor"
+        )
         parent1 = self._user("parent1@family.test", User.Role.PARENT, "Paula", "Parent")
         parent2 = self._user("parent2@family.test", User.Role.PARENT, "Peter", "Parent")
 
@@ -109,6 +115,7 @@ class Command(BaseCommand):
              "Singing together, from folk songs to film scores.",
              "Ends with a family concert in the main hall."),
         ]
+        seeded = {}
         for provider, title, slug, amin, amax, cap, weekday, start, where, desc, extra in classes:
             cls, created = ActivityClass.objects.get_or_create(
                 term=term,
@@ -130,6 +137,21 @@ class Command(BaseCommand):
             )
             if created:
                 generate_sessions(cls)
+            seeded[slug] = cls
+
+        # The coach runs AllStars and teaches too; Ivan only teaches football.
+        coach_profile, _ = Instructor.objects.get_or_create(
+            provider=sports,
+            user=coach,
+            defaults={"bio": "UEFA C licence coach; ten years of junior football."},
+        )
+        coach_profile.classes.add(seeded["football-juniors"], seeded["athletics-club"])
+        ivan_profile, _ = Instructor.objects.get_or_create(
+            provider=sports,
+            user=instructor,
+            defaults={"bio": "Former county sprinter, now coaching the youngest groups."},
+        )
+        ivan_profile.classes.add(seeded["football-juniors"])
 
         self._child(parent1, "Lena", "Parent", 8, "P3E")
         self._child(parent1, "Marco", "Parent", 6, "P1E")
@@ -138,7 +160,8 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             "Demo data ready. Accounts (password 'demo1234'):\n"
             "  admin@school.test    — school admin (staff)\n"
-            "  coach@provider.test  — provider (AllStars Sports)\n"
+            "  coach@provider.test  — provider (AllStars Sports), also an instructor\n"
+            "  instructor@provider.test — instructor (AllStars Sports, Football Juniors only)\n"
             "  tutor@provider.test  — provider (Bright Minds)\n"
             "  parent1@family.test  — parent with 2 children\n"
             "  parent2@family.test  — parent with 1 child"

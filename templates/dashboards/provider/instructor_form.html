@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Add an instructor{% endblock %}
+{% block content %}
+<h1>Add an instructor <span class="muted">— {{ provider.name }}</span></h1>
+<div class="panel">
+  <p class="muted small">An account is created for them and they get an email with a link to choose a
+     password. If the address already belongs to an instructor of another provider, that account is
+     linked instead. Parent and school accounts cannot be used: instructors need their own login.</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Add instructor</button>
+    <a class="btn btn-secondary" href="{% url 'provider_instructors' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

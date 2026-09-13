@@ -1,29 +1,67 @@
+"""The provider dashboard: classes, registers, attendance, announcements, and
+the provider's instructors.
+
+Two kinds of account come through here, told apart by ActivityClass.run_by:
+a provider's own accounts (Provider.members), who see every class and manage
+the instructors; and instructors, who see the classes assigned to them. The
+class pages do not care which one is asking, only that the class is theirs.
+"""
 from django import forms
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
+from apps.accounts.models import User
 from apps.accounts.permissions import provider_required
-from apps.catalog.models import ActivityClass, ClassSession
+from apps.catalog.models import ActivityClass, ClassSession, Instructor, Provider
 from apps.enrollments.models import Attendance, Enrollment
 from apps.notifications import services as notification_services
 from apps.notifications.forms import RichTextField
 from apps.notifications.models import Broadcast
 
+from .provider_forms import (
+    CERTIFICATE_TYPES,
+    InstructorAccountForm,
+    InstructorClassesForm,
+    InstructorProfileForm,
+)
+
 
 def _own_classes(user):
     return (
-        ActivityClass.objects.filter(provider__members=user)
+        ActivityClass.objects.run_by(user)
         .select_related("provider", "term", "term__school_year")
         .order_by("-term__start_date", "weekday", "start_time")
     )
 
 
+def _managed_providers(user):
+    return Provider.objects.managed_by(user).order_by("name")
+
+
+def _managed_instructor_or_404(user, instructor_id):
+    return get_object_or_404(
+        Instructor.objects.managed_by(user).select_related("user", "provider"),
+        pk=instructor_id,
+    )
+
+
 @provider_required
 def home(request):
-    classes = _own_classes(request.user).with_counts()
-    return render(request, "dashboards/provider/home.html", {"classes": classes})
+    classes = _own_classes(request.user).with_counts().prefetch_related("instructors__user")
+    return render(
+        request,
+        "dashboards/provider/home.html",
+        {
+            "classes": classes,
+            "managed_providers": _managed_providers(request.user),
+            "my_profiles": Instructor.objects.for_user(request.user).select_related("provider"),
+        },
+    )
 
 
 @provider_required
@@ -50,6 +88,8 @@ def class_detail(request, class_id):
             "next_session": next_session,
             "holidays": cls.skipped_holidays(),
             "today": today,
+            "instructors": cls.instructors.select_related("user"),
+            "manages_provider": cls.provider.is_managed_by(request.user),
         },
     )
 
@@ -133,3 +173,218 @@ def broadcast(request):
         )
         return redirect("provider_home")
     return render(request, "dashboards/provider/broadcast.html", {"form": form})
+
+
+# -- Instructors -------------------------------------------------------------
+#
+# Managed by the provider's own accounts (Provider.members). An instructor who
+# is not also a member sees none of these pages except their own profile.
+
+
+@provider_required
+def instructors(request):
+    """Every instructor of every provider this account runs, with their
+    classes and where their certificate stands."""
+    providers = list(_managed_providers(request.user))
+    if not providers:
+        return render(request, "dashboards/provider/instructors.html", {"providers": []})
+    for provider in providers:
+        provider.instructor_rows = list(
+            provider.instructors.select_related("user").prefetch_related("classes__term")
+        )
+        provider.self_is_instructor = any(
+            row.user_id == request.user.pk for row in provider.instructor_rows
+        )
+    return render(request, "dashboards/provider/instructors.html", {"providers": providers})
+
+
+@provider_required
+def instructor_add(request, provider_id):
+    provider = get_object_or_404(_managed_providers(request.user), pk=provider_id)
+    form = InstructorAccountForm(provider, request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            user = form.existing_user
+            created = user is None
+            if created:
+                user = User.objects.create_user(
+                    form.cleaned_data["email"],
+                    password=None,  # unusable until the invitation link sets one
+                    role=User.Role.PROVIDER,
+                    first_name=form.cleaned_data["first_name"],
+                    last_name=form.cleaned_data["last_name"],
+                )
+            instructor = Instructor.objects.create(provider=provider, user=user)
+            instructor.classes.set(form.cleaned_data["classes"])
+            if created:
+                notification_services.queue_instructor_invite(instructor, request.user)
+        if created:
+            messages.success(
+                request,
+                f"{instructor.display_name} has been added. We have emailed {user.email} "
+                "a link to choose a password.",
+            )
+        else:
+            messages.success(
+                request,
+                f"{instructor.display_name} already had an account and is now one of "
+                f"{provider.name}'s instructors.",
+            )
+        return redirect("provider_instructor", instructor_id=instructor.pk)
+    return render(
+        request,
+        "dashboards/provider/instructor_form.html",
+        {"form": form, "provider": provider},
+    )
+
+
+@provider_required
+@require_POST
+def instructor_add_self(request, provider_id):
+    """The provider account is also an instructor: give it a profile."""
+    provider = get_object_or_404(_managed_providers(request.user), pk=provider_id)
+    instructor, created = Instructor.objects.get_or_create(provider=provider, user=request.user)
+    if created:
+        messages.success(
+            request,
+            f"You are now listed as an instructor with {provider.name}. Fill in your "
+            "profile and pick the classes you teach.",
+        )
+    return redirect("provider_instructor", instructor_id=instructor.pk)
+
+
+@provider_required
+def instructor_detail(request, instructor_id):
+    """A manager's view of one instructor: profile, certificate, classes."""
+    instructor = _managed_instructor_or_404(request.user, instructor_id)
+    form = InstructorClassesForm(instructor, request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"Classes updated for {instructor.display_name}.")
+        return redirect("provider_instructor", instructor_id=instructor.pk)
+    return render(
+        request,
+        "dashboards/provider/instructor_detail.html",
+        {
+            "instructor": instructor,
+            "form": form,
+            "classes": instructor.classes.select_related("term").order_by(
+                "-term__start_date", "weekday", "start_time"
+            ),
+            "never_logged_in": instructor.user.last_login is None,
+            "is_self": instructor.user_id == request.user.pk,
+        },
+    )
+
+
+@provider_required
+@require_POST
+def instructor_resend_invite(request, instructor_id):
+    instructor = _managed_instructor_or_404(request.user, instructor_id)
+    if instructor.user.last_login is not None:
+        messages.info(
+            request,
+            f"{instructor.display_name} has already logged in. If they have forgotten "
+            "their password, the login page has a link to reset it.",
+        )
+    else:
+        notification_services.queue_instructor_invite(instructor, request.user)
+        messages.success(request, f"Invitation sent again to {instructor.user.email}.")
+    return redirect("provider_instructor", instructor_id=instructor.pk)
+
+
+@provider_required
+@require_POST
+def instructor_remove(request, instructor_id):
+    """Take an instructor off the provider: profile, certificate and class
+    assignments go; the account is switched off if nothing else uses it."""
+    instructor = _managed_instructor_or_404(request.user, instructor_id)
+    user = instructor.user
+    name = instructor.display_name
+    files = [
+        (field.storage, field.name)
+        for field in (instructor.conduct_certificate, instructor.photo)
+        if field
+    ]
+    with transaction.atomic():
+        instructor.delete()
+        still_used = (
+            user.provider_orgs.exists()
+            or Instructor.objects.filter(user=user).exists()
+            or user.pk == request.user.pk
+        )
+        if not still_used and user.is_active:
+            user.is_active = False
+            user.save(update_fields=["is_active"])
+    for storage, file_name in files:
+        storage.delete(file_name)
+    messages.success(request, f"{name} is no longer one of your instructors.")
+    return redirect("provider_instructors")
+
+
+@provider_required
+def my_profile(request):
+    """The instructor's own profile, wherever it is: straight to the one
+    profile most people have, a choice if they teach for several providers."""
+    profiles = list(Instructor.objects.for_user(request.user).select_related("provider"))
+    if len(profiles) == 1:
+        return redirect("provider_instructor_profile", instructor_id=profiles[0].pk)
+    if not profiles:
+        messages.info(
+            request,
+            "You do not have an instructor profile yet. Your provider adds you as an "
+            "instructor from their dashboard; if you run the provider, use "
+            "“I teach too” on the Instructors page.",
+        )
+        return redirect("provider_home")
+    return render(request, "dashboards/provider/my_profiles.html", {"profiles": profiles})
+
+
+@provider_required
+def instructor_profile(request, instructor_id):
+    """Edit the profile: the instructor themself, or a manager on their behalf."""
+    instructor = get_object_or_404(
+        Instructor.objects.visible_to(request.user).select_related("user", "provider"),
+        pk=instructor_id,
+    )
+    form = InstructorProfileForm(request.POST or None, request.FILES or None, instance=instructor)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Profile saved.")
+        if instructor.user_id == request.user.pk:
+            return redirect("provider_home")
+        return redirect("provider_instructor", instructor_id=instructor.pk)
+    return render(
+        request,
+        "dashboards/provider/instructor_profile.html",
+        {
+            "form": form,
+            "instructor": instructor,
+            "is_self": instructor.user_id == request.user.pk,
+            "manages_provider": instructor.provider.is_managed_by(request.user),
+        },
+    )
+
+
+@login_required
+def instructor_certificate(request, instructor_id):
+    """Hand out the certificate of police conduct, to the few who may see it.
+
+    Not a provider_required view: the school office (admin role) opens it
+    from the admin as well. Everyone else, a parent included, is told it does
+    not exist rather than that it is forbidden.
+    """
+    instructor = get_object_or_404(
+        Instructor.objects.select_related("user", "provider"), pk=instructor_id
+    )
+    if not instructor.may_be_opened_by(request.user) or not instructor.has_certificate:
+        raise Http404
+    stored = instructor.conduct_certificate
+    extension = "." + stored.name.rsplit(".", 1)[-1].lower() if "." in stored.name else ""
+    content_type = CERTIFICATE_TYPES.get(extension, "application/octet-stream")
+    filename = f"police-conduct-{instructor.user.last_name or 'certificate'}{extension}".lower()
+    response = FileResponse(
+        stored.open("rb"), content_type=content_type, as_attachment=True, filename=filename
+    )
+    response["Cache-Control"] = "private, no-store"
+    return response

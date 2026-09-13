@@ -33,6 +33,8 @@
           <a href="{% url 'parent_home' %}">My family</a>
         {% elif user.role == "PROVIDER" %}
           <a href="{% url 'provider_home' %}">My classes</a>
+          {% if provider_manages %}<a href="{% url 'provider_instructors' %}">Instructors</a>{% endif %}
+          {% if provider_teaches %}<a href="{% url 'provider_my_profile' %}">My profile</a>{% endif %}
           <a href="{% url 'password_change' %}">Password</a>
         {% elif user.role == "ADMIN" %}
           {# Admins are parents too (User.is_parent): their own family sits beside the desk. #}

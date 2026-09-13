@@ -25,6 +25,15 @@
   <p class="desk-scope">
     {{ cls.provider.name }} · {{ cls.term.name }} · {{ cls.schedule_display }}{% if cls.location %} · {{ cls.location }}{% endif %}
   </p>
+  <p class="desk-scope">
+    Instructors:
+    {% for instructor in instructors %}
+      <a href="{% url 'admin:catalog_instructor_change' instructor.pk %}">{{ instructor.display_name }}</a>
+      {% if instructor.certificate_checked %}<span class="pill pill-ok">certificate checked</span>
+      {% elif instructor.has_certificate %}<span class="pill pill-warn">certificate to check</span>
+      {% else %}<span class="pill pill-bad">no certificate</span>{% endif %}{% if not forloop.last %} · {% endif %}
+    {% empty %}<span class="quiet">none assigned — the provider assigns them, or edit the class</span>{% endfor %}
+  </p>
   <p>
     <span class="pill">{{ cls.registrations_count }} registration{{ cls.registrations_count|pluralize }}</span>
     <span class="pill">{{ cls.enrolled_count }} / {{ cls.capacity }} seats taken (incl. outstanding offers)</span>

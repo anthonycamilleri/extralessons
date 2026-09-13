@@ -9,10 +9,15 @@ from django.http import Http404, HttpResponse
 from django.views.decorators.http import require_safe
 
 from .models import StoredFile
+from .storage import is_private_name
 
 
 @require_safe
 def serve_stored_file(request, name):
+    # A private file (an instructor's police conduct certificate) is only ever
+    # handed out by the view that checks who is asking; here it does not exist.
+    if is_private_name(name):
+        raise Http404(name)
     try:
         row = StoredFile.objects.get(name=name)
     except StoredFile.DoesNotExist:

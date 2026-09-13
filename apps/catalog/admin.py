@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 
 from apps.accounts.admin_permissions import SchoolAdminPermissionMixin
 from apps.accounts.models import User
@@ -17,6 +18,7 @@ from .models import (
     ActivityClass,
     ClassSession,
     Holiday,
+    Instructor,
     Provider,
     SchoolYear,
     SessionPlan,
@@ -34,11 +36,250 @@ def _totals(plans):
     ).summary
 
 
+def certificate_pill(instructor):
+    """Where the certificate of police conduct stands, as an admin pill."""
+    status = instructor.certificate_status
+    if status == "checked":
+        return format_html(
+            '<span class="pill pill-ok">checked {}</span>',
+            instructor.conduct_certificate_checked_at.strftime("%-d %b %Y"),
+        )
+    if status == "uploaded":
+        return mark_safe('<span class="pill pill-warn">uploaded, to check</span>')
+    return mark_safe('<span class="pill pill-bad">not uploaded</span>')
+
+
+class InstructorInline(admin.TabularInline):
+    """The provider's instructors at a glance; each links to its own page,
+    where the certificate is."""
+
+    model = Instructor
+    extra = 0
+    fields = ["user", "classes_taught", "certificate"]
+    readonly_fields = ["classes_taught", "certificate"]
+    autocomplete_fields = ["user"]
+    show_change_link = True
+    verbose_name_plural = "instructors (profiles, certificates and classes are on each instructor's page)"
+
+    @admin.display(description="classes")
+    def classes_taught(self, obj):
+        if not obj.pk:
+            return "—"
+        return ", ".join(cls.title for cls in obj.classes.all()) or "—"
+
+    @admin.display(description="police conduct certificate")
+    def certificate(self, obj):
+        return certificate_pill(obj) if obj.pk else "—"
+
+
 @admin.register(Provider)
 class ProviderAdmin(admin.ModelAdmin):
-    list_display = ["name", "contact_email", "contact_phone"]
+    list_display = ["name", "contact_email", "contact_phone", "member_count", "instructor_count"]
     search_fields = ["name"]
     filter_horizontal = ["members"]
+    inlines = [InstructorInline]
+
+    @admin.display(description="provider accounts")
+    def member_count(self, obj):
+        return obj.members.count()
+
+    @admin.display(description="instructors")
+    def instructor_count(self, obj):
+        return obj.instructors.count()
+
+
+class CertificateFilter(admin.SimpleListFilter):
+    title = "police conduct certificate"
+    parameter_name = "certificate"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("missing", "Not uploaded"),
+            ("uploaded", "Uploaded, to check"),
+            ("checked", "Checked"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == "missing":
+            return queryset.filter(conduct_certificate="")
+        if self.value() == "uploaded":
+            return queryset.exclude(conduct_certificate="").filter(
+                conduct_certificate_checked_at__isnull=True
+            )
+        if self.value() == "checked":
+            return queryset.exclude(conduct_certificate="").filter(
+                conduct_certificate_checked_at__isnull=False
+            )
+        return queryset
+
+
+class InstructorAdminForm(forms.ModelForm):
+    """The classes live on ActivityClass.instructors; this form shows the
+    relation from the instructor's side, limited to their provider's classes."""
+
+    classes = forms.ModelMultipleChoiceField(
+        queryset=ActivityClass.objects.none(),
+        widget=forms.CheckboxSelectMultiple,
+        required=False,
+        label="Classes they teach",
+    )
+
+    class Meta:
+        model = Instructor
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["classes"].queryset = self.instance.provider.classes.select_related(
+                "term"
+            ).order_by("-term__start_date", "title")
+            if not self.is_bound:
+                self.initial["classes"] = list(
+                    self.instance.classes.values_list("pk", flat=True)
+                )
+        else:
+            self.fields["classes"].help_text = "Save the instructor first, then pick their classes."
+
+    def save(self, commit=True):
+        instructor = super().save(commit=commit)
+        if commit:
+            instructor.classes.set(self.cleaned_data["classes"])
+        return instructor
+
+
+@admin.register(Instructor)
+class InstructorAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
+    """The backend view of the people in front of the children.
+
+    Regular admins see the instructors of their classes and can mark a
+    certificate as checked, which is the office's one job here; the profile
+    itself is the instructor's to write and the provider's to manage, so it
+    is read-only for everyone but super admins.
+    """
+
+    school_admin_can = frozenset({"view"})
+    list_display = [
+        "display_name",
+        "provider",
+        "email",
+        "classes_taught",
+        "certificate",
+        "profile_complete",
+    ]
+    list_filter = [CertificateFilter, "provider"]
+    search_fields = ["user__first_name", "user__last_name", "user__email", "provider__name"]
+    autocomplete_fields = ["user"]
+    form = InstructorAdminForm
+    actions = ["mark_certificate_checked"]
+    readonly_fields = [
+        "classes_taught",
+        "certificate_link",
+        "conduct_certificate_uploaded_at",
+        "conduct_certificate_checked_at",
+        "conduct_certificate_checked_by",
+        "created_at",
+    ]
+    fieldsets = (
+        (None, {"fields": ("provider", "user", "classes")}),
+        ("Profile (shown to parents on the class page)", {"fields": ("bio", "photo")}),
+        (
+            "Certificate of police conduct",
+            {
+                "fields": (
+                    "certificate_link",
+                    "conduct_certificate",
+                    "conduct_certificate_issued_on",
+                    "conduct_certificate_uploaded_at",
+                    "conduct_certificate_checked_at",
+                    "conduct_certificate_checked_by",
+                ),
+                "description": "The document itself opens only for the office, the "
+                "provider and the instructor. Parents are shown only that the school "
+                "has checked it: use the “Mark certificate as checked” action on the "
+                "list once you have looked at it. A new upload clears the check.",
+            },
+        ),
+        ("Record", {"fields": ("created_at",)}),
+    )
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related("user", "provider")
+        if not request.user.is_superuser:
+            qs = qs.filter(classes__in=ActivityClass.objects.managed_by(request.user)).distinct()
+        return qs.prefetch_related("classes")
+
+    def get_fieldsets(self, request, obj=None):
+        # A regular admin gets the read-only page; the class picker is a form
+        # field over a reverse relation, which the read-only renderer cannot
+        # show, so they get the plain list of classes instead.
+        fieldsets = super().get_fieldsets(request, obj)
+        if request.user.is_superuser:
+            return fieldsets
+        head, *rest = fieldsets
+        fields = tuple("classes_taught" if f == "classes" else f for f in head[1]["fields"])
+        return [(head[0], {**head[1], "fields": fields}), *rest]
+
+    def save_related(self, request, form, formsets, change):
+        # The ModelForm's own save_m2m knows nothing about the reverse
+        # relation; the form's save(commit=True) path does, so call it.
+        super().save_related(request, form, formsets, change)
+        if "classes" in form.cleaned_data:
+            form.instance.classes.set(form.cleaned_data["classes"])
+
+    def save_model(self, request, obj, form, change):
+        if "conduct_certificate" in form.changed_data and form.cleaned_data.get(
+            "conduct_certificate"
+        ):
+            from django.utils import timezone
+
+            obj.conduct_certificate_uploaded_at = timezone.now()
+            obj.conduct_certificate_checked_at = None
+            obj.conduct_certificate_checked_by = None
+        super().save_model(request, obj, form, change)
+
+    @admin.display(description="instructor", ordering="user__first_name")
+    def display_name(self, obj):
+        return obj.display_name
+
+    @admin.display(description="email", ordering="user__email")
+    def email(self, obj):
+        return obj.user.email
+
+    @admin.display(description="classes")
+    def classes_taught(self, obj):
+        return ", ".join(cls.title for cls in obj.classes.all()) or "—"
+
+    @admin.display(description="police conduct certificate")
+    def certificate(self, obj):
+        return certificate_pill(obj)
+
+    @admin.display(description="profile", boolean=True)
+    def profile_complete(self, obj):
+        return bool(obj.bio)
+
+    @admin.display(description="current file")
+    def certificate_link(self, obj):
+        if not obj.pk or not obj.has_certificate:
+            return "No certificate uploaded yet."
+        return format_html(
+            '<a href="{}">Download the certificate</a>{}',
+            reverse("provider_instructor_certificate", kwargs={"instructor_id": obj.pk}),
+            f" · issued {obj.conduct_certificate_issued_on:%-d %b %Y}"
+            if obj.conduct_certificate_issued_on
+            else "",
+        )
+
+    @admin.action(description="Mark police conduct certificate as checked")
+    def mark_certificate_checked(self, request, queryset):
+        checked = sum(
+            int(instructor.mark_certificate_checked(request.user)) for instructor in queryset
+        )
+        skipped = queryset.count() - checked
+        message = f"{checked} certificate(s) marked as checked."
+        if skipped:
+            message += f" {skipped} instructor(s) skipped: nothing uploaded yet."
+        self.message_user(request, message, messages.WARNING if skipped else messages.SUCCESS)
 
 
 class HolidayInline(admin.TabularInline):
@@ -219,6 +460,30 @@ class ActivityClassForm(forms.ModelForm):
         model = ActivityClass
         fields = "__all__"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "instructors" in self.fields and self.instance.pk:
+            self.fields["instructors"].queryset = Instructor.objects.filter(
+                provider=self.instance.provider_id
+            ).select_related("user")
+
+    def clean(self):
+        cleaned = super().clean()
+        provider = cleaned.get("provider")
+        strangers = [
+            instructor
+            for instructor in cleaned.get("instructors") or []
+            if provider is not None and instructor.provider_id != provider.pk
+        ]
+        if strangers:
+            names = ", ".join(instructor.display_name for instructor in strangers)
+            self.add_error(
+                "instructors",
+                f"Only {provider.name}'s own instructors can teach this class ({names} "
+                "belong to another provider).",
+            )
+        return cleaned
+
     def clean_capacity(self):
         capacity = self.cleaned_data["capacity"]
         if self.instance.pk:
@@ -258,6 +523,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         "waiting",
         "pending",
         "status",
+        "instructor_list",
         "administrator_list",
         "roster_link",
     ]
@@ -273,7 +539,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
     ]
     search_fields = ["title", "provider__name", "administrators__email"]
     prepopulated_fields = {"slug": ["title"]}
-    filter_horizontal = ["administrators"]
+    filter_horizontal = ["administrators", "instructors"]
     inlines = [ClassSessionInline]
     form = ActivityClassForm
     actions = [
@@ -292,7 +558,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             .get_queryset(request)
             .with_counts()
             .select_related("term", "provider")
-            .prefetch_related("administrators")
+            .prefetch_related("administrators", "instructors__user")
         )
 
     def get_actions(self, request):
@@ -371,6 +637,10 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         url = reverse("admin:enrollments_enrollment_requests")
         return format_html('<a href="{}?class={}"><b>{}</b></a>', url, obj.pk, obj.requested_count)
 
+    @admin.display(description="instructors")
+    def instructor_list(self, obj):
+        return ", ".join(i.display_name for i in obj.instructors.all()) or "—"
+
     @admin.display(description="administrators")
     def administrator_list(self, obj):
         names = [admin.get_full_name() or admin.email for admin in obj.administrators.all()]
@@ -435,6 +705,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             "pending": pending,
             "seats_free": cls.places_free,
             "seats_over": max(0, cls.enrolled_count - cls.capacity),
+            "instructors": list(cls.instructors.select_related("user")),
         }
         return TemplateResponse(request, "admin/catalog/activityclass/roster.html", context)
 

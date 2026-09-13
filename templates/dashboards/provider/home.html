@@ -3,17 +3,36 @@
 {% block content %}
 <div class="panel-title">
   <h1>My classes</h1>
-  <a class="btn btn-small" href="{% url 'provider_broadcast' %}">Message families</a>
+  <div class="actions">
+    {% if managed_providers %}<a class="btn btn-secondary btn-small" href="{% url 'provider_instructors' %}">Instructors</a>{% endif %}
+    {% if my_profiles %}<a class="btn btn-secondary btn-small" href="{% url 'provider_my_profile' %}">My profile</a>{% endif %}
+    <a class="btn btn-small" href="{% url 'provider_broadcast' %}">Message families</a>
+  </div>
 </div>
+
+{% for profile in my_profiles %}
+  {% if not profile.has_certificate or not profile.bio %}
+  <div class="panel panel-accent">
+    <h2>Your instructor profile{% if my_profiles|length > 1 %} — {{ profile.provider.name }}{% endif %}</h2>
+    <p>
+      {% if not profile.bio %}Parents see your profile on the page of every class you teach — it has no text yet.{% endif %}
+      {% if not profile.has_certificate %}Your certificate of police conduct has not been uploaded; the school checks it before showing parents that it is in order.{% endif %}
+    </p>
+    <a class="btn btn-small" href="{% url 'provider_instructor_profile' profile.pk %}">Complete my profile</a>
+  </div>
+  {% endif %}
+{% endfor %}
 
 {% if classes %}
 <div class="table-wrap"><table class="list stacked">
-  <tr><th>Class</th><th>Term</th><th>Schedule</th><th>Enrolled</th><th>Waiting</th><th>Status</th></tr>
+  <tr><th>Class</th><th>Term</th><th>Schedule</th><th>Instructors</th><th>Enrolled</th><th>Waiting</th><th>Status</th></tr>
   {% for cls in classes %}
   <tr>
-    <td data-label="Class"><a href="{% url 'provider_class' cls.pk %}">{{ cls.title }}</a></td>
+    <td data-label="Class"><a href="{% url 'provider_class' cls.pk %}">{{ cls.title }}</a>
+      {% if managed_providers|length > 1 %}<div class="muted small">{{ cls.provider.name }}</div>{% endif %}</td>
     <td data-label="Term">{{ cls.term.name }}</td>
     <td data-label="Schedule">{{ cls.schedule_display }}</td>
+    <td data-label="Instructors" class="small">{% for instructor in cls.instructors.all %}{{ instructor.display_name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="muted">—</span>{% endfor %}</td>
     <td data-label="Enrolled">{{ cls.enrolled_count }} / {{ cls.capacity }}</td>
     <td data-label="Waiting">{{ cls.waitlist_count }}</td>
     <td data-label="Status">
@@ -25,6 +44,8 @@
   {% endfor %}
 </table></div>
 {% else %}
-<div class="panel"><p>No classes are assigned to you yet — the school office manages the class list.</p></div>
+<div class="panel"><p>No classes are assigned to you yet.
+  {% if managed_providers %}The school office sets up the class list; ask them if a class of yours is missing.
+  {% else %}Your provider assigns you to the classes you teach from their Instructors page.{% endif %}</p></div>
 {% endif %}
 {% endblock %}

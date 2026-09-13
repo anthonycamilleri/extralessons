@@ -1,0 +1,7 @@
+{% if instructor.certificate_checked %}
+  <span class="badge badge-ok">Checked by the school{% if instructor.conduct_certificate_checked_at %} · {{ instructor.conduct_certificate_checked_at|date:"j M Y" }}{% endif %}</span>
+{% elif instructor.has_certificate %}
+  <span class="badge badge-warn">Uploaded, awaiting the school's check</span>
+{% else %}
+  <span class="badge badge-bad">Not uploaded</span>
+{% endif %}

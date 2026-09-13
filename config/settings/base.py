@@ -81,6 +81,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "apps.accounts.context_processors.site_config",
                 "apps.dashboards.context_processors.admin_badge",
+                "apps.dashboards.context_processors.provider_nav",
             ],
         },
     },
@@ -136,6 +137,15 @@ WHITENOISE_MAX_AGE = env.int("WHITENOISE_MAX_AGE", default=60 * 60 * 24 * 365)
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    # Files that must never be served at a guessable URL: an instructor's
+    # certificate of police conduct. Read through a permission-checked view
+    # (apps.dashboards.provider_views.instructor_certificate) and nowhere
+    # else; the FileField selects this storage by name, so a deployment can
+    # swap the backend without a migration (see apps.media.storage).
+    "private": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": env("PRIVATE_MEDIA_ROOT", default=str(BASE_DIR / "private-media"))},
+    },
 }
 
 MEDIA_URL = "media/"

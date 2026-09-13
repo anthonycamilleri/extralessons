@@ -19,12 +19,14 @@ NEW = importlib.import_module("apps.notifications.migrations.0005_friendly_templ
 # migration that added them.
 LEAVING = importlib.import_module("apps.notifications.migrations.0008_cancellation_events")
 LESSON = importlib.import_module("apps.notifications.migrations.0011_lesson_cancelled_event")
+INSTRUCTOR = importlib.import_module("apps.notifications.migrations.0012_instructor_invite")
 LATER = {
     importlib.import_module(
         "apps.notifications.migrations.0006_contact_form_messages"
     ).EVENT,
     *LEAVING.TEMPLATES,
     LESSON.EVENT,
+    INSTRUCTOR.EVENT,
 }
 
 

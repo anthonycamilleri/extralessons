@@ -14,7 +14,7 @@ import mimetypes
 import os
 
 from django.core.files.base import ContentFile
-from django.core.files.storage import Storage
+from django.core.files.storage import Storage, storages
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 from django.utils.deconstruct import deconstructible
@@ -22,6 +22,25 @@ from django.utils.deconstruct import deconstructible
 from .models import StoredFile
 
 SUFFIX_LENGTH = 8
+
+# Names under this prefix are never served at MEDIA_URL (apps.media.views):
+# a private FileField saves under it, so the same DatabaseStorage table can
+# hold public class pictures and a certificate of police conduct side by side.
+PRIVATE_PREFIX = "private/"
+
+
+def private_storage():
+    """The storage for files only a permission-checked view may hand out.
+
+    A callable rather than an instance, so the FileField that uses it
+    (Instructor.conduct_certificate) is not pinned to one backend in its
+    migration: settings pick disk in development, the database in production.
+    """
+    return storages["private"]
+
+
+def is_private_name(name):
+    return name.startswith(PRIVATE_PREFIX)
 
 
 @deconstructible

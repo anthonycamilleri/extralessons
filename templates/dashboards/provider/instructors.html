@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Instructors{% endblock %}
+{% block content %}
+<div class="panel-title">
+  <h1>Instructors</h1>
+  <a class="btn btn-secondary btn-small" href="{% url 'provider_home' %}">← My classes</a>
+</div>
+
+{% if not providers %}
+<div class="panel">
+  <p>Only a provider's own account manages its instructors. Yours is an instructor account:
+     your classes are on <a href="{% url 'provider_home' %}">My classes</a> and your profile
+     under <a href="{% url 'provider_my_profile' %}">My profile</a>.</p>
+</div>
+{% endif %}
+
+{% for provider in providers %}
+<div class="panel">
+  <div class="panel-title">
+    <h2>{{ provider.name }}</h2>
+    <div class="actions">
+      {% if not provider.self_is_instructor %}
+      <form method="post" action="{% url 'provider_instructor_add_self' provider.pk %}" class="inline-form">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary btn-small">I teach too</button>
+      </form>
+      {% endif %}
+      <a class="btn btn-small" href="{% url 'provider_instructor_add' provider.pk %}">Add an instructor</a>
+    </div>
+  </div>
+  <p class="muted small">Instructors see the children in the classes assigned to them, take the register
+     and can write to those families. Parents see each instructor's profile on the class page, together with
+     whether the school has checked their certificate of police conduct.</p>
+  {% if provider.instructor_rows %}
+  <div class="table-wrap"><table class="list stacked">
+    <tr><th>Instructor</th><th>Classes</th><th>Police conduct certificate</th><th>Account</th><th></th></tr>
+    {% for row in provider.instructor_rows %}
+    <tr>
+      <td data-label="Instructor">
+        <a href="{% url 'provider_instructor' row.pk %}">{{ row.display_name }}</a>
+        {% if row.user_id == user.pk %}<span class="badge">You</span>{% endif %}
+        <div class="muted small">{{ row.user.email }}</div>
+      </td>
+      <td data-label="Classes" class="small">
+        {% for cls in row.classes.all %}{{ cls.title }} <span class="muted">({{ cls.term.name }})</span>{% if not forloop.last %}<br>{% endif %}{% empty %}<span class="muted">None yet</span>{% endfor %}
+      </td>
+      <td data-label="Certificate">
+        {% include "dashboards/provider/_certificate_badge.html" with instructor=row %}
+      </td>
+      <td data-label="Account" class="small">
+        {% if not row.user.is_active %}<span class="badge badge-bad">Disabled</span>
+        {% elif row.user.last_login %}<span class="badge badge-ok">Active</span>
+        {% else %}<span class="badge badge-warn">Invitation sent</span>{% endif %}
+      </td>
+      <td><a href="{% url 'provider_instructor' row.pk %}">Manage</a></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}
+  <p class="muted">No instructors yet. Add the people who teach {{ provider.name }}'s classes, or click
+     <em>I teach too</em> if that is you.</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

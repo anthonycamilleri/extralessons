@@ -24,6 +24,9 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Dashboard with class rosters for their own classes.
 - Per-session attendance taking.
 - Message the families of their classes (announcements/broadcasts), with formatting and pictures.
+- Two kinds of account under one provider (see *Provider accounts and instructors* under Architecture). A **provider account** sees every class of the provider and manages its **instructors**: it creates their accounts from the dashboard (the instructor gets an email with a set-your-password link), assigns each one the classes they teach, re-sends a lapsed invitation, and removes people who have left. A provider account can also list itself as an instructor (*I teach too*).
+- An **instructor** sees only the classes assigned to them: the register with the children's going-home arrangements and care notes, attendance for every session, and the announcement composer for those families.
+- Every instructor has a small profile (name, a few lines, a photo) and uploads their **certificate of police conduct**. The profile appears on the public class page under *Who runs it*, on the provider's class page and in the admin; the certificate is a private file that only the instructor, their provider and the school office can open, and parents are shown only that the office has checked it.
 
 **School admin**
 - Set up the school year once — term dates plus every holiday period — and every class generated in it skips those days automatically.
@@ -32,6 +35,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48). A full class can still be offered to: the roster warns and asks for confirmation, then shows how far over capacity the class is.
 - Optional email alerts on new requests and freed seats.
 - Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. See *Who sees what* under Architecture.
+- Instructors in the admin: every instructor with their provider, classes and where their certificate of police conduct stands (not uploaded, uploaded, checked), a download link for the document, and a *Mark police conduct certificate as checked* action that turns on the "checked by the school" badge parents see. The class form and the roster show who teaches a class; a class's instructors can also be set there.
 - Everything happens in one place, the Django admin at `/admin/`: a Requests page with one-click approve/reject and a pending-count badge on every page, the class list as the term's dashboard (registrations, confirmed, available, waiting, pending per class), a roster page per class (enrolled, offers, waiting list with "offer seat", pending requests; CSV download), children with their guardians' contacts and every registration, the announcement composer (a small rich-text editor: emphasis, headings, lists, links and uploaded pictures, sent as an HTML email with a plain-text twin, with a "send me a test email" button that delivers the draft to the author first), plus terms, providers, notification templates and site settings.
 - Let Claude do the data entry: a built-in MCP server (`manage.py mcp_server`) lets Claude Code or Claude Desktop set up school years, holidays, terms, providers and classes from a conversation, and read back who is registered for what — see [Connecting Claude](#connecting-claude-mcp).
 
@@ -169,6 +173,39 @@ are among them. A class nobody has claimed alerts the super admins, so it
 still lands on a desk; with no super admins at all, every admin is emailed
 rather than no one.
 
+**Provider accounts and instructors.** The other side of the desk has the
+same shape. A `Provider` has *members* (`Provider.members`, provider-role
+accounts: the organisation itself) and *instructors* (`Instructor` rows: the
+people in the room, each an account plus a profile, a certificate and the
+classes they take, `ActivityClass.instructors`). One account can be both.
+What a provider-side account works with is one question asked in one place,
+`ActivityClass.objects.run_by(user)`: every class of the providers they are a
+member of, plus every class they are assigned to as an instructor. The
+provider dashboard, the attendance pages and the announcement composer all
+scope through it, so an instructor cannot open, register or write to a class
+that is not theirs.
+
+| Account | On the provider dashboard |
+|---------|---------------------------|
+| Provider account (member) | Every class of the provider; the *Instructors* page: add an instructor (creates the account and emails a set-your-password link, or links an existing provider-role account), assign classes, re-send the invitation, edit a profile on their behalf, remove; *I teach too* to get an instructor profile of their own. |
+| Instructor | The classes assigned to them, their registers, attendance and announcements; *My profile* to write their profile and upload their certificate of police conduct. |
+
+Instructor accounts are created by the provider, not by signup: parent and
+admin addresses are refused, because an account has one role. Removing an
+instructor deletes the profile and the certificate file and switches the
+account off unless another provider still uses it.
+
+**The certificate is a private file.** It is saved through a second, named
+storage (`STORAGES["private"]`: the database in production whatever the
+picture storage is, a separate directory in development) under a `private/`
+prefix that the public media view refuses to serve, and it leaves the building
+only through `provider_instructor_certificate`, which checks that the caller
+is the instructor, a member of their provider, or a school admin, and answers
+everyone else with a 404. Parents never see the file, only
+`Instructor.certificate_checked`: the office looks at the document and uses
+the admin action *Mark police conduct certificate as checked*; a new upload
+clears the check, because it is a new document.
+
 **The school calendar is a default, not a cage.** Holidays live once, on the
 `SchoolYear`, and every term in that year inherits them
 (`apps/catalog/models.py`). `generate_sessions()` reconciles a class's
@@ -232,7 +269,8 @@ Demo accounts (all with password `demo1234`):
 | Account                | Role                                    |
 |------------------------|-----------------------------------------|
 | `admin@school.test`    | School admin (staff + superuser)        |
-| `coach@provider.test`  | Provider — AllStars Sports              |
+| `coach@provider.test`  | Provider — AllStars Sports, also an instructor |
+| `instructor@provider.test` | Instructor — AllStars Sports, Football Juniors only |
 | `tutor@provider.test`  | Provider — Bright Minds                 |
 | `parent1@family.test`  | Parent with 2 children                  |
 | `parent2@family.test`  | Parent with 1 child                     |

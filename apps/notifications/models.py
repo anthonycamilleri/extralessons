@@ -21,6 +21,8 @@ class Event(models.TextChoices):
     LESSON_CANCELLED = "LESSON_CANCELLED", "Lesson cancelled (one or more dates off)"
     GUARDIAN_INVITE = "GUARDIAN_INVITE", "Co-parent invitation"
     BROADCAST = "BROADCAST", "Announcement"
+    # Provider-facing (email only)
+    INSTRUCTOR_INVITE = "INSTRUCTOR_INVITE", "Instructor: account invitation"
     # Admin-facing (email only)
     ADMIN_NEW_REQUEST = "ADMIN_NEW_REQUEST", "Admin: new enrolment request"
     ADMIN_SEAT_FREED = "ADMIN_SEAT_FREED", "Admin: seat freed"

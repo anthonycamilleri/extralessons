@@ -13,6 +13,18 @@
   {% endif %}
 </p>
 
+<h2>Instructors</h2>
+{% if instructors %}
+<div class="instructor-list">
+  {% for instructor in instructors %}
+    {% include "dashboards/provider/_instructor_card.html" with instructor=instructor show_private=True %}
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted small">No instructor is assigned to this class yet.</p>
+{% endif %}
+{% if manages_provider %}<p class="small"><a href="{% url 'provider_instructors' %}">Manage instructors and their classes</a></p>{% endif %}
+
 <h2>Enrolled children</h2>
 {% if roster %}
 <div class="table-wrap"><table class="list stacked">

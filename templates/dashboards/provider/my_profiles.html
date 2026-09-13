@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}My profiles{% endblock %}
+{% block content %}
+<h1>My instructor profiles</h1>
+<div class="panel">
+  <p class="muted small">You teach for more than one provider. Each has its own profile.</p>
+  <ul class="plain">
+    {% for profile in profiles %}
+    <li><a href="{% url 'provider_instructor_profile' profile.pk %}">{{ profile.provider.name }}</a>
+      · {% include "dashboards/provider/_certificate_badge.html" with instructor=profile %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

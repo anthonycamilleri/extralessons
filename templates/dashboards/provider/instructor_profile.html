@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{% if is_self %}My profile{% else %}{{ instructor.display_name }}'s profile{% endif %}{% endblock %}
+{% block content %}
+<h1>{% if is_self %}My instructor profile{% else %}{{ instructor.display_name }}'s profile{% endif %}
+  <span class="muted">— {{ instructor.provider.name }}</span></h1>
+<div class="panel">
+  <p class="muted small">Your name, picture and the text below appear on the page of every class you teach.
+     The certificate of police conduct is private: only you, {{ instructor.provider.name }} and the school office
+     can open it. Parents are shown only that the school has checked it.</p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.as_p }}
+    {% if instructor.has_certificate %}
+    <p class="small">Current certificate:
+      {% include "dashboards/provider/_certificate_badge.html" with instructor=instructor %}
+      <a href="{% url 'provider_instructor_certificate' instructor.pk %}">Download</a>
+      {% if instructor.conduct_certificate_uploaded_at %}· uploaded {{ instructor.conduct_certificate_uploaded_at|date:"j M Y" }}{% endif %}
+    </p>
+    {% endif %}
+    <button type="submit" class="btn">Save profile</button>
+    <a class="btn btn-secondary" href="{% if is_self %}{% url 'provider_home' %}{% else %}{% url 'provider_instructor' instructor.pk %}{% endif %}">Cancel</a>
+  </form>
+</div>
+{% if is_self %}
+<p class="muted small">Account email: {{ user.email }} · <a href="{% url 'password_change' %}">Change password</a>.</p>
+{% endif %}
+{% endblock %}
