@@ -701,3 +701,22 @@ table.list tbody tr:hover td { background: #fafcfe; }
   display: grid; place-items: center; font-weight: 700; font-size: 1.6rem;
   color: var(--day-ink, #0072bb);
 }
+
+/* --- Help pages for providers (the admin has its own in admin.css) -------- */
+.help-card .card-body h3 { margin: 0; font-size: 1.05rem; }
+.help-card .card-body h3::after { content: none; }
+.help-article > :not(figure) { max-width: 46rem; }
+.help-article h1 { font-size: 1.6rem; margin: 0 0 .5rem; }
+.help-article h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; padding-top: .75rem; border-top: 1px solid var(--hairline, #e3e8ee); }
+.help-article h3 { font-size: 1rem; margin: 1.5rem 0 .35rem; }
+.help-article p, .help-article li { line-height: 1.6; }
+.help-article ul, .help-article ol { padding-left: 1.25rem; }
+.help-article li + li { margin-top: .35rem; }
+.help-article blockquote { margin: 1rem 0; padding: .6rem 1rem; border-left: 4px solid var(--day-ink, #0072bb); background: var(--day-soft, #e8f1f8); border-radius: .4rem; }
+.help-article blockquote p { margin: .25rem 0; }
+.help-article figure { margin: 1.25rem 0; }
+.help-article figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--hairline, #e3e8ee); border-radius: .5rem; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.help-article figcaption { color: var(--muted); font-size: .88rem; margin-top: .4rem; }
+.help-more { margin-top: 2rem; }
+.help-more h2 { font-size: 1.1rem; }
+.help-more li + li { margin-top: .4rem; }

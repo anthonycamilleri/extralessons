@@ -12,7 +12,7 @@
 
   <div class="desk-panel">
     {% for topic in audience.topics %}
-    <a class="desk-tile help-tile" href="{% url 'admin:help_topic' topic.slug %}">
+    <a class="desk-tile help-tile" href="{% url audience.url_name topic.slug %}">
       <span class="help-tile-title">{{ topic.title }}</span>
       <span class="desk-label">{{ topic.summary }}</span>
     </a>

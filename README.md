@@ -500,6 +500,15 @@ Every admin page carries a **Help** link, and the busy pages (Requests, a
 class, a roster, the announcement composer) link straight to the guide that
 covers them. The guides live at `/admin/help/`.
 
+Providers and instructors have their own set at `/provider/help/`, linked as
+**Help** in the site navigation and from the dashboard's busy pages (the
+message form, the attendance page, the Instructors page, the profile):
+getting started, the register, attendance, messaging families, the profile
+and certificate of police conduct, and managing instructors. Same mechanism,
+second audience: the Markdown lives in `content/provider/`, the screenshots
+in `static/img/help/provider/`, and the pages render on the public layout
+(`templates/dashboards/help/`) behind `provider_required`.
+
 The content is Markdown in the repository, not rows in a table, so a guide
 changes in the same commit as the behaviour it describes:
 
@@ -508,16 +517,18 @@ apps/dashboards/help/
   registry.py                # the audiences and their topics — one entry per page
   markdown_ext.py            # ![shot](name.png) → static URL; [text](other-topic) → its URL
   views.py                   # index + topic, mounted on the admin site in admin_site.py
-  content/admin/*.md         # the guides themselves
-static/img/help/admin/*.png  # their screenshots
-templates/admin/help/        # index.html, topic.html
+  content/admin/*.md         # the office's guides
+  content/provider/*.md      # the providers' and instructors' guides
+static/img/help/<audience>/*.png  # their screenshots
+templates/admin/help/        # index.html, topic.html on the admin layout
+templates/dashboards/help/   # the same two pages on the public layout
 ```
 
 **To add a guide**: write `content/<audience>/<slug>.md`, add a `Topic` to that
 audience in `registry.py`, and give the headings you want to link to explicit
 anchors (`## Approving a request {#approve}`). `tests/test_admin_help.py`
-fails if a registered file, a referenced screenshot or a link to another guide
-is missing.
+and `tests/test_provider_help.py` fail if a registered file, a referenced
+screenshot or a link to another guide is missing.
 
 **To refresh the screenshots** — do this whenever an admin screen changes:
 
@@ -529,7 +540,8 @@ python scripts/capture_help_screenshots.py
 
 It builds a throwaway database (`seed_demo` plus `scripts/demo_office.py`, which
 adds the requests, waiting list and outstanding offer the pictures need), drives
-the real admin in headless Chromium, and rewrites the PNGs in place. Commit the
+the real admin and then the provider dashboard (as the demo coach) in headless
+Chromium, and rewrites the PNGs of both audiences in place. Commit the
 diff. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` points it at a Chromium Playwright did
 not install itself.
 

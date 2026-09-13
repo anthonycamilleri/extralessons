@@ -1,0 +1,23 @@
+{% extends base_template %}
+{% block title %}Help{% endblock %}
+{% block content %}
+<div class="panel-title">
+  <h1>{{ audience.title }}</h1>
+  <a class="btn btn-secondary btn-small" href="{% url 'provider_home' %}">← My classes</a>
+</div>
+<p class="lead">{{ audience.intro }}</p>
+
+<div class="card-grid help-grid">
+  {% for topic in audience.topics %}
+  <a class="card help-card" href="{% url audience.url_name topic.slug %}">
+    <div class="card-body">
+      <h3>{{ topic.title }}</h3>
+      <p class="meta">{{ topic.summary }}</p>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<p class="muted small">Something missing? Tell the school office and it can be added here.
+   These pages live with the app, so they are updated when the app changes.</p>
+{% endblock %}

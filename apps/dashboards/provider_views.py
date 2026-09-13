@@ -388,3 +388,31 @@ def instructor_certificate(request, instructor_id):
     )
     response["Cache-Control"] = "private, no-store"
     return response
+
+
+# -- Help ---------------------------------------------------------------------
+
+
+@provider_required
+def help_index(request):
+    from .help import views as help_views
+
+    return help_views.help_index(
+        request,
+        audience="provider",
+        base_template="base.html",
+        template="dashboards/help/index.html",
+    )
+
+
+@provider_required
+def help_topic(request, slug):
+    from .help import views as help_views
+
+    return help_views.help_topic(
+        request,
+        slug,
+        audience="provider",
+        base_template="base.html",
+        template="dashboards/help/topic.html",
+    )

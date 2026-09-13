@@ -22,7 +22,7 @@
     <h2>More help</h2>
     <ul>
       {% for other in siblings %}
-      <li><a href="{% url 'admin:help_topic' other.slug %}">{{ other.title }}</a>
+      <li><a href="{% url audience.url_name other.slug %}">{{ other.title }}</a>
         <span class="desk-label">{{ other.summary }}</span></li>
       {% endfor %}
     </ul>

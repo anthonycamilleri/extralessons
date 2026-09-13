@@ -6,7 +6,8 @@
 <div class="panel">
   <p class="muted small">Your name, picture and the text below appear on the page of every class you teach.
      The certificate of police conduct is private: only you, {{ instructor.provider.name }} and the school office
-     can open it. Parents are shown only that the school has checked it.</p>
+     can open it. Parents are shown only that the school has checked it.
+     <a href="{% url 'provider_help_topic' 'your-profile' %}">More about your profile and certificate.</a></p>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     {{ form.as_p }}

@@ -149,6 +149,15 @@ class InstructorProfileForm(forms.ModelForm):
         widget=forms.DateInput(attrs={"type": "date"}),
     )
 
+    field_order = [
+        "first_name",
+        "last_name",
+        "bio",
+        "photo",
+        "conduct_certificate",
+        "conduct_certificate_issued_on",
+    ]
+
     class Meta:
         model = Instructor
         fields = ["bio", "photo"]

@@ -11,6 +11,9 @@ urlpatterns = [
         name="provider_attendance",
     ),
     path("broadcast/", provider_views.broadcast, name="provider_broadcast"),
+    # The guides for providers and instructors (apps/dashboards/help).
+    path("help/", provider_views.help_index, name="provider_help_index"),
+    path("help/<slug:slug>/", provider_views.help_topic, name="provider_help_topic"),
     # Instructors: managed by the provider's own accounts.
     path("instructors/", provider_views.instructors, name="provider_instructors"),
     path(

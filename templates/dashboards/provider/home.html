@@ -7,6 +7,7 @@
     {% if managed_providers %}<a class="btn btn-secondary btn-small" href="{% url 'provider_instructors' %}">Instructors</a>{% endif %}
     {% if my_profiles %}<a class="btn btn-secondary btn-small" href="{% url 'provider_my_profile' %}">My profile</a>{% endif %}
     <a class="btn btn-small" href="{% url 'provider_broadcast' %}">Message families</a>
+    <a class="small" href="{% url 'provider_help_index' %}">Help</a>
   </div>
 </div>
 
@@ -44,6 +45,7 @@
   {% endfor %}
 </table></div>
 {% else %}
+<p class="muted small">New here? Read <a href="{% url 'provider_help_topic' 'getting-started' %}">Getting started</a>.</p>
 <div class="panel"><p>No classes are assigned to you yet.
   {% if managed_providers %}The school office sets up the class list; ask them if a class of yours is missing.
   {% else %}Your provider assigns you to the classes you teach from their Instructors page.{% endif %}</p></div>

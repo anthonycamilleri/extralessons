@@ -22,9 +22,13 @@ import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-OUT_DIR = BASE_DIR / "static" / "img" / "help" / "admin"
+HELP_IMG_DIR = BASE_DIR / "static" / "img" / "help"
+OUT_DIR = HELP_IMG_DIR / "admin"
 PASSWORD = "demo1234"
 ADMIN_EMAIL = "admin@school.test"
+# The demo coach runs AllStars Sports and teaches too, so one login shows
+# every provider-side page: the dashboard, the Instructors page, a profile.
+COACH_EMAIL = "coach@provider.test"
 VIEWPORT = {"width": 1500, "height": 950}
 # Matches config.settings.base.TIME_ZONE, so the admin does not warn about clocks.
 SERVER_TIMEZONE = os.environ.get("TIME_ZONE", "Europe/Malta")
@@ -89,13 +93,19 @@ def shrink(path: Path) -> None:
         candidate.unlink()
 
 
-def shoot(page, name: str, selector: str = "#content", max_height: int | None = None) -> None:
+def shoot(
+    page,
+    name: str,
+    selector: str = "#content",
+    max_height: int | None = None,
+    out_dir: Path = OUT_DIR,
+) -> None:
     """One element, optionally cut off at `max_height` CSS pixels.
 
     A changelist can run to hundreds of rows; a help page only ever needs the
     top of it, and a 2 MB PNG helps nobody.
     """
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     element = page.locator(selector).first
     element.scroll_into_view_if_needed()
     # bounding_box() is viewport-relative; back at the top of the page it is
@@ -106,12 +116,12 @@ def shoot(page, name: str, selector: str = "#content", max_height: int | None = 
         # full_page: the clip is in page coordinates, which for a tall element
         # reach past the bottom of the viewport.
         page.screenshot(
-            path=str(OUT_DIR / name), clip={**box, "height": max_height}, full_page=True
+            path=str(out_dir / name), clip={**box, "height": max_height}, full_page=True
         )
     else:
-        element.screenshot(path=str(OUT_DIR / name))
-    shrink(OUT_DIR / name)
-    print(f"  {name}")
+        element.screenshot(path=str(out_dir / name))
+    shrink(out_dir / name)
+    print(f"  {out_dir.relative_to(HELP_IMG_DIR)}/{name}")
 
 
 def capture(base_url: str, roster_class_id: str) -> None:
@@ -161,7 +171,68 @@ def capture(base_url: str, roster_class_id: str) -> None:
         page.goto(f"{base_url}/admin/notifications/notification/")
         shoot(page, "notifications-log.png", "#result_list", max_height=520)
 
+        capture_provider(browser, base_url)
         browser.close()
+
+
+def capture_provider(browser, base_url: str) -> None:
+    """The provider dashboard as the demo coach sees it, for the provider guides."""
+    out = HELP_IMG_DIR / "provider"
+    # A phone-sized viewport is what a coach in a sports hall actually holds,
+    # but the guides are read at a desk: a narrow desktop width keeps the
+    # pictures legible in both.
+    context = browser.new_context(
+        viewport={"width": 1100, "height": 900}, device_scale_factor=2,
+        timezone_id=SERVER_TIMEZONE,
+    )
+    # The site header is sticky, and a clipped full-page screenshot paints it
+    # over the top of whatever it is clipping. Pin it in place for the shoot.
+    context.add_init_script(
+        """document.addEventListener('DOMContentLoaded', () => {
+             const style = document.createElement('style');
+             style.textContent = '.site-header { position: static !important; }';
+             document.head.appendChild(style);
+           });"""
+    )
+    page = context.new_page()
+
+    page.goto(f"{base_url}/accounts/login/")
+    page.fill("#id_username", COACH_EMAIL)
+    page.fill("#id_password", PASSWORD)
+    page.click("button[type=submit], input[type=submit]")
+    page.wait_for_url(f"{base_url}/provider/**")
+
+    page.goto(f"{base_url}/provider/")
+    shoot(page, "dashboard.png", "main", max_height=700, out_dir=out)
+
+    # The first class on the coach's list is Football Juniors: enrolled
+    # children (from demo_office), two instructors, a session calendar.
+    page.click("table.list a >> nth=0")
+    page.wait_for_url(f"{base_url}/provider/classes/*/")
+    shoot(page, "class-page.png", "main", max_height=1000, out_dir=out)
+
+    page.click("a:has-text('Take attendance')")
+    page.wait_for_url(f"{base_url}/provider/classes/*/sessions/*/attendance/")
+    shoot(page, "attendance.png", "main", max_height=700, out_dir=out)
+
+    page.goto(f"{base_url}/provider/broadcast/")
+    shoot(page, "message-form.png", "main", max_height=900, out_dir=out)
+
+    page.goto(f"{base_url}/provider/instructors/")
+    shoot(page, "instructors.png", "main", max_height=800, out_dir=out)
+
+    page.click("a:has-text('Add an instructor')")
+    page.wait_for_url(f"{base_url}/provider/instructors/add/*/")
+    shoot(page, "add-instructor.png", "main", max_height=900, out_dir=out)
+
+    page.goto(f"{base_url}/provider/instructors/")
+    page.click("table.list a >> nth=0")
+    page.wait_for_url(f"{base_url}/provider/instructors/*/")
+    shoot(page, "instructor-page.png", "main", max_height=1100, out_dir=out)
+
+    page.goto(f"{base_url}/provider/profile/")
+    page.wait_for_url(f"{base_url}/provider/instructors/*/profile/")
+    shoot(page, "profile-form.png", "main", max_height=1000, out_dir=out)
 
 
 def main() -> None:
@@ -182,7 +253,7 @@ def main() -> None:
         finally:
             server.terminate()
             server.wait(timeout=10)
-    print(f"\nwritten to {OUT_DIR.relative_to(BASE_DIR)}")
+    print(f"\nwritten to {HELP_IMG_DIR.relative_to(BASE_DIR)}/{{admin,provider}}")
 
 
 if __name__ == "__main__":

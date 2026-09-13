@@ -22,7 +22,8 @@
     </tr>
     {% endfor %}
   </table></div>
-  <p class="small muted">Untick children who are absent, then save.</p>
+  <p class="small muted">Untick children who are absent, then save.
+     <a href="{% url 'provider_help_topic' 'attendance' %}">Help with attendance.</a></p>
   <button type="submit" class="btn">Save attendance</button>
   <a class="btn btn-secondary" href="{% url 'provider_class' cls.pk %}">Back</a>
 </form>

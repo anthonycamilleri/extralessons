@@ -83,7 +83,51 @@ ADMIN = Audience(
     ),
 )
 
-AUDIENCES = {audience.key: audience for audience in (ADMIN,)}
+PROVIDER = Audience(
+    key="provider",
+    title="Help for providers and instructors",
+    intro=(
+        "Short guides to the provider dashboard: your classes and their "
+        "registers, taking attendance, writing to families, your instructor "
+        "profile and certificate, and, for provider accounts, managing the "
+        "people who teach for you."
+    ),
+    url_name="provider_help_topic",
+    topics=(
+        Topic(
+            slug="getting-started",
+            title="Getting started",
+            summary="Logging in, the two kinds of account, and what you will find on your dashboard.",
+        ),
+        Topic(
+            slug="your-classes",
+            title="Your classes and their registers",
+            summary="Who is in each class, who may go home alone, and what families have told you.",
+        ),
+        Topic(
+            slug="attendance",
+            title="Taking attendance",
+            summary="Mark who was there at each session, and correct it afterwards.",
+        ),
+        Topic(
+            slug="messaging-families",
+            title="Messaging families",
+            summary="Write to the families of your classes, and check it arrived before it goes.",
+        ),
+        Topic(
+            slug="your-profile",
+            title="Your profile and certificate of police conduct",
+            summary="What parents see about you, and the certificate the school checks.",
+        ),
+        Topic(
+            slug="managing-instructors",
+            title="Managing your instructors",
+            summary="For provider accounts: add the people who teach for you, give them classes, and keep the list right.",
+        ),
+    ),
+)
+
+AUDIENCES = {audience.key: audience for audience in (ADMIN, PROVIDER)}
 
 
 def get_audience(key: str) -> Audience:
