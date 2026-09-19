@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block extrahead %}{{ block.super }}{{ form.media }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  › <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  › <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  › <a href="{% url opts|admin_urlname:'change' cls.pk %}">{{ cls.title }}</a>
+  › Announcement
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+{% comment %}Django nests object-tools inside the content block, so a page
+   that overrides content has to render the bar itself.{% endcomment %}
+<ul class="object-tools">
+  <li><a href="{% url 'admin:catalog_activityclass_roster' cls.pk %}">Roster</a></li>
+  <li><a href="{% url opts|admin_urlname:'change' cls.pk %}">Edit class</a></li>
+  <li><a href="{% url 'admin:notifications_broadcast_add' %}" class="addlink">Announcement to several classes</a></li>
+  <li><a href="{% url 'admin:help_topic' 'announcements' %}">Help with announcements</a></li>
+</ul>
+  <h1>Announcement to {{ cls.title }}</h1>
+  <p class="desk-scope">
+    {{ cls.provider.name }} · {{ cls.term.name }} · {{ cls.schedule_display }}{% if cls.location %} · {{ cls.location }}{% endif %}
+    · <span class="pill{% if cls.status == 'CANCELLED' %} pill-bad{% elif cls.status == 'PUBLISHED' %} pill-ok{% else %} pill-warn{% endif %}">{{ cls.get_status_display|lower }}</span>
+  </p>
+  <p class="help-inline">
+    This goes to the families of <b>{{ cls.title }}</b> and nobody else — the
+    composer under Notifications is the one for a message that spans classes.
+    It is sent straight away and cannot be unsent, so press
+    <b>Send me a test email</b> under the message first.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <div class="submit-row">
+      <input type="submit" value="Send announcement" class="default">
+      <a href="{% url opts|admin_urlname:'changelist' %}" class="button cancel-link">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

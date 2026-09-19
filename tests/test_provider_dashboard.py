@@ -178,6 +178,36 @@ class TestProviderBroadcast:
         assert sent_to == {waiting.child.guardians.first().pk}
         assert seated.child.guardians.first().pk not in sent_to
 
+    def test_provider_can_write_to_a_cancelled_class(self, client):
+        """The picker has always listed cancelled classes; before the third
+        audience existed, writing to one reached nobody."""
+        admin = AdminFactory()
+        provider_user, cls = provider_with_class()
+        parent = UserFactory()
+        services.approve_request(services.register(ChildFactory(parent=parent), cls), admin)
+        services.cancel_class(cls)
+        client.force_login(provider_user)
+
+        def send(audience):
+            Notification.objects.filter(event=Event.BROADCAST).delete()
+            return client.post(
+                reverse("provider_broadcast"),
+                {
+                    "classes": [cls.pk],
+                    "audience": audience,
+                    "subject": "Sorry about the class",
+                    "body_html": "<p>We could not run it.</p>",
+                },
+            )
+
+        send(Broadcast.Audience.EVERYONE)
+        assert not Notification.objects.filter(event=Event.BROADCAST).exists()
+
+        send(Broadcast.Audience.EVER_REGISTERED)
+        assert Notification.objects.filter(
+            event=Event.BROADCAST, recipient=parent, channel="EMAIL"
+        ).exists()
+
     def test_broadcast_form_rejects_other_providers_class(self, client):
         provider_user, _ = provider_with_class()
         other_cls = ActivityClassFactory()

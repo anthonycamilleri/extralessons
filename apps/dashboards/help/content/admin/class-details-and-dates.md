@@ -37,6 +37,12 @@ You cannot change **Status** on the form. Publishing, cancelling and archiving
 are done from the **Action** menu on the class list, so that families always
 get told.
 
+Cancelling a class cancels every place in it, which means the families are no
+longer on any list. To write to them afterwards — an apology, an alternative,
+a word about the money — use the **Announce** link on the class's row and pick
+the audience that includes cancelled places; see
+[Sending an announcement](announcements).
+
 ## How the lesson dates are worked out {#dates}
 
 You never type the dates in. The app works them out from three things:

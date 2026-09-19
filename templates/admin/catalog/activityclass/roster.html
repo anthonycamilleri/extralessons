@@ -18,6 +18,7 @@
 <ul class="object-tools">
   <li><a href="?format=csv">Download CSV</a></li>
   <li><a href="{% url opts|admin_urlname:'change' cls.pk %}">Edit class</a></li>
+  <li><a href="{% url 'admin:catalog_activityclass_announce' cls.pk %}">Send announcement</a></li>
   <li><a href="{% url 'admin:enrollments_enrollment_requests' %}">All requests</a></li>
   <li><a href="{{ cls.get_absolute_url }}">View on site</a></li>
   <li><a href="{% url 'admin:help_topic' 'waiting-lists' %}">Help with waiting lists</a></li>

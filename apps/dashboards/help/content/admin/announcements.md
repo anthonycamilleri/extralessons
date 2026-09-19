@@ -6,8 +6,19 @@ room, a kit reminder, a cancelled week.
 
 ## Where to find it {#where}
 
-Click **Send announcement** at the top of any admin page, or go to
-**Notifications → Announcements → Add announcement**.
+There are two doors, and which one you want depends on how many classes the
+message concerns.
+
+For a message that spans classes, click **Send announcement** at the top of
+any admin page, or go to **Notifications → Announcements → Add announcement**.
+That is the composer the rest of this page describes.
+
+For a message to **one** class, use the **Announce** link on that class's row
+in the class list — or **Send announcement** on the class's own page or its
+roster. The class is already the address, so there is nothing to tick, and
+the class list stays the place you work from. It is also the only way to
+write to a class the composer does not list: see
+[Writing to one class](#one-class).
 
 ![The announcement composer, with the classes, who gets it, subject and message](announcement-form.png)
 
@@ -20,7 +31,7 @@ Click **Send announcement** at the top of any admin page, or go to
 - **Selected classes** — tick the ones you mean. Only classes in the active
   term are listed.
 
-**Who gets it** — two choices, applied inside the classes you just picked:
+**Who gets it** — three choices, applied inside the classes you just picked:
 
 - **Everyone with a live place** — the usual one, and what every announcement
   did before this choice existed. "Live" is wider than you might think; see
@@ -29,6 +40,11 @@ Click **Send announcement** at the top of any admin page, or go to
   [on the waiting list](waiting-lists) right now. Use it to tell them where
   they stand, to ask whether they still want the place, or to say the term has
   filled up.
+- **Everyone who ever had a place** — the same families plus the ones whose
+  place has since been cancelled: withdrawn, not approved, or cancelled by the
+  school. Use it when the news concerns people who are no longer on the list —
+  above all when the class itself was cancelled, which cancelled every place in
+  it and left nobody "live" to write to.
 
 **Subject** is the email subject line. **Message** is the body, written as
 you would write it to a parent. Each family sees it opening with their own
@@ -49,6 +65,31 @@ email links to the hosted copy rather than attaching it.
 > the words only — a picture becomes its description, a link its address — so
 > never let a picture carry the whole point.
 
+## Writing to one class {#one-class}
+
+The **Announce** link on a class opens the same editor, already addressed to
+that class. Nothing else changes: the same audiences, the same test email, the
+same delivery log, and the message is recorded in the announcement history
+like any other.
+
+Two things it does that the main composer cannot:
+
+- **A cancelled class.** Cancelling a class cancels every place in it, so
+  *Everyone with a live place* matches nobody there. Pick **Everyone who ever
+  had a place** and the families who were in it hear from you — to apologise,
+  to offer an alternative, or to explain a refund.
+- **A class whose term is over.** The main composer lists the active term
+  only, on purpose: a picker holding every class ever run is a picker nobody
+  can read. Last term's class is still on the class list, and its **Announce**
+  link still works.
+
+Each audience on that page carries the number of families it would reach,
+counted for the class as it stands, so you can see before you write that
+*Everyone with a live place — 0 families* and pick the one that isn't empty.
+
+> Messages to several classes at once still belong in the main composer. This
+> one sends to the class you opened it from and nothing else.
+
 ## Who actually gets it {#recipients}
 
 > This surprises people, so it is worth reading once.
@@ -68,6 +109,11 @@ already offered a seat to has left the list — they are being asked to confirm,
 and the offer email is doing that job — so an offer holder is not written to
 here. Neither is a request you have not approved yet: until you approve it, the
 child is not on the list.
+
+**Everyone who ever had a place** is the widest: it adds the cancelled places
+to the live ones, so a family who withdrew in week two hears about it too.
+Worth a thought before you use it on a class that is still running — those
+families chose to leave.
 
 If nothing matches — an empty waiting list, say — nothing is sent, and the page
 tells you so instead of reporting a send.
@@ -120,5 +166,5 @@ on.
 ## Providers can write too {#providers}
 
 Coaches and tutors have their own **Message families** button on their
-dashboard, limited to their own classes. They choose the same two audiences,
-and their messages appear in the same delivery log.
+dashboard, limited to their own classes. They choose from the same three
+audiences, and their messages appear in the same delivery log.

@@ -451,18 +451,48 @@ def audience_statuses(audience):
     "Waiting list only" means the children still waiting: a child holding an
     offer has already been handed the seat and hears about it through the
     offer emails, so they are no longer on the list.
+
+    "Everyone who ever had a place" adds the cancelled ones, and is the only
+    audience a cancelled class still has: cancelling a class cancels every
+    place in it, so nothing there is live any more.
     """
     from apps.enrollments.models import Enrollment
 
     if audience == Broadcast.Audience.WAITLIST:
         return [Enrollment.Status.WAITLISTED]
+    if audience == Broadcast.Audience.EVER_REGISTERED:
+        return list(Enrollment.Status.values)
     return Enrollment.ACTIVE_STATUSES
+
+
+def broadcast_recipients(classes, audience):
+    """The guardians an announcement to these classes would reach, by pk.
+
+    One definition of "who gets it", so the count a composer shows before
+    sending and the rows queue_broadcast writes can never disagree. A parent
+    with two children in two of the classes appears once.
+    """
+    from apps.enrollments.models import Enrollment
+
+    recipients = {}
+    for enrollment in (
+        Enrollment.objects.filter(
+            activity_class__in=classes,
+            status__in=audience_statuses(audience),
+        )
+        .select_related("child")
+        .prefetch_related(
+            Prefetch("child__guardians", queryset=User.objects.filter(is_active=True))
+        )
+    ):
+        for guardian in enrollment.child.guardians.all():
+            recipients.setdefault(guardian.pk, guardian)
+    return recipients
 
 
 def queue_broadcast(broadcast):
     """Fan a broadcast out to the guardians its audience covers."""
     from apps.catalog.models import ActivityClass
-    from apps.enrollments.models import Enrollment
 
     template = _get_template(Event.BROADCAST)
     if template is None:
@@ -473,19 +503,7 @@ def queue_broadcast(broadcast):
     else:
         classes = broadcast.classes.all()
 
-    recipients = {}
-    for enrollment in (
-        Enrollment.objects.filter(
-            activity_class__in=classes,
-            status__in=audience_statuses(broadcast.audience),
-        )
-        .select_related("child")
-        .prefetch_related(
-            Prefetch("child__guardians", queryset=User.objects.filter(is_active=True))
-        )
-    ):
-        for guardian in enrollment.child.guardians.all():
-            recipients.setdefault(guardian.pk, guardian)
+    recipients = broadcast_recipients(classes, broadcast.audience)
 
     rows = []
     for guardian in recipients.values():

@@ -11,8 +11,11 @@ from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
-from apps.accounts.admin_permissions import SchoolAdminPermissionMixin
+from apps.accounts.admin_permissions import SchoolAdminPermissionMixin, is_school_admin
 from apps.accounts.models import User
+from apps.notifications import services as notification_services
+from apps.notifications.forms import RichTextField
+from apps.notifications.models import Broadcast
 
 from .models import (
     ActivityClass,
@@ -449,6 +452,51 @@ class CloneIntoTermForm(forms.Form):
     )
 
 
+def may_send_announcements(request):
+    """The rule the announcement composer itself applies (BroadcastAdmin).
+
+    Asked here so the class list can offer the same job without the class
+    admin growing its own idea of who may write to families.
+    """
+    return is_school_admin(request) or request.user.has_perm("notifications.add_broadcast")
+
+
+class ClassAnnouncementForm(forms.Form):
+    """Write to one class's families, addressed before it is opened.
+
+    The main composer picks its classes from the active term; this one is
+    already pointed at a single class, which is what makes it the way to
+    write to a class that is cancelled or whose term is over — without those
+    classes having to clutter the composer's picker.
+
+    Each audience carries the number of families it would reach, counted for
+    this class now. A cancelled class reads "Everyone with a live place — 0
+    families", which is the whole reason the third audience exists.
+    """
+
+    audience = forms.ChoiceField(
+        widget=forms.RadioSelect,
+        initial=Broadcast.Audience.EVERYONE,
+        label="Who gets it",
+        help_text="Counted for this class as it stands now. Nobody is emailed "
+        "twice: a parent with two children in the class gets one email.",
+    )
+    subject = forms.CharField(max_length=200)
+    body_html = RichTextField()
+
+    def __init__(self, activity_class, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        def families(audience):
+            reached = notification_services.broadcast_recipients([activity_class], audience)
+            return notification_services.family_count_phrase(len(reached))
+
+        self.fields["audience"].choices = [
+            (value, f"{label} — {families(value)}")
+            for value, label in Broadcast.Audience.choices
+        ]
+
+
 class ClassSessionInline(admin.TabularInline):
     model = ClassSession
     extra = 0
@@ -526,6 +574,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         "instructor_list",
         "administrator_list",
         "roster_link",
+        "announce_link",
     ]
     list_filter = [
         ManagedByFilter,
@@ -653,17 +702,29 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             reverse("admin:catalog_activityclass_roster", kwargs={"object_id": obj.pk}),
         )
 
+    @admin.display(description="")
+    def announce_link(self, obj):
+        return format_html(
+            '<a href="{}">Announce</a>',
+            reverse("admin:catalog_activityclass_announce", kwargs={"object_id": obj.pk}),
+        )
+
     # -- Roster ---------------------------------------------------------------
 
     def get_urls(self):
-        roster = [
+        extra = [
             path(
                 "<int:object_id>/roster/",
                 self.admin_site.admin_view(self.roster_view),
                 name="catalog_activityclass_roster",
             ),
+            path(
+                "<int:object_id>/announce/",
+                self.admin_site.admin_view(self.announce_view),
+                name="catalog_activityclass_announce",
+            ),
         ]
-        return roster + super().get_urls()
+        return extra + super().get_urls()
 
     def roster_view(self, request, object_id):
         """Everyone in one class, by state, with the actions that move them."""
@@ -755,6 +816,58 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
                     ]
                 )
         return response
+
+    # -- Announcement to one class -------------------------------------------
+
+    def announce_view(self, request, object_id):
+        """Write to the families of one class, and nobody else.
+
+        The composer under Notifications is the one for a message that spans
+        classes, and its picker stays what it is: the active term. This page
+        is the other half — the class is the address, so a cancelled class, or
+        one whose term is over, can still be written to without being listed
+        there.
+        """
+        cls = get_object_or_404(self.get_queryset(request), pk=object_id)
+        if not (self.has_change_permission(request, cls) and may_send_announcements(request)):
+            raise PermissionDenied
+        form = ClassAnnouncementForm(cls, request.POST or None)
+        if request.method == "POST" and form.is_valid():
+            _, count = notification_services.create_broadcast(
+                sender=request.user,
+                scope=Broadcast.Scope.SELECTED_CLASSES,
+                subject=form.cleaned_data["subject"],
+                body_html=form.cleaned_data["body_html"],
+                classes=[cls],
+                audience=form.cleaned_data["audience"],
+            )
+            # An audience can legitimately match nobody — a class with an
+            # empty waiting list, or one whose places were never taken up.
+            # Say so rather than reporting a send that reached no one.
+            if count:
+                self.message_user(
+                    request,
+                    f"Announcement queued for "
+                    f"{notification_services.family_count_phrase(count)} of {cls.title}.",
+                )
+            else:
+                self.message_user(
+                    request,
+                    "Nobody matched that audience, so the announcement was not sent "
+                    "to anyone.",
+                    messages.WARNING,
+                )
+            return redirect(reverse("admin:catalog_activityclass_changelist"))
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.opts,
+            "title": f"{cls.title} · announcement",
+            "cls": cls,
+            "form": form,
+        }
+        return TemplateResponse(
+            request, "admin/catalog/activityclass/announce.html", context
+        )
 
     @admin.action(description="Assign administrators…")
     def assign_administrators(self, request, queryset):

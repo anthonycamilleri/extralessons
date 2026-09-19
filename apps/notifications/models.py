@@ -85,6 +85,12 @@ class Broadcast(models.Model):
     class Audience(models.TextChoices):
         EVERYONE = "EVERYONE", "Everyone with a live place"
         WAITLIST = "WAITLIST", "Waiting list only"
+        # The only audience a cancelled class still has: cancelling a class
+        # cancels every place in it, so "live place" matches nobody there.
+        EVER_REGISTERED = (
+            "EVER_REGISTERED",
+            "Everyone who ever had a place, cancelled places included",
+        )
 
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="broadcasts"

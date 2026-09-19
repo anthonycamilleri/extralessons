@@ -230,3 +230,150 @@ class TestDjangoAdminActions:
 
         assert response.status_code == 302
         assert Notification.objects.filter(event=Event.ADMIN_SEAT_FREED).exists()
+
+
+class TestClassAnnouncement:
+    """The composer on the class itself: one class, already addressed.
+
+    Its reason to exist is the class the main composer cannot reach — a
+    cancelled one, or one whose term is over — without those classes having
+    to appear in that composer's picker.
+    """
+
+    def announce(self, client, cls, **fields):
+        return client.post(
+            reverse("admin:catalog_activityclass_announce", args=[cls.pk]),
+            {
+                "audience": Broadcast.Audience.EVERYONE,
+                "subject": "Room change",
+                "body_html": "<p>We are in the <strong>hall</strong>.</p>",
+                **fields,
+            },
+        )
+
+    def test_the_class_list_offers_it_per_class(self, client):
+        cls = ActivityClassFactory()
+        client.force_login(SuperAdminFactory())
+        page = client.get(reverse("admin:catalog_activityclass_changelist")).content.decode()
+        assert reverse("admin:catalog_activityclass_announce", args=[cls.pk]) in page
+
+    def test_it_reaches_that_class_only(self, client):
+        parent, stranger = UserFactory(), UserFactory()
+        cls, other = ActivityClassFactory(), ActivityClassFactory()
+        services.register(ChildFactory(parent=parent), cls)
+        services.register(ChildFactory(parent=stranger), other)
+        client.force_login(SuperAdminFactory())
+
+        response = self.announce(client, cls)
+
+        assert response.status_code == 302
+        broadcast = Broadcast.objects.get()
+        assert broadcast.scope == Broadcast.Scope.SELECTED_CLASSES
+        assert list(broadcast.classes.all()) == [cls]
+        sent_to = set(
+            Notification.objects.filter(
+                event=Event.BROADCAST, channel=Notification.Channel.EMAIL
+            ).values_list("recipient", flat=True)
+        )
+        assert sent_to == {parent.pk}
+
+    def test_a_cancelled_class_has_nobody_with_a_live_place(self, client):
+        """The gap this page fills: cancelling cancels every place in the class."""
+        parent = UserFactory()
+        cls = ActivityClassFactory()
+        services.register(ChildFactory(parent=parent), cls)
+        services.cancel_class(cls)
+        client.force_login(SuperAdminFactory())
+
+        self.announce(client, cls, audience=Broadcast.Audience.EVERYONE)
+
+        assert not Notification.objects.filter(event=Event.BROADCAST).exists()
+
+    def test_a_cancelled_class_can_still_be_written_to(self, client):
+        parent = UserFactory()
+        cls = ActivityClassFactory()
+        services.register(ChildFactory(parent=parent), cls)
+        services.cancel_class(cls)
+        client.force_login(SuperAdminFactory())
+
+        self.announce(client, cls, audience=Broadcast.Audience.EVER_REGISTERED)
+
+        row = Notification.objects.get(
+            event=Event.BROADCAST, recipient=parent, channel=Notification.Channel.EMAIL
+        )
+        assert "<strong>hall</strong>" in row.rendered_html
+        assert Broadcast.objects.get().audience == Broadcast.Audience.EVER_REGISTERED
+
+    def test_each_audience_says_how_many_families_it_reaches(self, client):
+        cls = ActivityClassFactory()
+        services.register(ChildFactory(parent=UserFactory()), cls)
+        services.cancel_class(cls)
+        client.force_login(SuperAdminFactory())
+
+        page = client.get(
+            reverse("admin:catalog_activityclass_announce", args=[cls.pk])
+        ).content.decode()
+
+        assert "Everyone with a live place — 0 families" in page
+        assert "cancelled places included — 1 family" in page
+
+    def test_a_class_whose_term_is_over_can_still_be_written_to(self, client):
+        """The main composer lists the active term only; this page has no picker."""
+        parent = UserFactory()
+        cls = ActivityClassFactory()
+        services.register(ChildFactory(parent=parent), cls)
+        cls.term.is_active = False
+        cls.term.save(update_fields=["is_active"])
+        client.force_login(SuperAdminFactory())
+
+        assert self.announce(client, cls).status_code == 302
+        assert Notification.objects.filter(
+            event=Event.BROADCAST, recipient=parent, channel=Notification.Channel.EMAIL
+        ).exists()
+
+    def test_a_send_that_reached_nobody_says_so(self, client):
+        cls = ActivityClassFactory()
+        client.force_login(SuperAdminFactory())
+
+        response = self.announce(client, cls, audience=Broadcast.Audience.WAITLIST)
+
+        assert b"was not sent to anyone" in client.get(response.url).content
+
+    def test_the_composer_loads_the_editor(self, client):
+        cls = ActivityClassFactory()
+        client.force_login(SuperAdminFactory())
+        page = client.get(
+            reverse("admin:catalog_activityclass_announce", args=[cls.pk])
+        ).content
+        assert b"vendor/quill/quill.js" in page
+        assert b'data-richtext="1"' in page
+        assert reverse("announcement_test_send").encode() in page
+
+    def test_an_empty_message_is_refused(self, client):
+        cls = ActivityClassFactory()
+        client.force_login(SuperAdminFactory())
+
+        response = self.announce(client, cls, body_html="<p><br></p>")
+
+        assert response.status_code == 200
+        assert b"Write a message." in response.content
+        assert not Broadcast.objects.exists()
+
+    def test_an_admin_cannot_write_to_a_class_that_is_not_theirs(self, client):
+        admin = AdminFactory()
+        mine, theirs = ActivityClassFactory(), ActivityClassFactory()
+        mine.administrators.add(admin)
+        client.force_login(admin)
+
+        assert self.announce(client, mine).status_code == 302
+        assert self.announce(client, theirs).status_code == 404
+        assert list(Broadcast.objects.get().classes.all()) == [mine]
+
+    def test_it_is_closed_to_parents(self, client):
+        cls = ActivityClassFactory()
+        client.force_login(UserFactory())
+        response = client.get(
+            reverse("admin:catalog_activityclass_announce", args=[cls.pk])
+        )
+        assert response.status_code == 302
+        assert response.url.startswith(reverse("admin:login"))
