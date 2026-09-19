@@ -25,7 +25,12 @@ class BroadcastAdminForm(forms.ModelForm):
     for anyone else; that narrowing is what classes_addressed() records.
 
     The classes are one half of the address; `audience` is the other, and
-    picks who inside them — everyone, or only the waiting list."""
+    picks who inside them — everyone with a live place, the waiting list
+    alone, or everyone who ever had a place.
+
+    A message to a single class is composed from the class itself
+    (apps.catalog.admin.ActivityClassAdmin.announce_view), which is why the
+    picker here can stay the active term."""
 
     request = None  # injected per request by BroadcastAdmin.get_form
 
@@ -73,7 +78,9 @@ class BroadcastAdminForm(forms.ModelForm):
             audience.help_text = (
                 "Everyone means every guardian of a child with a live place in those "
                 "classes — enrolled, waiting, offered a seat, or not reviewed yet. "
-                "Waiting list only reaches the families still waiting for a seat."
+                "Waiting list only reaches the families still waiting for a seat. "
+                "The third adds the places since cancelled, and is the only audience "
+                "a cancelled class still has."
             )
 
     def clean(self):

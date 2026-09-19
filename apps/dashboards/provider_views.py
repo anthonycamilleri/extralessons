@@ -151,7 +151,9 @@ class ProviderBroadcastForm(forms.Form):
         initial=Broadcast.Audience.EVERYONE,
         label="Who gets it",
         help_text="Everyone with a live place in those classes — enrolled, waiting, "
-        "offered a seat, or not reviewed yet — or only the families still waiting.",
+        "offered a seat, or not reviewed yet — or only the families still waiting. "
+        "The third adds the places since cancelled, and is the only audience a "
+        "cancelled class still has.",
     )
     subject = forms.CharField(max_length=200)
     body_html = RichTextField()
