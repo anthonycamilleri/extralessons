@@ -30,7 +30,14 @@
 .richtext-editor .ql-editor h3 { font-size: 1.125rem; margin: 0.6em 0 0.3em; }
 .richtext-editor .ql-editor a { color: #0072bb; }
 .richtext-field .ql-toolbar.ql-snow { background: #fff; border-radius: 4px 4px 0 0; }
-.richtext-field .ql-container.ql-snow { border-radius: 0 0 4px 4px; }
+/* Quill's snow theme sets .ql-container { height: 100% }. In a wrapper of
+   automatic height that resolves against the wrapper itself, so the editor
+   claims the whole box and whatever follows it — the "Send me a test email"
+   row — is laid out below the wrapper, where the admin's .form-row clearfix
+   (overflow: hidden) clips it out of sight. Sizing to content keeps the
+   wrapper as tall as everything inside it; .ql-editor's min-height, above,
+   is what actually makes the editing area roomy. */
+.richtext-field .ql-container.ql-snow { height: auto; border-radius: 0 0 4px 4px; }
 
 .richtext-error { color: #b42318; margin: 0.5rem 0 0; }
 .richtext-error[hidden] { display: none; }
