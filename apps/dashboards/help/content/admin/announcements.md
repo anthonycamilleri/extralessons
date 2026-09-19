@@ -67,6 +67,8 @@ email links to the hosted copy rather than attaching it.
 
 ## Writing to one class {#one-class}
 
+![The composer for one class, each audience with the number of families it reaches](class-announcement.png)
+
 The **Announce** link on a class opens the same editor, already addressed to
 that class. Nothing else changes: the same audiences, the same test email, the
 same delivery log, and the message is recorded in the announcement history

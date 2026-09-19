@@ -155,6 +155,9 @@ def capture(base_url: str, roster_class_id: str) -> None:
         shoot(page, "roster.png", max_height=900)
         shoot(page, "roster-waiting-list.png", "#waiting-list")
 
+        page.goto(f"{base_url}/admin/catalog/activityclass/{roster_class_id}/announce/")
+        shoot(page, "class-announcement.png", max_height=620)
+
         page.goto(f"{base_url}/admin/notifications/broadcast/add/")
         shoot(page, "announcement-form.png", max_height=980)
 

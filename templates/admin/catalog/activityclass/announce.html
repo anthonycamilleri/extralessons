@@ -23,7 +23,6 @@
   <li><a href="{% url 'admin:notifications_broadcast_add' %}" class="addlink">Announcement to several classes</a></li>
   <li><a href="{% url 'admin:help_topic' 'announcements' %}">Help with announcements</a></li>
 </ul>
-  <h1>Announcement to {{ cls.title }}</h1>
   <p class="desk-scope">
     {{ cls.provider.name }} · {{ cls.term.name }} · {{ cls.schedule_display }}{% if cls.location %} · {{ cls.location }}{% endif %}
     · <span class="pill{% if cls.status == 'CANCELLED' %} pill-bad{% elif cls.status == 'PUBLISHED' %} pill-ok{% else %} pill-warn{% endif %}">{{ cls.get_status_display|lower }}</span>
