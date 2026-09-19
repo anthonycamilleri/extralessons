@@ -7,8 +7,12 @@ name: "Scaleway: configure the estate"
 #   SECRET_KEY                 kept identical so every parent's session and
 #                              every outstanding password-reset or invitation
 #                              link survives the move
-#   ZEPTOMAIL_SEND_MAIL_TOKEN  email keeps flowing from the same Mail Agent
 #   MCP_API_TOKEN              the Claude connector keeps working unchanged
+#   ZEPTOMAIL_SEND_MAIL_TOKEN  carried over only if Render still has one
+#
+# Email itself is Scaleway Transactional Email: the password comes from the
+# SCW_MAIL_SECRET_KEY secret and the rest from deploy/scaleway-env.lib.sh,
+# exactly as deploy.yml applies them on every deploy.
 #   DATABASE_URL               stays what it is: the Scaleway database's own
 #
 # Uploaded images live in the database (apps/media), so the S3_* variables of
@@ -70,6 +74,8 @@ jobs:
       JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
       RENDER_WEB_SERVICE_NAME: extralessons-web
       RENDER_ENV_GROUP_NAME: extralessons-shared
+      EMAIL_HOST_USER: ${{ vars.SCW_MAIL_PROJECT_ID || secrets.SCW_DEFAULT_PROJECT_ID }}
+      EMAIL_HOST_PASSWORD: ${{ secrets.SCW_MAIL_SECRET_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,7 +83,7 @@ jobs:
         run: |
           missing=""
           for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID RENDER_API_KEY \
-                   CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID; do
+                   CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID EMAIL_HOST_PASSWORD; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
           [ -z "$missing" ] || { echo "::error::Missing secrets/variables:$missing"; exit 1; }
@@ -100,9 +106,12 @@ jobs:
             [ -n "$v" ] || v="$(jq -r --arg k "$1" '.envVars[] | select(.key==$k) | .value' <<<"$group_env")"
             printf '%s' "$v"
           }
-          for k in SECRET_KEY ZEPTOMAIL_SEND_MAIL_TOKEN MCP_API_TOKEN; do
+          for k in SECRET_KEY MCP_API_TOKEN ZEPTOMAIL_SEND_MAIL_TOKEN; do
             v="$(value $k)"
-            [ -n "$v" ] || { echo "::error::Render holds no value for $k"; exit 1; }
+            if [ -z "$v" ]; then
+              [ "$k" = ZEPTOMAIL_SEND_MAIL_TOKEN ] && { echo "Render holds no $k (fine: email is Transactional Email)"; continue; }
+              echo "::error::Render holds no value for $k"; exit 1
+            fi
             echo "::add-mask::$v"
             echo "$k=$v" >> "$GITHUB_OUTPUT"
             echo "read $k from Render (${#v} characters)"
@@ -156,7 +165,7 @@ jobs:
           printf '  %s\n' "${PLAIN_ENV[@]}" "${scale[@]}"
           printf '  %s\n' "${CONTAINER_SECRETS[@]}" | sed -E 's/=.*/=<secret>/'
           echo "## jobs $JOB_MIGRATE_ID, $JOB_NOTIFIER_ID"
-          printf '  %s\n' "${JOB_ENV[@]}" | sed -E 's/^(environment-variables\.(SECRET_KEY|DATABASE_URL|ZEPTOMAIL_SEND_MAIL_TOKEN))=.*/\1=<secret>/'
+          printf '  %s\n' "${JOB_ENV[@]}" | sed -E 's/^(environment-variables\.(SECRET_KEY|DATABASE_URL|ZEPTOMAIL_SEND_MAIL_TOKEN|EMAIL_HOST_PASSWORD))=.*/\1=<secret>/'
 
           if [ "$DRY_RUN" = "true" ]; then
             echo; echo "Dry run: nothing changed. Re-run with dry_run unticked to apply."

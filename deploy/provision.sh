@@ -68,10 +68,18 @@ command -v docker >/dev/null || die "docker not found."
 : "${TIME_ZONE:=Europe/Malta}"
 : "${REGION:=fr-par}"
 : "${DEFAULT_FROM_EMAIL:=School Activities <notifications@${DOMAIN:-example.com}>}"
+# Email: Scaleway Transactional Email over SMTP (deploy/scaleway-env.lib.sh,
+# scw_email_env). The password is an API secret key allowed to send;
+# SCW_MAIL_SECRET_KEY is the name the GitHub workflows use for the same value.
+# The username defaults to this project's id once it is known (below).
+: "${EMAIL_HOST_PASSWORD:=${SCW_MAIL_SECRET_KEY:-}}"
+: "${EMAIL_HOST_USER:=}"
+# Legacy alternative: Zoho ZeptoMail's API. Only applied when the token is set.
 : "${ZEPTOMAIL_SEND_MAIL_TOKEN:=}"
 : "${ZEPTOMAIL_API_URL:=https://api.zeptomail.eu/v1.1/email}"
 : "${MIN_SCALE:=0}"
 export TIME_ZONE DEFAULT_FROM_EMAIL ZEPTOMAIL_API_URL ADMIN_EMAIL ZEPTOMAIL_SEND_MAIL_TOKEN
+export EMAIL_HOST_PASSWORD EMAIL_HOST_USER
 
 export SCW_DEFAULT_REGION="$REGION"
 
@@ -100,6 +108,10 @@ scw_setting() { # scw_setting CONFIG_KEY ENV_VAR
 PROJECT_ID="$(scw_setting default-project-id SCW_DEFAULT_PROJECT_ID)"
 ORGANIZATION_ID="$(scw_setting default-organization-id SCW_DEFAULT_ORGANIZATION_ID)"
 [ -n "$PROJECT_ID" ] || die "no default project. Run 'scw init', or export SCW_DEFAULT_PROJECT_ID (see docs/scaleway-setup.md)."
+# Transactional Email authenticates as the project the sending domain is
+# registered in; that is normally this one.
+: "${EMAIL_HOST_USER:=$PROJECT_ID}"
+[ -n "$EMAIL_HOST_PASSWORD" ] || die "EMAIL_HOST_PASSWORD (or SCW_MAIL_SECRET_KEY) is empty: set it in $CONFIG to the API secret key Transactional Email sends with."
 
 # Fail on a bad key here, with a sentence that says so, rather than fifteen
 # lines later inside a jq pipeline that saw an error object instead of a list.
@@ -259,7 +271,8 @@ else
   skip "MCP_API_TOKEN"
 fi
 export SECRET_KEY MCP_API_TOKEN
-[ -n "$ZEPTOMAIL_SEND_MAIL_TOKEN" ] || warn "ZEPTOMAIL_SEND_MAIL_TOKEN empty — sends will fail and retry; the outbox keeps them"
+ok "email via smtp.tem.scaleway.com as project $EMAIL_HOST_USER (Transactional Email)"
+[ -z "$ZEPTOMAIL_SEND_MAIL_TOKEN" ] || warn "ZEPTOMAIL_SEND_MAIL_TOKEN is set but inert: EMAIL_BACKEND names SMTP. Unset it unless returning to ZeptoMail."
 
 # --- 7. The web container ---------------------------------------------------
 

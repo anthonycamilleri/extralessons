@@ -19,7 +19,7 @@ exists:
 ```sh
 scw init                                      # once, interactive
 cp deploy/scaleway.env.example deploy/scaleway.env
-$EDITOR deploy/scaleway.env                   # domain, admin email, ZeptoMail token
+$EDITOR deploy/scaleway.env                   # domain, admin email, mail secret key
 ./deploy/provision.sh
 ./deploy/github-config.sh                     # writes the Actions secrets (needs gh)
 ```
@@ -52,7 +52,7 @@ by hand. The commands here and in the script are the same commands.
               ┌────────────────┴──────────────────┐
               │                                   │
    ┌──────────▼─────────┐                    ┌────▼─────────────────┐
-   │ Serverless SQL DB  │  rows + uploaded   │ ZeptoMail API /      │
+   │ Serverless SQL DB  │  rows + uploaded   │ Transactional Email  │
    │ (PostgreSQL 16)    │  class images      │ WhatsApp (outbound)  │
    └──────────▲─────────┘  (apps/media)      └────▲─────────────────┘
               │                                   │
@@ -217,16 +217,23 @@ is the authority; the commands below spell it out.
 export SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')
 export MCP_API_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(36))')
 export SITE_URL="https://$DOMAIN"
-export ZEPTOMAIL_SEND_MAIL_TOKEN=...       # the Mail Agent's Send Mail token
+export EMAIL_HOST_USER="$PROJECT_ID"       # Transactional Email logs in as the project
+export EMAIL_HOST_PASSWORD=...             # an API secret key allowed to send
 export ADMIN_EMAIL=you@example.com
 ```
 
-Email goes out through Zoho ZeptoMail's API
-(`apps/notifications/backends/zeptomail.py`): verify the sending domain in
-ZeptoMail (`zeptomail.zoho.eu` for an EU account), create a Mail Agent, copy its
-*Send Mail token*. The token selects the backend; without it the app falls back
-to plain SMTP over the `EMAIL_*` variables (port 587 only, see *Things that
-will bite you*).
+Email goes out through Scaleway Transactional Email over SMTP, with Django's
+own SMTP backend: `smtp.tem.scaleway.com`, port 587 with STARTTLS, username =
+the id of the project the sending domain is registered in, password = the
+secret key of an IAM principal with `TransactionalEmailFullAccess` (or a
+policy carrying `EmailSend`). Add the domain under *Transactional Email →
+Domains* and create the SPF, DKIM and DMARC records it shows before the first
+send; `DEFAULT_FROM_EMAIL` must be on that domain. The full variable set is
+`scw_email_env` in `deploy/scaleway-env.lib.sh`; the deploy workflow
+re-applies it on every deploy and then proves it with `manage.py
+send_test_email` (below). The Zoho ZeptoMail backend
+(`apps/notifications/backends/zeptomail.py`) remains as an alternative: set
+its token and `EMAIL_BACKEND` to it.
 
 ### The web container
 
@@ -251,14 +258,18 @@ scw container container create namespace-id="$NS_ID" name="$APP_NAME-web" \
   environment-variables.TIME_ZONE=Europe/Malta \
   environment-variables.LOG_LEVEL=INFO \
   environment-variables.DEFAULT_FROM_EMAIL="ESLJ Parents <info@$DOMAIN>" \
-  environment-variables.ZEPTOMAIL_API_URL=https://api.zeptomail.eu/v1.1/email \
+  environment-variables.EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend \
+  environment-variables.EMAIL_HOST=smtp.tem.scaleway.com \
+  environment-variables.EMAIL_PORT=587 \
+  environment-variables.EMAIL_USE_TLS=true \
+  environment-variables.EMAIL_HOST_USER="$EMAIL_HOST_USER" \
   environment-variables.ADMIN_EMAIL="$ADMIN_EMAIL" \
   environment-variables.DB_POOL_MAX_SIZE=8 \
   environment-variables.NOTIFIER_DRAIN_MAX_SECONDS=300 \
   environment-variables.WHATSAPP_ENABLED=false \
   secret-environment-variables.SECRET_KEY="$SECRET_KEY" \
   secret-environment-variables.DATABASE_URL="$DATABASE_URL" \
-  secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
+  secret-environment-variables.EMAIL_HOST_PASSWORD="$EMAIL_HOST_PASSWORD" \
   secret-environment-variables.MCP_API_TOKEN="$MCP_API_TOKEN" \
   -o json
 ```
@@ -312,7 +323,12 @@ scw jobs definition create name="$APP_NAME-migrate" \
   environment-variables.DATABASE_URL="$DATABASE_URL" \
   environment-variables.SITE_URL="$SITE_URL" \
   environment-variables.DEFAULT_FROM_EMAIL="ESLJ Parents <info@$DOMAIN>" \
-  environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
+  environment-variables.EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend \
+  environment-variables.EMAIL_HOST=smtp.tem.scaleway.com \
+  environment-variables.EMAIL_PORT=587 \
+  environment-variables.EMAIL_USE_TLS=true \
+  environment-variables.EMAIL_HOST_USER="$EMAIL_HOST_USER" \
+  environment-variables.EMAIL_HOST_PASSWORD="$EMAIL_HOST_PASSWORD" \
   environment-variables.ADMIN_EMAIL="$ADMIN_EMAIL" \
   -o json
 ```
@@ -344,7 +360,12 @@ scw jobs definition create name="$APP_NAME-notifier" \
   environment-variables.DEFAULT_FROM_EMAIL="ESLJ Parents <info@$DOMAIN>" \
   environment-variables.SECRET_KEY="$SECRET_KEY" \
   environment-variables.DATABASE_URL="$DATABASE_URL" \
-  environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN" \
+  environment-variables.EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend \
+  environment-variables.EMAIL_HOST=smtp.tem.scaleway.com \
+  environment-variables.EMAIL_PORT=587 \
+  environment-variables.EMAIL_USE_TLS=true \
+  environment-variables.EMAIL_HOST_USER="$EMAIL_HOST_USER" \
+  environment-variables.EMAIL_HOST_PASSWORD="$EMAIL_HOST_PASSWORD" \
   -o json
 ```
 
@@ -474,16 +495,29 @@ approval step if you ever want one). Then push to `main`: once *CI* is green,
 push, run migrations as a job and wait for them, repoint the notifier job,
 redeploy the container, then smoke-test `/_health`.
 
+The deploy also carries the email set-up: on every run it merges the
+Transactional Email variables into the container and both jobs (in the same
+update as the image, so no extra redeploy; `deploy/scw-merge-env.sh` reads the
+current set and re-sends it with the changes), then runs `manage.py
+send_test_email` as the migrate job. That sends one real message to
+`ADMIN_EMAIL` from the estate, subject *Email check for deploy `<sha>`*. If
+Transactional Email refuses the login, the port is blocked or the sender
+domain is not verified, that step fails and the container is not rolled. The
+SMTP password is the `SCW_MAIL_SECRET_KEY` secret (written by
+`deploy/github-config.sh` from `EMAIL_HOST_PASSWORD`); the username is the
+`SCW_MAIL_PROJECT_ID` variable if the domain lives in another project, else
+`SCW_DEFAULT_PROJECT_ID`.
+
 Five more workflows use the same secrets from *Actions → Run workflow*:
 *Inspect hosting estate* (read-only listing), *Scaleway: configure the estate*
 (apply `deploy/scaleway-env.lib.sh` to the container and jobs), *Scaleway:
-rotate the ZeptoMail token* (a new Send Mail token, see *Operating it*),
-*Scaleway: attach domains*, and *Scaleway: move production from Render* (the
-data copy).
+rotate the ZeptoMail token* (legacy, see *Operating it*), *Scaleway: attach
+domains*, and *Scaleway: move production from Render* (the data copy).
 
-Note what is *not* in GitHub: no database URL, no SMTP password, no WhatsApp
-token. Application secrets live in Scaleway; GitHub only gets a key that can
-push images and roll deployments.
+Note what is *not* in GitHub beyond the mail secret key: no database URL, no
+WhatsApp token. Application secrets live in Scaleway; GitHub gets a key that
+can push images and roll deployments, and the key mail is sent with, because
+the deploy re-applies and tests it.
 
 ## Operating it
 
@@ -514,10 +548,21 @@ exercises the probe, the public pages, login and admin, hashed statics, the
 security headers and `/mcp` from outside; add `MCP_API_TOKEN=...` to make a
 real tool call.
 
-**Changing the ZeptoMail token.** A replaced Mail Agent, or a regenerated
-token on the same agent, invalidates the token the estate holds: every send
-fails with HTTP 401 and notifications pile up as retries. Put the new one on
-the estate without touching anything else:
+**Rotating the mail secret key.** Create a new API key for the sending IAM
+principal, put it in `deploy/scaleway.env` as `EMAIL_HOST_PASSWORD` and in
+GitHub as the `SCW_MAIL_SECRET_KEY` secret (`deploy/github-config.sh` does the
+latter), then run *Deploy to Scaleway* with `image_tag` set to the current
+SHA: it re-applies the variables, sends the test email and rolls nothing new.
+Delete the old key once that deploy is green.
+
+**Returning to ZeptoMail (legacy).** The ZeptoMail backend is still in the
+code. To use it, set `EMAIL_BACKEND` to
+`apps.notifications.backends.zeptomail.ZeptoMailBackend` in
+`scw_email_env` (or override it in `deploy/scaleway.env`) and put the Mail
+Agent's token on the estate with the workflow below. A replaced Mail Agent, or
+a regenerated token on the same agent, invalidates the token the estate holds:
+every send fails with HTTP 401 and notifications pile up as retries. Put the
+new one on the estate without touching anything else:
 
 1. ZeptoMail → *Mail Agents* → the agent → *SMTP/API* → copy *Send Mail
    token*. The copy button includes the `Zoho-enczapikey` prefix; that is fine.

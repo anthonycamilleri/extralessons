@@ -10,8 +10,9 @@ from .base import ChannelError
 class EmailAdapter:
     """Send via Django's configured email backend.
 
-    In production that is the ZeptoMail API backend (or SMTP, if configured
-    that way); in development the console; in tests the in-memory outbox. The
+    In production that is SMTP to Scaleway Transactional Email (or the
+    ZeptoMail API backend, if configured that way); in development the
+    console; in tests the in-memory outbox. The
     adapter does not care which — it only translates each backend's idea of
     "this address will never work" into a permanent ChannelError.
 

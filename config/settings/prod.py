@@ -121,9 +121,9 @@ else:
     }
 
 # --- Email ---
-# ZeptoMail's API whenever its token is present, plain SMTP otherwise (any
-# EMAIL_HOST, including ZeptoMail's own relay). EMAIL_BACKEND set explicitly
-# wins over both.
+# EMAIL_BACKEND set explicitly wins; the estate sets it to SMTP (Scaleway
+# Transactional Email, deploy/scaleway-env.lib.sh). Without it: ZeptoMail's
+# API whenever its token is present, plain SMTP otherwise.
 EMAIL_BACKEND = env(
     "EMAIL_BACKEND",
     default=(

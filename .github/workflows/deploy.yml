@@ -8,6 +8,15 @@ name: Deploy to Scaleway
 #
 # Roll back with Actions → Run workflow → image_tag set to an earlier commit's
 # SHA (it skips the build and repoints everything at that image).
+#
+# Email: every deploy also applies the Scaleway Transactional Email settings
+# from deploy/scaleway-env.lib.sh (scw_email_env) to the container and both
+# jobs — in the same update call as the image, so it costs no extra redeploy —
+# and then sends one real email from the estate (manage.py send_test_email,
+# run as the migrate job) to ADMIN_EMAIL. A mail set-up that cannot send fails
+# the deploy before the new image serves traffic. The SMTP password is the
+# SCW_MAIL_SECRET_KEY secret; the username is the project id the sending
+# domain lives in (SCW_MAIL_PROJECT_ID variable, else SCW_DEFAULT_PROJECT_ID).
 
 on:
   workflow_run:
@@ -61,17 +70,19 @@ jobs:
           SCW_CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
           SCW_JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
           SCW_JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
+          SCW_MAIL_SECRET_KEY: ${{ secrets.SCW_MAIL_SECRET_KEY }}
         run: |
           missing=""
           for name in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID \
                       SCW_REGISTRY_NAMESPACE SCW_CONTAINER_ID \
-                      SCW_JOB_MIGRATE_ID SCW_JOB_NOTIFIER_ID; do
+                      SCW_JOB_MIGRATE_ID SCW_JOB_NOTIFIER_ID SCW_MAIL_SECRET_KEY; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secrets/variables:$missing"
             echo "Run through docs/scaleway-setup.md, then set them under"
             echo "Settings → Secrets and variables → Actions."
+            echo "SCW_MAIL_SECRET_KEY is the API secret key Transactional Email is sent with."
             exit 1
           fi
 
@@ -129,14 +140,43 @@ jobs:
           SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
           SCW_DEFAULT_REGION: ${{ env.SCW_REGION }}
           IMAGE_REF: ${{ steps.image.outputs.ref }}
+          EMAIL_HOST_USER: ${{ vars.SCW_MAIL_PROJECT_ID || secrets.SCW_DEFAULT_PROJECT_ID }}
+          EMAIL_HOST_PASSWORD: ${{ secrets.SCW_MAIL_SECRET_KEY }}
         run: |
           set -euo pipefail
+          . deploy/scaleway-env.lib.sh
+          scw_email_env
+          # Jobs hold everything as plain variables, the password included
+          # (like SECRET_KEY and DATABASE_URL already are; see the Secret
+          # Manager note in docs/scaleway-setup.md). Merged into what the job
+          # has so nothing else on it changes.
+          mapfile -t JOB_ENV < <(deploy/scw-merge-env.sh job "${{ vars.SCW_JOB_MIGRATE_ID }}" \
+            "${EMAIL_VARS[@]}" "${EMAIL_SECRET_VARS[@]}")
           scw jobs definition update "${{ vars.SCW_JOB_MIGRATE_ID }}" \
-            image-uri="$IMAGE_REF" -o json > /dev/null
+            image-uri="$IMAGE_REF" "${JOB_ENV[@]}" -o json > /dev/null
+          echo "migrate job: image and email settings applied"
           deploy/scw-run-job.sh "${{ vars.SCW_JOB_MIGRATE_ID }}"
           # First deploy of a fresh estate: creates the ADMIN_EMAIL account and
           # emails a set-password link. Every later deploy: finds it, does nothing.
           deploy/scw-run-job.sh "${{ vars.SCW_JOB_MIGRATE_ID }}" args.0=ensure_admin
+
+      - name: Send a test email from the estate
+        # The proof that mail works: the real image, the job's real variables,
+        # Scaleway's network, one message to ADMIN_EMAIL. A refused login, a
+        # blocked port or an unverified sender domain fails here, and the
+        # container below is never rolled.
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          SCW_DEFAULT_REGION: ${{ env.SCW_REGION }}
+        run: |
+          set -euo pipefail
+          deploy/scw-run-job.sh "${{ vars.SCW_JOB_MIGRATE_ID }}" \
+            args.0=send_test_email args.1=--tag args.2="${{ steps.image.outputs.tag }}" \
+            || { echo "::error::The estate could not send email; see the job run's logs in Cockpit. The container was not updated."; exit 1; }
+          echo "Test email sent to ADMIN_EMAIL for ${{ steps.image.outputs.tag }}."
 
       - name: Point the notifier job at the new image
         env:
@@ -146,11 +186,17 @@ jobs:
           SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
           SCW_DEFAULT_REGION: ${{ env.SCW_REGION }}
           IMAGE_REF: ${{ steps.image.outputs.ref }}
+          EMAIL_HOST_USER: ${{ vars.SCW_MAIL_PROJECT_ID || secrets.SCW_DEFAULT_PROJECT_ID }}
+          EMAIL_HOST_PASSWORD: ${{ secrets.SCW_MAIL_SECRET_KEY }}
         run: |
           set -euo pipefail
+          . deploy/scaleway-env.lib.sh
+          scw_email_env
+          mapfile -t JOB_ENV < <(deploy/scw-merge-env.sh job "${{ vars.SCW_JOB_NOTIFIER_ID }}" \
+            "${EMAIL_VARS[@]}" "${EMAIL_SECRET_VARS[@]}")
           scw jobs definition update "${{ vars.SCW_JOB_NOTIFIER_ID }}" \
-            image-uri="$IMAGE_REF" -o json > /dev/null
-          echo "Notifier job will use $IMAGE_REF on its next scheduled run."
+            image-uri="$IMAGE_REF" "${JOB_ENV[@]}" -o json > /dev/null
+          echo "Notifier job will use $IMAGE_REF and the same email settings on its next scheduled run."
 
       - name: Deploy the container
         env:
@@ -160,13 +206,23 @@ jobs:
           SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
           SCW_DEFAULT_REGION: ${{ env.SCW_REGION }}
           IMAGE_REF: ${{ steps.image.outputs.ref }}
+          EMAIL_HOST_USER: ${{ vars.SCW_MAIL_PROJECT_ID || secrets.SCW_DEFAULT_PROJECT_ID }}
+          EMAIL_HOST_PASSWORD: ${{ secrets.SCW_MAIL_SECRET_KEY }}
         run: |
           set -euo pipefail
-          # Updating the image reference is what triggers the redeploy.
+          . deploy/scaleway-env.lib.sh
+          scw_email_env
+          # Plain variables merged into the container's current set (the
+          # update replaces that map wholesale); the password goes in the
+          # secret map, which merges on its own.
+          mapfile -t PLAIN_ENV < <(deploy/scw-merge-env.sh container "${{ vars.SCW_CONTAINER_ID }}" "${EMAIL_VARS[@]}")
+          SECRETS=(); for kv in "${EMAIL_SECRET_VARS[@]}"; do SECRETS+=("secret-environment-variables.$kv"); done
+          # Updating the image reference is what triggers the redeploy; the
+          # variables ride along in the same call so there is only one.
           # The argument is `image=`; the older `registry-image=` was removed
           # from the CLI and is now rejected as an unknown argument.
           scw container container update "${{ vars.SCW_CONTAINER_ID }}" \
-            image="$IMAGE_REF" -o json > /dev/null
+            image="$IMAGE_REF" "${PLAIN_ENV[@]}" "${SECRETS[@]}" -o json > /dev/null
 
           # The container reports the *previous* deployment as ready for a
           # moment after the update lands, so settle before believing a status.

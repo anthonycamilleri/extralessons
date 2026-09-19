@@ -157,6 +157,9 @@ MEDIA_MAX_AGE = env.int("MEDIA_MAX_AGE", default=60 * 60 * 24 * 365)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Email ---
+# Production sends through Scaleway Transactional Email over SMTP
+# (smtp.tem.scaleway.com:587, STARTTLS; username = project id, password = an
+# API secret key); the deploy applies those from deploy/scaleway-env.lib.sh.
 EMAIL_HOST = env("EMAIL_HOST", default="localhost")
 EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
@@ -166,9 +169,10 @@ EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=15)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@example.com")
 
 # Zoho ZeptoMail, via its sending API rather than SMTP; see
-# apps/notifications/backends/zeptomail.py. Production selects that backend
-# whenever the token is set. Accounts on the EU data centre (zeptomail.zoho.eu)
-# use api.zeptomail.eu; others api.zeptomail.com.
+# apps/notifications/backends/zeptomail.py. Kept as an alternative: production
+# selects that backend when the token is set and EMAIL_BACKEND is not.
+# Accounts on the EU data centre (zeptomail.zoho.eu) use api.zeptomail.eu;
+# others api.zeptomail.com.
 ZEPTOMAIL_SEND_MAIL_TOKEN = env("ZEPTOMAIL_SEND_MAIL_TOKEN", default="")
 ZEPTOMAIL_API_URL = env("ZEPTOMAIL_API_URL", default="https://api.zeptomail.eu/v1.1/email")
 ZEPTOMAIL_BOUNCE_ADDRESS = env("ZEPTOMAIL_BOUNCE_ADDRESS", default="")

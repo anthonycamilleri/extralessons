@@ -11,8 +11,9 @@ shell. Idempotent: on every later deploy it finds the account and does nothing.
 No password is ever configured or printed. The account is created with a long
 random password nobody knows, and the owner receives the same "set your
 password" email the login page's *Forgotten your password?* link sends, via the
-configured email backend. If that email cannot go out (no ZeptoMail token yet),
-the deploy still succeeds and the link can be requested from the login page.
+configured email backend. If that email cannot go out (mail not configured
+yet), the deploy still succeeds and the link can be requested from the login
+page; ``send_test_email`` is the command that fails a deploy over broken mail.
 """
 import secrets
 from urllib.parse import urlparse

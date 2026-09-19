@@ -52,6 +52,11 @@ set_secret SCW_ACCESS_KEY              "$CI_ACCESS_KEY"
 set_secret SCW_SECRET_KEY              "$CI_SECRET_KEY"
 set_secret SCW_DEFAULT_PROJECT_ID      "$PROJECT_ID"
 set_secret SCW_DEFAULT_ORGANIZATION_ID "$ORG_ID"
+# The deploy workflow re-applies the Transactional Email settings on every
+# deploy and sends a test email; this is the password it uses.
+mail_key="${EMAIL_HOST_PASSWORD:-${SCW_MAIL_SECRET_KEY:-}}"
+if [ -n "$mail_key" ]; then set_secret SCW_MAIL_SECRET_KEY "$mail_key"
+else echo "  (SCW_MAIL_SECRET_KEY not written: EMAIL_HOST_PASSWORD is empty in $CONFIG)"; fi
 
 set_var SCW_REGISTRY_NAMESPACE "$REGISTRY_NAMESPACE"
 set_var SCW_CONTAINER_ID       "$CONTAINER_ID"
