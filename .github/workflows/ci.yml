@@ -80,7 +80,8 @@ jobs:
   # Production settings have to survive `check --deploy` before anything ships;
   # a missing SECURE_* or a broken storage backend should fail here, not in
   # the migrate job on Scaleway. RENDER_EXTERNAL_HOSTNAME is set so the
-  # host-list handling in prod.py (kept for Render) runs under the check too.
+  # platform-hostname handling in prod.py (harmless on Scaleway, where the
+  # variable is absent) runs under the check too.
   deploy-checks:
     name: production settings
     runs-on: ubuntu-latest
@@ -139,9 +140,9 @@ jobs:
           curl -sf http://127.0.0.1:8080/_health || { docker logs smoke; exit 1; }
           docker rm -f smoke
       - name: The pre-deploy script runs in the image
-        # migrate + ensure_admin, the two runs the deploy makes of the migrate
-        # job, against a throwaway SQLite file, with no ADMIN_EMAIL so
-        # ensure_admin is a no-op.
+        # migrate + ensure_admin — what the deploy's migrate job and
+        # provision.sh's first-admin run do — against a throwaway SQLite file,
+        # with no ADMIN_EMAIL so ensure_admin is a no-op.
         run: |
           docker run --rm \
             -e SECRET_KEY=ci-only-placeholder \

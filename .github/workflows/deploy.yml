@@ -7,7 +7,13 @@ name: Deploy to Scaleway
 # change. Set-up and operations: docs/scaleway-setup.md.
 #
 # Roll back with Actions → Run workflow → image_tag set to an earlier commit's
-# SHA (it skips the build and repoints everything at that image).
+# SHA (it skips the build and repoints everything at that image). The last
+# step prunes the registry to the ten newest tags, so that is how far back a
+# rollback reaches; older commits need a fresh build (revert and push).
+#
+# Every deploy is a cold start of the estate: three job runs, a new container
+# instance kept alive for the idle window, and the database woken. Pushing
+# ten commits to main one at a time costs ten of those; merge them as one.
 #
 # Email: every deploy also applies the Scaleway Transactional Email settings
 # from deploy/scaleway-env.lib.sh (scw_email_env) to the container and both
@@ -162,9 +168,11 @@ jobs:
             image-uri="$IMAGE_REF" "${JOB_ENV[@]}" -o json > /dev/null
           echo "migrate job: image and email settings applied"
           deploy/scw-run-job.sh "${{ vars.SCW_JOB_MIGRATE_ID }}"
-          # First deploy of a fresh estate: creates the ADMIN_EMAIL account and
-          # emails a set-password link. Every later deploy: finds it, does nothing.
-          deploy/scw-run-job.sh "${{ vars.SCW_JOB_MIGRATE_ID }}" args.0=ensure_admin
+          # The first administrator is created once, by deploy/provision.sh
+          # (manage.py ensure_admin as a run of this same job). It used to run
+          # here on every deploy too, and did nothing every time but boot a
+          # job container and wake the database. To run it by hand:
+          #   deploy/scw-run-job.sh "$SCW_JOB_MIGRATE_ID" args.0=ensure_admin
 
       - name: Send a test email from the estate
         # The proof that mail works: the real image, the job's real variables,
@@ -280,3 +288,16 @@ jobs:
           done
           echo "::error::${{ vars.APP_URL }}/_health never returned 200."
           exit 1
+
+      - name: Prune old images from the registry
+        # Every deploy adds a SHA-tagged image and nothing removed them. Keep
+        # `latest`, the tag just deployed and the ten newest besides (rollback
+        # headroom); delete the rest. Runs only once the new image serves
+        # traffic, and never fails the deploy (deploy/scw-prune-images.sh).
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          SCW_DEFAULT_REGION: ${{ env.SCW_REGION }}
+        run: deploy/scw-prune-images.sh "$IMAGE_NAME" "${{ steps.image.outputs.tag }}" 10
