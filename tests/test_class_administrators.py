@@ -272,8 +272,10 @@ class TestOnlyMineOnTheRequestsPage:
 
 class TestAnnouncementsScope:
     def _send(self, client, data):
+        """Post the composer. Audience defaults to everyone, as the form does."""
         return client.post(
-            reverse("admin:notifications_broadcast_add"), {**data, "_save": "1"}
+            reverse("admin:notifications_broadcast_add"),
+            {"audience": Broadcast.Audience.EVERYONE, **data, "_save": "1"},
         )
 
     def test_admin_broadcast_to_all_reaches_only_their_families(self, client):
@@ -331,6 +333,32 @@ class TestAnnouncementsScope:
         assert Notification.objects.filter(
             event=Event.BROADCAST, recipient=one.child.guardians.first()
         ).exists()
+
+    def test_admin_can_write_to_the_waiting_list_of_their_classes(self, client):
+        admin = AdminFactory()
+        mine = _assign(ActivityClassFactory(title="Chess", capacity=1), admin)
+        seated = services.approve_request(services.register(ChildFactory(), mine), admin)
+        waiting = services.approve_request(services.register(ChildFactory(), mine), admin)
+        assert waiting.status == Enrollment.Status.WAITLISTED
+        client.force_login(admin)
+
+        response = self._send(
+            client,
+            {
+                "scope": "ALL_CLASSES",
+                "audience": Broadcast.Audience.WAITLIST,
+                "subject": "Still interested?",
+                "body_html": "<p>Let us know.</p>",
+            },
+        )
+
+        assert response.status_code == 302
+        assert Broadcast.objects.get().audience == Broadcast.Audience.WAITLIST
+        sent_to = set(
+            Notification.objects.filter(event=Event.BROADCAST).values_list("recipient", flat=True)
+        )
+        assert sent_to == {waiting.child.guardians.first().pk}
+        assert seated.child.guardians.first().pk not in sent_to
 
     def test_sent_announcements_are_a_read_only_record(self, client):
         admin = AdminFactory()

@@ -71,15 +71,31 @@ class NotificationTemplate(models.Model):
 
 
 class Broadcast(models.Model):
+    """An announcement: which classes it addressed, and who inside them.
+
+    `scope` picks the classes, `audience` picks the families within those
+    classes. Both are recorded on the row, so the sent history says exactly
+    who a message was written for.
+    """
+
     class Scope(models.TextChoices):
         ALL_CLASSES = "ALL_CLASSES", "All published classes"
         SELECTED_CLASSES = "SELECTED_CLASSES", "Selected classes"
+
+    class Audience(models.TextChoices):
+        EVERYONE = "EVERYONE", "Everyone with a live place"
+        WAITLIST = "WAITLIST", "Waiting list only"
 
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="broadcasts"
     )
     scope = models.CharField(max_length=20, choices=Scope.choices)
     classes = models.ManyToManyField("catalog.ActivityClass", blank=True, related_name="broadcasts")
+    # Which families inside those classes. Announcements sent before the
+    # choice existed went to everyone, which is what the default records.
+    audience = models.CharField(
+        max_length=20, choices=Audience.choices, default=Audience.EVERYONE
+    )
     subject = models.CharField(max_length=200)
     # The plain-text message: what WhatsApp gets, the text/plain half of the
     # email, and the whole story for announcements sent before rich text.

@@ -1,5 +1,5 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.html import escape, format_html, linebreaks
@@ -22,7 +22,10 @@ class NotificationTemplateAdmin(admin.ModelAdmin):
 class BroadcastAdminForm(forms.ModelForm):
     """The announcement composer. "All classes" means every class on this
     admin's desk: all published classes for a super admin, only their own
-    for anyone else; that narrowing is what audience() records."""
+    for anyone else; that narrowing is what classes_addressed() records.
+
+    The classes are one half of the address; `audience` is the other, and
+    picks who inside them — everyone, or only the waiting list."""
 
     request = None  # injected per request by BroadcastAdmin.get_form
 
@@ -32,7 +35,7 @@ class BroadcastAdminForm(forms.ModelForm):
 
     class Meta:
         model = Broadcast
-        fields = ["scope", "classes", "subject", "body_html"]
+        fields = ["scope", "classes", "audience", "subject", "body_html"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -43,7 +46,7 @@ class BroadcastAdminForm(forms.ModelForm):
         # editable fields at all; only dress the ones that are there.
         if "scope" in self.fields:
             scope = self.fields["scope"]
-            scope.label = "Audience"
+            scope.label = "Classes"
             scope.initial = Broadcast.Scope.ALL_CLASSES
             # Swapping the widget drops the choices it was given: hand them
             # over again, minus the empty "---------" a radio has no use for.
@@ -60,8 +63,18 @@ class BroadcastAdminForm(forms.ModelForm):
             classes.widget = forms.CheckboxSelectMultiple()
             classes.queryset = self.managed.filter(term__is_active=True).order_by("title")
             classes.required = False
-            classes.label = "Classes (when audience is 'Selected classes')"
+            classes.label = "Classes (when the choice above is 'Selected classes')"
             classes.help_text = ""
+        if "audience" in self.fields:
+            audience = self.fields["audience"]
+            audience.label = "Who gets it"
+            audience.widget = forms.RadioSelect(choices=Broadcast.Audience.choices)
+            audience.initial = Broadcast.Audience.EVERYONE
+            audience.help_text = (
+                "Everyone means every guardian of a child with a live place in those "
+                "classes — enrolled, waiting, offered a seat, or not reviewed yet. "
+                "Waiting list only reaches the families still waiting for a seat."
+            )
 
     def clean(self):
         cleaned = super().clean()
@@ -71,7 +84,7 @@ class BroadcastAdminForm(forms.ModelForm):
             self.add_error("classes", "Pick at least one class.")
         return cleaned
 
-    def audience(self):
+    def classes_addressed(self):
         """(scope, classes) to hand to create_broadcast.
 
         A narrowed "all classes" is stored as an explicit selection of the
@@ -93,8 +106,10 @@ class BroadcastAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
 
     school_admin_can = frozenset({"view", "add"})
     form = BroadcastAdminForm
-    list_display = ["subject", "sender", "scope", "created_at", "sent_at", "recipients"]
-    list_filter = ["scope"]
+    list_display = [
+        "subject", "sender", "scope", "audience", "created_at", "sent_at", "recipients",
+    ]
+    list_filter = ["scope", "audience"]
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related("sender")
@@ -111,9 +126,10 @@ class BroadcastAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
 
     def get_fields(self, request, obj=None):
         if obj is None:
-            return ["scope", "classes", "subject", "body_html"]
+            return ["scope", "classes", "audience", "subject", "body_html"]
         return [
-            "sender", "scope", "classes", "subject", "message", "created_at", "sent_at", "recipients",
+            "sender", "scope", "classes", "audience", "subject", "message", "created_at",
+            "sent_at", "recipients",
         ]
 
     def get_readonly_fields(self, request, obj=None):
@@ -145,22 +161,34 @@ class BroadcastAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
         return format_html('<div class="readonly-richtext">{}</div>', mark_safe(html))
 
     def save_model(self, request, obj, form, change):
-        scope, classes = form.audience()
+        scope, classes = form.classes_addressed()
         broadcast, count = services.create_broadcast(
             sender=request.user,
             scope=scope,
             subject=obj.subject,
             body_html=form.cleaned_data["body_html"],
             classes=classes,
+            audience=form.cleaned_data["audience"],
         )
         # The service saved the row; let the admin's logging and redirect see it.
-        for field in ("pk", "id", "sender", "scope", "body", "body_html", "created_at", "sent_at"):
+        for field in (
+            "pk", "id", "sender", "scope", "audience", "body", "body_html", "created_at", "sent_at"
+        ):
             setattr(obj, field, getattr(broadcast, field))
         obj._state.adding = False
         obj._state.db = broadcast._state.db
-        self.message_user(
-            request, f"Announcement queued for {services.family_count_phrase(count)}."
-        )
+        # A waiting-list message can legitimately match nobody; say so plainly
+        # rather than reporting a send that reached no one as a success.
+        if count:
+            self.message_user(
+                request, f"Announcement queued for {services.family_count_phrase(count)}."
+            )
+        else:
+            self.message_user(
+                request,
+                "Nobody matched that audience, so the announcement was not sent to anyone.",
+                level=messages.WARNING,
+            )
 
     def save_related(self, request, form, formsets, change):
         # create_broadcast already set the classes; form.save_m2m() would

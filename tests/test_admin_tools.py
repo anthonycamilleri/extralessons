@@ -30,6 +30,7 @@ class TestAdminBroadcast:
             reverse("admin:notifications_broadcast_add"),
             {
                 "scope": "ALL_CLASSES",
+                "audience": Broadcast.Audience.EVERYONE,
                 "subject": "School closed Friday",
                 "body_html": "<p>Public <strong>holiday</strong>.</p>",
                 "_save": "1",
@@ -53,6 +54,7 @@ class TestAdminBroadcast:
             reverse("admin:notifications_broadcast_add"),
             {
                 "scope": "ALL_CLASSES",
+                "audience": Broadcast.Audience.EVERYONE,
                 "subject": "Kit",
                 "body_html": '<p onclick="x()">Boots</p><script>alert(1)</script>'
                 '<img src="data:image/png;base64,AAA">',

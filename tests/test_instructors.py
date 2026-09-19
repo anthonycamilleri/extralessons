@@ -11,7 +11,7 @@ from apps.accounts.models import User
 from apps.catalog.models import ActivityClass, Instructor, generate_sessions
 from apps.enrollments import services
 from apps.enrollments.models import Attendance
-from apps.notifications.models import Event, Notification
+from apps.notifications.models import Broadcast, Event, Notification
 
 from .factories import (
     ActivityClassFactory,
@@ -112,14 +112,24 @@ class TestScoping:
 
         refused = client.post(
             reverse("provider_broadcast"),
-            {"classes": [other.pk], "subject": "Hijack", "body_html": "<p>x</p>"},
+            {
+                "classes": [other.pk],
+                "audience": Broadcast.Audience.EVERYONE,
+                "subject": "Hijack",
+                "body_html": "<p>x</p>",
+            },
         )
         assert refused.status_code == 200
         assert not Notification.objects.filter(event=Event.BROADCAST).exists()
 
         sent = client.post(
             reverse("provider_broadcast"),
-            {"classes": [taught.pk], "subject": "Kit", "body_html": "<p>Boots.</p>"},
+            {
+                "classes": [taught.pk],
+                "audience": Broadcast.Audience.EVERYONE,
+                "subject": "Kit",
+                "body_html": "<p>Boots.</p>",
+            },
         )
         assert sent.status_code == 302
         assert Notification.objects.filter(event=Event.BROADCAST, recipient=parent).exists()

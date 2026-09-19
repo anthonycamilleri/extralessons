@@ -145,6 +145,14 @@ class ProviderBroadcastForm(forms.Form):
         widget=forms.CheckboxSelectMultiple,
         label="Send to families of",
     )
+    audience = forms.ChoiceField(
+        choices=Broadcast.Audience.choices,
+        widget=forms.RadioSelect,
+        initial=Broadcast.Audience.EVERYONE,
+        label="Who gets it",
+        help_text="Everyone with a live place in those classes — enrolled, waiting, "
+        "offered a seat, or not reviewed yet — or only the families still waiting.",
+    )
     subject = forms.CharField(max_length=200)
     body_html = RichTextField()
 
@@ -166,11 +174,19 @@ def broadcast(request):
             subject=form.cleaned_data["subject"],
             body_html=form.cleaned_data["body_html"],
             classes=form.cleaned_data["classes"],
+            audience=form.cleaned_data["audience"],
         )
-        messages.success(
-            request,
-            f"Message queued for {notification_services.family_count_phrase(count)}.",
-        )
+        # A waiting-list message can match nobody; a success note would read
+        # as if it had gone out.
+        if count:
+            messages.success(
+                request,
+                f"Message queued for {notification_services.family_count_phrase(count)}.",
+            )
+        else:
+            messages.warning(
+                request, "Nobody matched that audience, so the message was not sent to anyone."
+            )
         return redirect("provider_home")
     return render(request, "dashboards/provider/broadcast.html", {"form": form})
 

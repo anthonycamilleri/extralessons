@@ -6,7 +6,7 @@ from django.urls import reverse
 from apps.catalog.models import generate_sessions
 from apps.enrollments.models import Attendance, Enrollment
 from apps.notifications import worker
-from apps.notifications.models import Event, Notification
+from apps.notifications.models import Broadcast, Event, Notification
 
 from .factories import ActivityClassFactory, ProviderUserFactory, SuperAdminFactory
 
@@ -130,7 +130,12 @@ def test_full_lifecycle(client):
     # --- Provider messages the class; worker delivers everything ------------
     client.post(
         reverse("provider_broadcast"),
-        {"classes": [cls.pk], "subject": "First session!", "body_html": "<p>See you Monday.</p>"},
+        {
+            "classes": [cls.pk],
+            "audience": Broadcast.Audience.EVERYONE,
+            "subject": "First session!",
+            "body_html": "<p>See you Monday.</p>",
+        },
     )
     client.post(reverse("logout"))
 

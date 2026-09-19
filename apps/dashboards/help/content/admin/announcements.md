@@ -9,16 +9,26 @@ room, a kit reminder, a cancelled week.
 Click **Send announcement** at the top of any admin page, or go to
 **Notifications → Announcements → Add announcement**.
 
-![The announcement composer, with audience, subject and message](announcement-form.png)
+![The announcement composer, with the classes, who gets it, subject and message](announcement-form.png)
 
 ## Filling it in {#form}
 
-**Audience** — two choices:
+**Classes** — two choices:
 
 - **All published classes** — every class you look after that is published
   this term. (If you are a super admin, this really does mean all of them.)
 - **Selected classes** — tick the ones you mean. Only classes in the active
   term are listed.
+
+**Who gets it** — two choices, applied inside the classes you just picked:
+
+- **Everyone with a live place** — the usual one, and what every announcement
+  did before this choice existed. "Live" is wider than you might think; see
+  [Who actually gets it](#recipients) below.
+- **Waiting list only** — just the families whose child is
+  [on the waiting list](waiting-lists) right now. Use it to tell them where
+  they stand, to ask whether they still want the place, or to say the term has
+  filled up.
 
 **Subject** is the email subject line. **Message** is the body, written as
 you would write it to a parent. Each family sees it opening with their own
@@ -43,14 +53,24 @@ email links to the hosted copy rather than attaching it.
 
 > This surprises people, so it is worth reading once.
 >
-> An announcement goes to **every guardian of every child who has a live place
-> in the classes you picked** — and "live" includes children whose request you
-> have not reviewed yet, children on the waiting list, and children holding an
-> offer. Not only the enrolled ones.
+> With **Everyone with a live place**, an announcement goes to **every guardian
+> of every child who has a live place in the classes you picked** — and "live"
+> includes children whose request you have not reviewed yet, children on the
+> waiting list, and children holding an offer. Not only the enrolled ones.
 
 That is usually what you want: a cancelled first session concerns everyone who
 thinks they might be coming. But if a message only makes sense for confirmed
 children, say so in the message itself.
+
+**Waiting list only** is the narrow one: the guardians of the children sitting
+at status *On waiting list* in those classes, and nobody else. A child you have
+already offered a seat to has left the list — they are being asked to confirm,
+and the offer email is doing that job — so an offer holder is not written to
+here. Neither is a request you have not approved yet: until you approve it, the
+child is not on the list.
+
+If nothing matches — an empty waiting list, say — nothing is sent, and the page
+tells you so instead of reporting a send.
 
 Nobody is emailed twice. A parent with two children in two of the classes you
 picked gets one email.
@@ -64,6 +84,10 @@ on your phone. Send yourself as many tests as you like; nothing is recorded.
 
 Then press save and it goes. You are told how many families it reached:
 *Announcement queued for 24 families.*
+
+Sent announcements record who they were addressed to — the classes and the
+audience — so the history says whether a message went to a whole class or to
+its waiting list.
 
 > There is no draft and no unsend. The test email is your preview: read it
 > once more before you press the button.
@@ -96,5 +120,5 @@ on.
 ## Providers can write too {#providers}
 
 Coaches and tutors have their own **Message families** button on their
-dashboard, limited to their own classes. Their messages appear in the same
-delivery log.
+dashboard, limited to their own classes. They choose the same two audiences,
+and their messages appear in the same delivery log.

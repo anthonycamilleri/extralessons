@@ -3,7 +3,7 @@ from django.urls import reverse
 
 from apps.enrollments import services
 from apps.enrollments.models import Attendance
-from apps.notifications.models import Event, Notification
+from apps.notifications.models import Broadcast, Event, Notification
 
 from .factories import (
     ActivityClassFactory,
@@ -117,6 +117,7 @@ class TestProviderBroadcast:
             reverse("provider_broadcast"),
             {
                 "classes": [cls.pk],
+                "audience": Broadcast.Audience.EVERYONE,
                 "subject": "Kit reminder",
                 "body_html": "<p>Bring <em>boots</em>.</p>",
             },
@@ -141,11 +142,41 @@ class TestProviderBroadcast:
 
         response = client.post(
             reverse("provider_broadcast"),
-            {"classes": [cls.pk], "subject": "Kit", "body_html": "<p><br></p>"},
+            {
+                "classes": [cls.pk],
+                "audience": Broadcast.Audience.EVERYONE,
+                "subject": "Kit",
+                "body_html": "<p><br></p>",
+            },
         )
         assert response.status_code == 200
         assert b"Write a message." in response.content
         assert not Notification.objects.filter(event=Event.BROADCAST).exists()
+
+    def test_provider_can_write_to_the_waiting_list_alone(self, client):
+        admin = AdminFactory()
+        provider_user, cls = provider_with_class(capacity=1)
+        seated = services.approve_request(services.register(ChildFactory(), cls), admin)
+        waiting = services.approve_request(services.register(ChildFactory(), cls), admin)
+        client.force_login(provider_user)
+
+        response = client.post(
+            reverse("provider_broadcast"),
+            {
+                "classes": [cls.pk],
+                "audience": Broadcast.Audience.WAITLIST,
+                "subject": "A place may open up",
+                "body_html": "<p>Still interested?</p>",
+            },
+        )
+
+        assert response.status_code == 302
+        assert Broadcast.objects.get().audience == Broadcast.Audience.WAITLIST
+        sent_to = set(
+            Notification.objects.filter(event=Event.BROADCAST).values_list("recipient", flat=True)
+        )
+        assert sent_to == {waiting.child.guardians.first().pk}
+        assert seated.child.guardians.first().pk not in sent_to
 
     def test_broadcast_form_rejects_other_providers_class(self, client):
         provider_user, _ = provider_with_class()
@@ -154,7 +185,12 @@ class TestProviderBroadcast:
 
         response = client.post(
             reverse("provider_broadcast"),
-            {"classes": [other_cls.pk], "subject": "Hijack", "body_html": "<p>nope</p>"},
+            {
+                "classes": [other_cls.pk],
+                "audience": Broadcast.Audience.EVERYONE,
+                "subject": "Hijack",
+                "body_html": "<p>nope</p>",
+            },
         )
 
         assert response.status_code == 200  # form redisplayed with errors

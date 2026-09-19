@@ -348,11 +348,23 @@ def queue_instructor_invite(instructor, invited_by):
     return row
 
 
-def create_broadcast(sender, scope, subject, body="", classes=None, *, body_html=""):
+def create_broadcast(
+    sender,
+    scope,
+    subject,
+    body="",
+    classes=None,
+    *,
+    body_html="",
+    audience=Broadcast.Audience.EVERYONE,
+):
     """Create a Broadcast and queue it, atomically with its outbox rows.
 
     Returns (broadcast, family_count). Shared by the admin and provider
     composers so the send flow exists exactly once.
+
+    `scope`/`classes` choose the classes, `audience` chooses who inside them:
+    everyone with a live place, or only the families still waiting for a seat.
 
     A rich-text message arrives as `body_html`; it is cleaned again here (the
     forms already did, but a shell or MCP caller may not have) and its plain
@@ -369,7 +381,12 @@ def create_broadcast(sender, scope, subject, body="", classes=None, *, body_html
 
     with transaction.atomic():
         broadcast = Broadcast.objects.create(
-            sender=sender, scope=scope, subject=subject, body=body, body_html=body_html
+            sender=sender,
+            scope=scope,
+            audience=audience,
+            subject=subject,
+            body=body,
+            body_html=body_html,
         )
         if scope == Broadcast.Scope.SELECTED_CLASSES:
             broadcast.classes.set(classes)
@@ -428,8 +445,22 @@ def send_test_broadcast(user, subject, body_html):
     return user.email
 
 
+def audience_statuses(audience):
+    """The enrolment statuses an audience covers.
+
+    "Waiting list only" means the children still waiting: a child holding an
+    offer has already been handed the seat and hears about it through the
+    offer emails, so they are no longer on the list.
+    """
+    from apps.enrollments.models import Enrollment
+
+    if audience == Broadcast.Audience.WAITLIST:
+        return [Enrollment.Status.WAITLISTED]
+    return Enrollment.ACTIVE_STATUSES
+
+
 def queue_broadcast(broadcast):
-    """Fan a broadcast out to guardians of children active in the target classes."""
+    """Fan a broadcast out to the guardians its audience covers."""
     from apps.catalog.models import ActivityClass
     from apps.enrollments.models import Enrollment
 
@@ -445,7 +476,8 @@ def queue_broadcast(broadcast):
     recipients = {}
     for enrollment in (
         Enrollment.objects.filter(
-            activity_class__in=classes, status__in=Enrollment.ACTIVE_STATUSES
+            activity_class__in=classes,
+            status__in=audience_statuses(broadcast.audience),
         )
         .select_related("child")
         .prefetch_related(

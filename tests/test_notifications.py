@@ -9,7 +9,7 @@ from apps.enrollments.models import Enrollment
 from apps.notifications import worker
 from apps.notifications.channels.base import ChannelError
 from apps.notifications.models import Broadcast, Event, Notification, NotificationTemplate
-from apps.notifications.services import queue_broadcast, queue_event
+from apps.notifications.services import create_broadcast, queue_broadcast, queue_event
 
 from .factories import ActivityClassFactory, AdminFactory, ChildFactory, UserFactory
 
@@ -116,6 +116,89 @@ class TestBroadcast:
         assert recipients == {parent1.pk, parent2.pk}
         broadcast.refresh_from_db()
         assert broadcast.sent_at is not None
+
+    def test_waiting_list_audience_reaches_only_the_families_still_waiting(self):
+        """The narrow audience: on the list now, not approved-and-seated,
+        not holding an offer, not still awaiting a decision."""
+        admin = AdminFactory()
+        cls = ActivityClassFactory(capacity=1)
+        enrolled, waiting, offered, unreviewed = (UserFactory() for _ in range(4))
+        enrollment_services.approve_request(
+            enrollment_services.register(ChildFactory(parent=enrolled), cls), admin
+        )
+        enrollment_services.approve_request(
+            enrollment_services.register(ChildFactory(parent=waiting), cls), admin
+        )
+        held_offer = enrollment_services.approve_request(
+            enrollment_services.register(ChildFactory(parent=offered), cls), admin
+        )
+        enrollment_services.offer_seat(held_offer, admin)
+        enrollment_services.register(ChildFactory(parent=unreviewed), cls)
+
+        broadcast = Broadcast.objects.create(
+            sender=admin,
+            scope=Broadcast.Scope.SELECTED_CLASSES,
+            audience=Broadcast.Audience.WAITLIST,
+            subject="Still waiting?",
+            body="Tell us whether you still want the place.",
+        )
+        broadcast.classes.add(cls)
+        count = queue_broadcast(broadcast)
+
+        assert count == 1
+        recipients = set(
+            Notification.objects.filter(
+                event=Event.BROADCAST, channel=Notification.Channel.EMAIL
+            ).values_list("recipient", flat=True)
+        )
+        assert recipients == {waiting.pk}
+
+    def test_the_default_audience_still_reaches_every_live_place(self):
+        admin = AdminFactory()
+        cls = ActivityClassFactory(capacity=1)
+        enrolled, waiting, unreviewed = (UserFactory() for _ in range(3))
+        enrollment_services.approve_request(
+            enrollment_services.register(ChildFactory(parent=enrolled), cls), admin
+        )
+        enrollment_services.approve_request(
+            enrollment_services.register(ChildFactory(parent=waiting), cls), admin
+        )
+        enrollment_services.register(ChildFactory(parent=unreviewed), cls)
+
+        broadcast = Broadcast.objects.create(
+            sender=admin,
+            scope=Broadcast.Scope.SELECTED_CLASSES,
+            subject="Room change",
+            body="We are in the hall this week.",
+        )
+        broadcast.classes.add(cls)
+        count = queue_broadcast(broadcast)
+
+        assert broadcast.audience == Broadcast.Audience.EVERYONE
+        assert count == 3
+
+    def test_a_waiting_list_message_with_nobody_waiting_sends_nothing(self):
+        admin = AdminFactory()
+        cls = ActivityClassFactory(capacity=5)
+        enrollment_services.approve_request(
+            enrollment_services.register(ChildFactory(), cls), admin
+        )
+
+        broadcast, count = create_broadcast(
+            sender=admin,
+            scope=Broadcast.Scope.SELECTED_CLASSES,
+            subject="Still waiting?",
+            body_html="<p>Any news?</p>",
+            classes=[cls],
+            audience=Broadcast.Audience.WAITLIST,
+        )
+
+        assert count == 0
+        assert not Notification.objects.filter(broadcast=broadcast).exists()
+        # Still a sent announcement, and the history records who it was for.
+        broadcast.refresh_from_db()
+        assert broadcast.sent_at is not None
+        assert broadcast.audience == Broadcast.Audience.WAITLIST
 
     def test_rich_text_broadcast_sends_html_and_plain_text(self):
         from django.core import mail
