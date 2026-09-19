@@ -67,6 +67,11 @@ jobs:
       JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
       JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
       RAW_TOKEN: ${{ secrets.ZEPTOMAIL_SEND_MAIL_TOKEN }}
+      # A container update replaces the WHOLE secret map, so the container
+      # step sends every secret, not just the token; these are the others.
+      EMAIL_HOST_USER: ${{ vars.SCW_MAIL_PROJECT_ID || secrets.SCW_DEFAULT_PROJECT_ID }}
+      EMAIL_HOST_PASSWORD: ${{ secrets.SCW_MAIL_SECRET_KEY }}
+      MCP_API_TOKEN: ${{ secrets.MCP_API_TOKEN }}
       DRY_RUN: ${{ inputs.dry_run }}
       TEST_RECIPIENT: ${{ inputs.test_recipient }}
     steps:
@@ -74,7 +79,7 @@ jobs:
         run: |
           missing=""
           for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID \
-                   CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID RAW_TOKEN; do
+                   CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID RAW_TOKEN EMAIL_HOST_PASSWORD; do
             [ -n "${!n}" ] || missing="$missing ${n/RAW_TOKEN/ZEPTOMAIL_SEND_MAIL_TOKEN}"
           done
           [ -z "$missing" ] || {
@@ -83,6 +88,8 @@ jobs:
             echo "as a secret of the 'production' environment (or of the repository)."
             exit 1
           }
+
+      - uses: actions/checkout@v4
 
       - name: Install the Scaleway CLI
         run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
@@ -165,8 +172,23 @@ jobs:
             echo "  job $id: $(jq -r '.name' <<<"$json"), $(jq -r '.environment_variables | keys | length' <<<"$json") variables kept, ZEPTOMAIL_SEND_MAIL_TOKEN replaced"
           }
 
+          # Container: the secret map is replaced wholesale by an update, so
+          # build the complete set (deploy/scaleway-env.lib.sh) with the new
+          # token in it. SECRET_KEY and DATABASE_URL come from the migrate job.
+          . deploy/scaleway-env.lib.sh
+          scw_email_env
+          job="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json)"
+          SECRET_KEY="$(jq -r '.environment_variables.SECRET_KEY // empty' <<<"$job")"
+          DATABASE_URL="$(jq -r '.environment_variables.DATABASE_URL // empty' <<<"$job")"
+          [ -n "$SECRET_KEY" ] && [ -n "$DATABASE_URL" ] \
+            || { echo "::error::the migrate job carries no SECRET_KEY/DATABASE_URL to give the container"; exit 1; }
+          echo "::add-mask::$SECRET_KEY"; echo "::add-mask::$DATABASE_URL"
+          export SECRET_KEY DATABASE_URL ZEPTOMAIL_SEND_MAIL_TOKEN="$TOKEN"
+          scw_container_secrets
+
           echo "## plan"
-          echo "  container $CONTAINER_ID: secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN=<secret> (other secrets kept)"
+          echo "  container $CONTAINER_ID: full secret set = $(printf '%s\n' "${CONTAINER_SECRETS[@]}" | sed -E 's/^secret-environment-variables\.([A-Z_]+)=.*/\1/' | paste -sd, -)"
+          [ -n "$MCP_API_TOKEN" ] || echo "::warning::MCP_API_TOKEN secret is not set; the /mcp endpoint will be off after this."
           job_args "$JOB_MIGRATE_ID";  MIGRATE_ARGS=("${JOB_ARGS[@]}")
           job_args "$JOB_NOTIFIER_ID"; NOTIFIER_ARGS=("${JOB_ARGS[@]}")
 
@@ -175,8 +197,7 @@ jobs:
             exit 0
           fi
 
-          scw container container update "$CONTAINER_ID" \
-            secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$TOKEN" -o json > /dev/null
+          scw container container update "$CONTAINER_ID" "${CONTAINER_SECRETS[@]}" -o json > /dev/null
           echo "container updated; redeploying"
           scw jobs definition update "$JOB_MIGRATE_ID"  "${MIGRATE_ARGS[@]}"  -o json > /dev/null
           scw jobs definition update "$JOB_NOTIFIER_ID" "${NOTIFIER_ARGS[@]}" -o json > /dev/null

@@ -277,8 +277,11 @@ scw container container create namespace-id="$NS_ID" name="$APP_NAME-web" \
 `ALLOWED_HOSTS` must also carry the endpoint Scaleway generates for the
 container (read it back once the container is `ready`; `provision.sh` does
 this in a second pass), and a bare apex domain if you accept one alongside
-`www`. `container update` replaces the plain map wholesale and merges the
-secret map, so every later update re-sends the full plain set.
+`www`. `container update` replaces the plain map **and the secret map**
+wholesale, so every later update re-sends the full plain set and the full
+secret set (`scw_container_secrets`). Naming a single secret deletes the
+others: the app then boots with the defaults, an empty SQLite file among them,
+and every real page is a 500 while `/_health` stays green.
 
 Why these numbers:
 
@@ -506,7 +509,11 @@ domain is not verified, that step fails and the container is not rolled. The
 SMTP password is the `SCW_MAIL_SECRET_KEY` secret (written by
 `deploy/github-config.sh` from `EMAIL_HOST_PASSWORD`); the username is the
 `SCW_MAIL_PROJECT_ID` variable if the domain lives in another project, else
-`SCW_DEFAULT_PROJECT_ID`.
+`SCW_DEFAULT_PROJECT_ID`. Because the container's secret map is replaced on
+every update, the container step sends the complete set: `SECRET_KEY` and
+`DATABASE_URL` read back from the migrate job, the mail password, and
+`MCP_API_TOKEN` from the GitHub secret of that name (`github-config.sh` writes
+it from the state file). Without that secret the `/mcp` endpoint is off.
 
 Five more workflows use the same secrets from *Actions → Run workflow*:
 *Inspect hosting estate* (read-only listing), *Scaleway: configure the estate*

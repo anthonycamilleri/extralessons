@@ -8,12 +8,16 @@
 # Each function fills a bash array with `scw` arguments from the variables
 # named in its comment. Callers export those variables first.
 #
-# Two things to know about `scw container container update`:
-#   * `environment-variables.*` replaces the plain map wholesale, so every
-#     call must pass the complete set — which is what these functions emit;
-#   * `secret-environment-variables.*` merges: keys not mentioned are kept.
-#     Nothing here ever needs to delete a secret; S3_BUCKET (plain) is the
-#     switch that decides whether the S3_* secrets are read at all.
+# The one thing to know about `scw container container update`: BOTH
+# `environment-variables.*` and `secret-environment-variables.*` replace their
+# map wholesale. Naming one secret deletes every other secret on the container
+# (this took production down once: a token rotation left the container with
+# that token only, so SECRET_KEY and DATABASE_URL vanished and the app came up
+# on an empty SQLite file). Every update must therefore pass the complete
+# plain set AND the complete secret set, which is what these functions emit.
+# Secrets cannot be read back from the container; SECRET_KEY and DATABASE_URL
+# are recovered from the migrate job's plain variables, the rest come from
+# GitHub secrets (deploy.yml shows the pattern).
 #
 # Jobs take plain variables only, so their secrets are plain too. Anyone who
 # can read a job definition can read them; docs/scaleway-setup.md describes
@@ -85,19 +89,25 @@ scw_plain_env() { # fills PLAIN_ENV
   for kv in "${EMAIL_VARS[@]}"; do PLAIN_ENV+=("environment-variables.$kv"); done
 }
 
-# Secrets for the web container (stored encrypted by the platform).
-# Needs: SECRET_KEY DATABASE_URL MCP_API_TOKEN, and scw_email_env's
-# Optional: ZEPTOMAIL_SEND_MAIL_TOKEN (only sent when set; the secret map
-#           merges, so an absent key leaves whatever the container has)
+# Secrets for the web container (stored encrypted by the platform). This is
+# the COMPLETE secret set: an update carrying it replaces whatever the
+# container had, so anything not listed here is gone after the call.
+# Needs: SECRET_KEY DATABASE_URL, and scw_email_env's
+# Optional: MCP_API_TOKEN (empty switches the /mcp endpoint off),
+#           ZEPTOMAIL_SEND_MAIL_TOKEN (only sent when set)
 scw_container_secrets() { # fills CONTAINER_SECRETS
+  : "${SECRET_KEY:?SECRET_KEY is required (read it from the migrate job)}"
+  : "${DATABASE_URL:?DATABASE_URL is required (read it from the migrate job)}"
   scw_email_env
   local kv
   CONTAINER_SECRETS=(
     secret-environment-variables.SECRET_KEY="$SECRET_KEY"
     secret-environment-variables.DATABASE_URL="$DATABASE_URL"
-    secret-environment-variables.MCP_API_TOKEN="${MCP_API_TOKEN:-}"
   )
   for kv in "${EMAIL_SECRET_VARS[@]}"; do CONTAINER_SECRETS+=("secret-environment-variables.$kv"); done
+  # Absent and empty mean the same to the app (endpoint off); only send a value.
+  [ -n "${MCP_API_TOKEN:-}" ] && \
+    CONTAINER_SECRETS+=(secret-environment-variables.MCP_API_TOKEN="$MCP_API_TOKEN")
   [ -n "${ZEPTOMAIL_SEND_MAIL_TOKEN:-}" ] && \
     CONTAINER_SECRETS+=(secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$ZEPTOMAIL_SEND_MAIL_TOKEN")
   return 0

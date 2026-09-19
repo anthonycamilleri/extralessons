@@ -57,6 +57,10 @@ set_secret SCW_DEFAULT_ORGANIZATION_ID "$ORG_ID"
 mail_key="${EMAIL_HOST_PASSWORD:-${SCW_MAIL_SECRET_KEY:-}}"
 if [ -n "$mail_key" ]; then set_secret SCW_MAIL_SECRET_KEY "$mail_key"
 else echo "  (SCW_MAIL_SECRET_KEY not written: EMAIL_HOST_PASSWORD is empty in $CONFIG)"; fi
+# Every container update replaces the whole secret map, so the deploy needs
+# the connector token too, every time.
+if [ -n "${MCP_API_TOKEN:-}" ]; then set_secret MCP_API_TOKEN "$MCP_API_TOKEN"
+else echo "  (MCP_API_TOKEN not written: not in $STATE; the /mcp endpoint stays off until it is set)"; fi
 
 set_var SCW_REGISTRY_NAMESPACE "$REGISTRY_NAMESPACE"
 set_var SCW_CONTAINER_ID       "$CONTAINER_ID"

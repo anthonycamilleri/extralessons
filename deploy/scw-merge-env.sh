@@ -13,8 +13,10 @@
 # written: the caller passes ARGS to the update it was going to make anyway
 # (image change and variables in one call means one redeploy, not two).
 #
-# Only the plain map is handled. A container's secrets merge on their own
-# (keys not mentioned are kept), so they need no help; jobs have no secrets.
+# Only the plain map is handled. A container's secret map is ALSO replaced
+# wholesale by an update but cannot be read back, so it cannot be merged: the
+# caller must pass the complete set (scw_container_secrets in
+# scaleway-env.lib.sh) on every container update. Jobs have no secrets.
 #
 # Values must not contain newlines. Keys are printed sorted, so two runs with
 # the same inputs produce the same list.

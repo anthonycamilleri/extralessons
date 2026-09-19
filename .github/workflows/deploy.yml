@@ -17,6 +17,12 @@ name: Deploy to Scaleway
 # the deploy before the new image serves traffic. The SMTP password is the
 # SCW_MAIL_SECRET_KEY secret; the username is the project id the sending
 # domain lives in (SCW_MAIL_PROJECT_ID variable, else SCW_DEFAULT_PROJECT_ID).
+#
+# Container secrets: a container update replaces the whole secret map, so the
+# container step always sends the complete set — SECRET_KEY and DATABASE_URL
+# read back from the migrate job (plain there), EMAIL_HOST_PASSWORD and
+# MCP_API_TOKEN from GitHub secrets. MCP_API_TOKEN absent = the /mcp
+# connector endpoint is off until the secret is added and a deploy runs.
 
 on:
   workflow_run:
@@ -208,21 +214,33 @@ jobs:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           EMAIL_HOST_USER: ${{ vars.SCW_MAIL_PROJECT_ID || secrets.SCW_DEFAULT_PROJECT_ID }}
           EMAIL_HOST_PASSWORD: ${{ secrets.SCW_MAIL_SECRET_KEY }}
+          MCP_API_TOKEN: ${{ secrets.MCP_API_TOKEN }}
         run: |
           set -euo pipefail
           . deploy/scaleway-env.lib.sh
           scw_email_env
           # Plain variables merged into the container's current set (the
-          # update replaces that map wholesale); the password goes in the
-          # secret map, which merges on its own.
+          # update replaces that map wholesale).
           mapfile -t PLAIN_ENV < <(deploy/scw-merge-env.sh container "${{ vars.SCW_CONTAINER_ID }}" "${EMAIL_VARS[@]}")
-          SECRETS=(); for kv in "${EMAIL_SECRET_VARS[@]}"; do SECRETS+=("secret-environment-variables.$kv"); done
+          # The secret map is replaced wholesale too and cannot be read back,
+          # so send the complete set every time. SECRET_KEY and DATABASE_URL
+          # live as plain variables on the migrate job; take them from there.
+          job="$(scw jobs definition get "${{ vars.SCW_JOB_MIGRATE_ID }}" -o json)"
+          SECRET_KEY="$(jq -r '.environment_variables.SECRET_KEY // empty' <<<"$job")"
+          DATABASE_URL="$(jq -r '.environment_variables.DATABASE_URL // empty' <<<"$job")"
+          [ -n "$SECRET_KEY" ] && [ -n "$DATABASE_URL" ] \
+            || { echo "::error::the migrate job carries no SECRET_KEY/DATABASE_URL to give the container"; exit 1; }
+          echo "::add-mask::$SECRET_KEY"; echo "::add-mask::$DATABASE_URL"
+          export SECRET_KEY DATABASE_URL
+          [ -n "$MCP_API_TOKEN" ] || echo "::warning::MCP_API_TOKEN secret is not set: the /mcp connector endpoint stays off. Add it under Settings → Secrets and variables → Actions and deploy again."
+          scw_container_secrets
+          echo "container secrets sent: $(printf '%s\n' "${CONTAINER_SECRETS[@]}" | sed -E 's/^secret-environment-variables\.([A-Z_]+)=.*/\1/' | paste -sd, -)"
           # Updating the image reference is what triggers the redeploy; the
           # variables ride along in the same call so there is only one.
           # The argument is `image=`; the older `registry-image=` was removed
           # from the CLI and is now rejected as an unknown argument.
           scw container container update "${{ vars.SCW_CONTAINER_ID }}" \
-            image="$IMAGE_REF" "${PLAIN_ENV[@]}" "${SECRETS[@]}" -o json > /dev/null
+            image="$IMAGE_REF" "${PLAIN_ENV[@]}" "${CONTAINER_SECRETS[@]}" -o json > /dev/null
 
           # The container reports the *previous* deployment as ready for a
           # moment after the update lands, so settle before believing a status.
