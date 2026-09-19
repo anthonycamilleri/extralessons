@@ -6,7 +6,7 @@ instance and turns every deploy into a few seconds of downtime. The database
 is already there, already backed up, and already reachable from every instance
 — and the only uploads this application takes are class cover images, which
 `apps.catalog.images` shrinks to a JPEG of at most 1600px before they get here.
-A hundred classes is a few tens of megabytes. See docs/render-setup.md.
+A hundred classes is a few tens of megabytes. See docs/scaleway-setup.md, "Uploaded images".
 """
 from django.db import models
 

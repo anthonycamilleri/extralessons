@@ -1,9 +1,10 @@
 # Local development against PostgreSQL.
 #
-# Production is Render — see render.yaml and docs/render-setup.md. There is no
-# compose file for it on purpose: the deployed topology is a web service plus a
-# cron job, described by the Blueprint, and a compose file pretending otherwise
-# would drift out of date the first time someone changed the real thing.
+# Production is Scaleway Serverless — see docs/scaleway-setup.md. There is no
+# compose file for it on purpose: the deployed topology is a container plus two
+# jobs, described by deploy/provision.sh, and a compose file pretending
+# otherwise would drift out of date the first time someone changed the real
+# thing.
 #
 # For the fastest loop, skip this entirely: `python manage.py runserver` uses
 # SQLite with no services at all. Use this stack when you need PostgreSQL —

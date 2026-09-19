@@ -6,9 +6,9 @@ three of Serverless Containers, Serverless Jobs and Serverless SQL Database.
 
 Budget about an hour for the first run. If the estate already exists — it does
 for `esljparents.eu` — skip to *Operating it*; the environment is kept in step
-by the *Scaleway: configure the estate* workflow, and
-[migration-render-to-scaleway.md](migration-render-to-scaleway.md) is the
-runbook that brought the data back from Render.
+by the *Scaleway: configure the estate* workflow.
+[migration-render-to-scaleway.md](migration-render-to-scaleway.md) records how
+the data came back from Render in September 2026.
 
 ## The short version
 
@@ -336,11 +336,13 @@ scw jobs definition create name="$APP_NAME-migrate" \
   -o json
 ```
 
-No cron: this one only ever runs from the deploy pipeline, twice per deploy —
-once as defined, then once more with `args.0=ensure_admin` (contextual
-arguments override the definition's for that run only), which creates the
-`ADMIN_EMAIL` superuser with a set-password email the first time and does
-nothing thereafter. That is why it carries the email settings.
+No cron: this one only ever runs on demand. The deploy pipeline runs it as
+defined (migrate) and then once more with `args.0=send_test_email`
+(contextual arguments override the definition's for that run only), which is
+why it carries the email settings. `provision.sh` runs it once with
+`args.0=ensure_admin` to create the `ADMIN_EMAIL` superuser and email a
+set-password link; that run used to happen on every deploy too, doing nothing
+each time but booting a job and waking the database, so it no longer does.
 
 ### The notifier job
 
@@ -496,7 +498,11 @@ deploy workflow is pinned to it; required reviewers there give you a manual
 approval step if you ever want one). Then push to `main`: once *CI* is green,
 `.github/workflows/deploy.yml` takes it from there — build for `linux/amd64`,
 push, run migrations as a job and wait for them, repoint the notifier job,
-redeploy the container, then smoke-test `/_health`.
+redeploy the container, smoke-test `/_health`, then prune the registry:
+`deploy/scw-prune-images.sh` keeps `latest`, the tag just deployed and the ten
+newest tags besides, and deletes the rest, so registry storage stops growing by
+one image per push. Ten is the rollback horizon; anything older needs a revert
+and a fresh build.
 
 The deploy also carries the email set-up: on every run it merges the
 Transactional Email variables into the container and both jobs (in the same
@@ -515,11 +521,11 @@ every update, the container step sends the complete set: `SECRET_KEY` and
 `MCP_API_TOKEN` from the GitHub secret of that name (`github-config.sh` writes
 it from the state file). Without that secret the `/mcp` endpoint is off.
 
-Five more workflows use the same secrets from *Actions → Run workflow*:
-*Inspect hosting estate* (read-only listing), *Scaleway: configure the estate*
-(apply `deploy/scaleway-env.lib.sh` to the container and jobs), *Scaleway:
-rotate the ZeptoMail token* (legacy, see *Operating it*), *Scaleway: attach
-domains*, and *Scaleway: move production from Render* (the data copy).
+Three more workflows use the same secrets from *Actions → Run workflow*:
+*Inspect hosting estate* (read-only listing, including the container's current
+`min_scale..max_scale` and the database's `cpu_min..cpu_max`), *Scaleway:
+configure the estate* (apply `deploy/scaleway-env.lib.sh` to the container and
+jobs, and set `min-scale`), and *Scaleway: attach domains*.
 
 Note what is *not* in GitHub beyond the mail secret key: no database URL, no
 WhatsApp token. Application secrets live in Scaleway; GitHub gets a key that
@@ -563,35 +569,17 @@ SHA: it re-applies the variables, sends the test email and rolls nothing new.
 Delete the old key once that deploy is green.
 
 **Returning to ZeptoMail (legacy).** The ZeptoMail backend is still in the
-code. To use it, set `EMAIL_BACKEND` to
-`apps.notifications.backends.zeptomail.ZeptoMailBackend` in
-`scw_email_env` (or override it in `deploy/scaleway.env`) and put the Mail
-Agent's token on the estate with the workflow below. A replaced Mail Agent, or
-a regenerated token on the same agent, invalidates the token the estate holds:
-every send fails with HTTP 401 and notifications pile up as retries. Put the
-new one on the estate without touching anything else:
-
-1. ZeptoMail → *Mail Agents* → the agent → *SMTP/API* → copy *Send Mail
-   token*. The copy button includes the `Zoho-enczapikey` prefix; that is fine.
-2. GitHub → *Settings → Secrets and variables → Actions* → environment
-   `production` → new secret `ZEPTOMAIL_SEND_MAIL_TOKEN` with that value. It is
-   read only by the next step and can be deleted afterwards; the estate is the
-   store of record.
-3. *Actions → Scaleway: rotate the ZeptoMail token → Run workflow* with
-   `test_recipient` set to your own address. With `dry_run` ticked (the
-   default) it sends one test email through ZeptoMail with the new token and
-   prints the plan; a 401 there means the token was copied wrong, a 400 means
-   the agent does not own the From domain or is on the other data centre.
-   Run it once more with `dry_run` unticked to apply.
-
-The container gets the token as a platform secret, the migrate and notifier
-jobs as the plain variable jobs support (their other variables are read back
-and re-sent unchanged). Rows that had already exhausted their retries are
-marked `FAILED` and stay so: select them in *Admin → Notifications* and run
-*Retry failed notifications*. Check also that `DEFAULT_FROM_EMAIL` is on the
-new agent's domain and `ZEPTOMAIL_API_URL` matches its *Host*
-(`api.zeptomail.eu` or `api.zeptomail.com`); those two are plain variables,
-changed via *Scaleway: configure the estate* or `deploy/scaleway-env.lib.sh`.
+code and `deploy/scaleway-env.lib.sh` still forwards `ZEPTOMAIL_SEND_MAIL_TOKEN`
+to the container and jobs whenever it is set. To use it, set `EMAIL_BACKEND`
+to `apps.notifications.backends.zeptomail.ZeptoMailBackend` and the Mail
+Agent's *Send Mail token* as `ZEPTOMAIL_SEND_MAIL_TOKEN` in
+`deploy/scaleway.env`, check `DEFAULT_FROM_EMAIL` is on the agent's domain and
+`ZEPTOMAIL_API_URL` matches its *Host* (`api.zeptomail.eu` or
+`api.zeptomail.com`), and re-run `deploy/provision.sh`. The workflow that
+rotated the token from GitHub was removed with the move to Transactional
+Email. Rows that exhausted their retries while a token was wrong are marked
+`FAILED` and stay so: select them in *Admin → Notifications* and run *Retry
+failed notifications*.
 
 **Freezing the site.** `MAINTENANCE_MODE=true` on the container answers
 everything but the health probe with a 503 and `Retry-After`
@@ -600,13 +588,28 @@ can write to it.
 
 **Cost knobs, roughly in order of impact:**
 
-1. `min-scale` on the container.
-2. `cpu-min` on the database.
-3. The notifier cron interval — a nightly job lets the database idle through
+1. `min-scale` on the container. *Inspect hosting estate* prints the current
+   value; *Scaleway: configure the estate* changes it.
+2. How often you deploy. Every deploy is a cold start of the estate: job runs
+   for the migration and the test email, a new container instance that then
+   lives out the idle window, the database woken for all of it. Twenty pushes
+   to `main` in a day keep the container warm all day with no parent in sight;
+   merge them as one.
+3. `cpu-min` on the database.
+4. What wakes the container from outside. The Claude connector's `/mcp` calls
+   at the start of every conversation, crawlers on the public catalogue, and
+   uptime monitors each cost a cold start plus the idle window. `/robots.txt`
+   (`config/robots.py`) keeps well-behaved crawlers to the catalogue pages;
+   Cockpit's request metrics show the rest.
+5. The notifier cron interval — a nightly job lets the database idle through
    every night, weekend and holiday. Anything more frequent than about every
    five minutes keeps it permanently awake, because idle only starts after five
    minutes of silence.
-4. Log volume in Cockpit.
+6. The container's size: 1000 mvCPU and 1 GB is generous for one gunicorn
+   process with eight threads. Every warm minute is billed at that allocation;
+   halving it halves the cost of every wake, at some cold-start latency.
+7. Log volume in Cockpit, and registry storage (the deploy prunes it to the
+   ten newest images).
 
 ## Things that will bite you
 

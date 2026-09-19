@@ -1,6 +1,6 @@
 name: Inspect hosting estate
 
-# Read-only. Prints what exists on Scaleway and on Render — names, ids, states,
+# Read-only. Prints what exists on Scaleway — names, ids, states,
 # images, schedules and the *names* of environment variables — so a migration
 # can be planned against facts rather than memory. Never prints a secret value:
 # every env-var listing is reduced to its keys, and no connection string is
@@ -36,19 +36,15 @@ jobs:
           V_M: ${{ vars.SCW_JOB_MIGRATE_ID }}
           V_N: ${{ vars.SCW_JOB_NOTIFIER_ID }}
           V_URL: ${{ vars.APP_URL }}
-          V_RWEB: ${{ vars.RENDER_WEB_SERVICE_ID }}
-          S_RENDER: ${{ secrets.RENDER_API_KEY }}
         run: |
           for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID SCW_DEFAULT_ORGANIZATION_ID; do
             [ -n "${!n}" ] && echo "secret   $n: set" || echo "secret   $n: MISSING"
           done
-          [ -n "$S_RENDER" ] && echo "secret   RENDER_API_KEY: set" || echo "secret   RENDER_API_KEY: MISSING"
           echo "variable SCW_REGISTRY_NAMESPACE = ${V_NS:-<unset>}"
           echo "variable SCW_CONTAINER_ID       = ${V_C:-<unset>}"
           echo "variable SCW_JOB_MIGRATE_ID     = ${V_M:-<unset>}"
           echo "variable SCW_JOB_NOTIFIER_ID    = ${V_N:-<unset>}"
           echo "variable APP_URL                = ${V_URL:-<unset>}"
-          echo "variable RENDER_WEB_SERVICE_ID  = ${V_RWEB:-<unset>}"
       - name: Install the Scaleway CLI
         run: |
           curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
@@ -124,37 +120,3 @@ jobs:
             [ $i -lt 3 ] && sleep 20 || true
           done
 
-  render:
-    name: Render
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-      API: https://api.render.com/v1
-    steps:
-      - name: Services
-        continue-on-error: true
-        run: |
-          [ -n "$RENDER_API_KEY" ] || { echo "RENDER_API_KEY missing"; exit 1; }
-          get() { curl -fsS "$API$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
-          services=$(get "/services?limit=50")
-          echo "$services" | jq -r '.[].service | "\(.name)  id=\(.id)  type=\(.type)  suspended=\(.suspended)  branch=\(.branch)  autoDeploy=\(.autoDeploy // .autoDeployTrigger)\n  url=\(.serviceDetails.url // "-")  plan=\(.serviceDetails.plan // "-")  region=\(.serviceDetails.region // "-")  schedule=\(.serviceDetails.schedule // "-")  numInstances=\(.serviceDetails.numInstances // "-")"'
-          for id in $(echo "$services" | jq -r '.[].service.id'); do
-            echo "## env var keys of $id (values withheld)"
-            get "/services/$id/env-vars?limit=100" | jq -r '[.[].envVar.key] | join(", ")'
-            echo "## env groups linked to $id"
-            get "/services/$id/env-groups" 2>/dev/null | jq -r '.[]? | "\(.name)  id=\(.id)"' || true
-            echo "## custom domains of $id"
-            get "/services/$id/custom-domains?limit=20" 2>/dev/null | jq -r '.[]? | .customDomain | "\(.name)  verified=\(.verificationStatus)  domainType=\(.domainType)"' || true
-            echo "## latest deploy of $id"
-            get "/services/$id/deploys?limit=1" | jq -r '.[0].deploy | "\(.status)  commit=\(.commit.id[0:8])  finished=\(.finishedAt)"'
-          done
-          echo "## env groups"
-          get "/env-groups?limit=20" | jq -r '.[].envGroup | "\(.name)  id=\(.id)  keys=\([.envVars[]?.key] | join(","))"'
-      - name: Postgres
-        continue-on-error: true
-        run: |
-          get() { curl -fsS "$API$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
-          for id in $(get "/postgres?limit=20" | jq -r '.[].postgres.id'); do
-            get "/postgres/$id" | jq -r '"\(.name)  id=\(.id)  status=\(.status)  plan=\(.plan)  version=\(.version)  region=\(.region)  databaseName=\(.databaseName)  user=\(.databaseUser)  diskSizeGB=\(.diskSizeGB // "-")  highAvailability=\(.highAvailabilityEnabled)\n  ipAllowList=\(.ipAllowList | tostring)\n  expires=\(.expiresAt // "never")  created=\(.createdAt)"'
-          done

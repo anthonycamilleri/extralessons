@@ -1,5 +1,14 @@
 # Moving production from Render back to Scaleway
 
+> **Historical.** The move was completed in September 2026. The workflows this
+> runbook drives — *Scaleway: move production from Render*, the Render deploy,
+> the ZeptoMail token rotation — and the Render files (`render.yaml`, the
+> `deploy/render-*.sh` scripts, `docs/render-setup.md`) were removed
+> afterwards; *Scaleway: configure the estate* no longer reads anything from
+> Render. The runbook is kept for the record and for its troubleshooting
+> table. `deploy/migrate-db.sh` (plain `pg_dump`/`pg_restore` between any two
+> databases) is still in the tree.
+
 The runbook for the move, written so that the mechanical parts run from GitHub
 Actions and the parts that need a human — approving, changing DNS, checking
 that the site feels right — are short and listed. Budget an evening: about

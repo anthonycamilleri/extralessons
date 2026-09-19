@@ -75,7 +75,7 @@ scw_plain_env() { # fills PLAIN_ENV
     # there is no apex, which the app reads as "no redirects".
     environment-variables.CANONICAL_REDIRECT_HOSTS="${APEX_DOMAIN:-}"
     environment-variables.DEFAULT_FROM_EMAIL="$DEFAULT_FROM_EMAIL"
-    # Kept for a return to ZeptoMail (see scaleway-email-token.yml); inert
+    # Kept for a return to ZeptoMail (docs/scaleway-setup.md, "Returning to ZeptoMail"); inert
     # while EMAIL_BACKEND names SMTP.
     environment-variables.ZEPTOMAIL_API_URL="${ZEPTOMAIL_API_URL:-https://api.zeptomail.eu/v1.1/email}"
     environment-variables.ADMIN_EMAIL="${ADMIN_EMAIL:-}"

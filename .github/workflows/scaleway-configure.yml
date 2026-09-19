@@ -1,29 +1,29 @@
 name: "Scaleway: configure the estate"
 
 # Brings the existing Scaleway estate (web container, migrate job, notifier
-# job) up to the production configuration this repository expects, copying the
-# application secrets from Render so no human ever handles them:
+# job) up to the production configuration this repository expects, and is the
+# place to change the container's min-scale from GitHub.
 #
-#   SECRET_KEY                 kept identical so every parent's session and
-#                              every outstanding password-reset or invitation
-#                              link survives the move
-#   MCP_API_TOKEN              the Claude connector keeps working unchanged
-#   ZEPTOMAIL_SEND_MAIL_TOKEN  carried over only if Render still has one
+# Nothing is typed in and no human handles a secret. Everything comes from the
+# estate itself, exactly as deploy.yml reads it on every deploy:
+#
+#   SECRET_KEY, DATABASE_URL   plain variables on the migrate job
+#   EMAIL_HOST_PASSWORD        the SCW_MAIL_SECRET_KEY GitHub secret
+#   MCP_API_TOKEN              the MCP_API_TOKEN GitHub secret (absent = the
+#                              /mcp endpoint is switched off)
+#   ADMIN_EMAIL, DEFAULT_FROM_EMAIL, TIME_ZONE, DB_POOL_MAX_SIZE
+#                              read back from the container's plain variables
 #
 # Email itself is Scaleway Transactional Email: the password comes from the
-# SCW_MAIL_SECRET_KEY secret and the rest from deploy/scaleway-env.lib.sh,
-# exactly as deploy.yml applies them on every deploy.
-#   DATABASE_URL               stays what it is: the Scaleway database's own
-#
-# Uploaded images live in the database (apps/media), so the S3_* variables of
-# the old estate are dropped: S3_BUCKET absent is what selects database storage.
+# SCW_MAIL_SECRET_KEY secret and the rest from deploy/scaleway-env.lib.sh.
 #
 # Idempotent — run it as often as the configuration changes. The environment
 # is described once, in deploy/scaleway-env.lib.sh, and applied identically to
 # the container and both jobs. Every secret is masked in the log.
 #
 # Run with dry_run (the default) first: it prints what it would set and changes
-# nothing. Then run it again with dry_run unticked.
+# nothing. Then run it again with dry_run unticked. A container update
+# redeploys it: one cold start, one idle window of billing.
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ on:
         type: string
         default: esljparents.eu
       min_scale:
-        description: "Container min-scale (empty = leave as is; 1 = always warm, no cold starts)"
+        description: "Container min-scale (empty = leave as is; 0 = sleep when idle; 1 = always warm, billed around the clock)"
         type: string
         default: ""
   # A push that touches this file only registers the workflow with GitHub so
@@ -68,12 +68,9 @@ jobs:
       SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
       SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
       SCW_DEFAULT_REGION: fr-par
-      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
       JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
       JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
-      RENDER_WEB_SERVICE_NAME: extralessons-web
-      RENDER_ENV_GROUP_NAME: extralessons-shared
       EMAIL_HOST_USER: ${{ vars.SCW_MAIL_PROJECT_ID || secrets.SCW_DEFAULT_PROJECT_ID }}
       EMAIL_HOST_PASSWORD: ${{ secrets.SCW_MAIL_SECRET_KEY }}
     steps:
@@ -82,7 +79,7 @@ jobs:
       - name: Check required configuration is present
         run: |
           missing=""
-          for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID RENDER_API_KEY \
+          for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID \
                    CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID EMAIL_HOST_PASSWORD; do
             [ -n "${!n}" ] || missing="$missing $n"
           done
@@ -91,49 +88,30 @@ jobs:
       - name: Install the Scaleway CLI
         run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
 
-      - name: Read the application secrets from Render
-        id: render
-        run: |
-          set -euo pipefail
-          get() { curl -fsS "https://api.render.com/v1$1" -H "Authorization: Bearer $RENDER_API_KEY" -H "Accept: application/json"; }
-          web="$(deploy/render-service-id.sh "$RENDER_WEB_SERVICE_NAME")"
-          service_env="$(get "/services/$web/env-vars?limit=100")"
-          group_id="$(get "/env-groups?limit=50" | jq -r --arg n "$RENDER_ENV_GROUP_NAME" '.[].envGroup | select(.name==$n) | .id')"
-          [ -n "$group_id" ] || { echo "::error::no Render env group named $RENDER_ENV_GROUP_NAME"; exit 1; }
-          group_env="$(get "/env-groups/$group_id")"
-          value() { # value KEY -> from the service, else from the group
-            local v; v="$(jq -r --arg k "$1" '.[].envVar | select(.key==$k) | .value' <<<"$service_env")"
-            [ -n "$v" ] || v="$(jq -r --arg k "$1" '.envVars[] | select(.key==$k) | .value' <<<"$group_env")"
-            printf '%s' "$v"
-          }
-          for k in SECRET_KEY MCP_API_TOKEN ZEPTOMAIL_SEND_MAIL_TOKEN; do
-            v="$(value $k)"
-            if [ -z "$v" ]; then
-              [ "$k" = ZEPTOMAIL_SEND_MAIL_TOKEN ] && { echo "Render holds no $k (fine: email is Transactional Email)"; continue; }
-              echo "::error::Render holds no value for $k"; exit 1
-            fi
-            echo "::add-mask::$v"
-            echo "$k=$v" >> "$GITHUB_OUTPUT"
-            echo "read $k from Render (${#v} characters)"
-          done
-          for k in ADMIN_EMAIL DEFAULT_FROM_EMAIL ZEPTOMAIL_API_URL TIME_ZONE DB_POOL_MAX_SIZE; do
-            v="$(value $k)"; echo "$k=$v" >> "$GITHUB_OUTPUT"; echo "read $k = $v"
-          done
-
       - name: Read what the Scaleway estate already has
         id: scw
         run: |
           set -euo pipefail
-          # The database credentials live only on Scaleway: as a secret on the
-          # container (unreadable) and as a plain variable on the jobs.
-          db="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json | jq -r '.environment_variables.DATABASE_URL // empty')"
-          [ -n "$db" ] || { echo "::error::the migrate job carries no DATABASE_URL"; exit 1; }
-          echo "::add-mask::$db"
-          echo "DATABASE_URL=$db" >> "$GITHUB_OUTPUT"
+          # The application secrets live only on Scaleway: as secrets on the
+          # container (unreadable) and as plain variables on the jobs.
+          job="$(scw jobs definition get "$JOB_MIGRATE_ID" -o json)"
+          for k in SECRET_KEY DATABASE_URL; do
+            v="$(jq -r --arg k "$k" '.environment_variables[$k] // empty' <<<"$job")"
+            [ -n "$v" ] || { echo "::error::the migrate job carries no $k"; exit 1; }
+            echo "::add-mask::$v"
+            echo "$k=$v" >> "$GITHUB_OUTPUT"
+            echo "read $k from the migrate job (${#v} characters)"
+          done
           cjson="$(scw container container get "$CONTAINER_ID" -o json)"
           host="$(jq -r '(.public_endpoint // .domain_name // "") | sub("^https?://";"")' <<<"$cjson")"
           [ -n "$host" ] || { echo "::error::container has no endpoint yet"; exit 1; }
           echo "GENERATED_HOST=$host" >> "$GITHUB_OUTPUT"
+          # The plain settings that are not derived from anything else: keep
+          # whatever the container has, so this run changes only what it says.
+          for k in ADMIN_EMAIL DEFAULT_FROM_EMAIL TIME_ZONE DB_POOL_MAX_SIZE; do
+            v="$(jq -r --arg k "$k" '.environment_variables[$k] // empty' <<<"$cjson")"
+            echo "$k=$v" >> "$GITHUB_OUTPUT"; echo "read $k = ${v:-<unset, default applies>}"
+          done
           echo "container endpoint: $host"
           echo "container status:   $(jq -r .status <<<"$cjson"), scale $(jq -r .min_scale <<<"$cjson")..$(jq -r .max_scale <<<"$cjson"), image $(jq -r '.registry_image // .image' <<<"$cjson")"
           echo "plain env keys now: $(jq -r '.environment_variables | keys | join(",")' <<<"$cjson")"
@@ -146,16 +124,16 @@ jobs:
           MIN_SCALE: ${{ inputs.min_scale }}
           GENERATED_HOST: ${{ steps.scw.outputs.GENERATED_HOST }}
           DATABASE_URL: ${{ steps.scw.outputs.DATABASE_URL }}
-          SECRET_KEY: ${{ steps.render.outputs.SECRET_KEY }}
-          ZEPTOMAIL_SEND_MAIL_TOKEN: ${{ steps.render.outputs.ZEPTOMAIL_SEND_MAIL_TOKEN }}
-          MCP_API_TOKEN: ${{ steps.render.outputs.MCP_API_TOKEN }}
-          ADMIN_EMAIL: ${{ steps.render.outputs.ADMIN_EMAIL }}
-          DEFAULT_FROM_EMAIL: ${{ steps.render.outputs.DEFAULT_FROM_EMAIL }}
-          ZEPTOMAIL_API_URL: ${{ steps.render.outputs.ZEPTOMAIL_API_URL }}
-          TIME_ZONE: ${{ steps.render.outputs.TIME_ZONE }}
-          DB_POOL_MAX_SIZE: ${{ steps.render.outputs.DB_POOL_MAX_SIZE }}
+          SECRET_KEY: ${{ steps.scw.outputs.SECRET_KEY }}
+          MCP_API_TOKEN: ${{ secrets.MCP_API_TOKEN }}
+          ADMIN_EMAIL: ${{ steps.scw.outputs.ADMIN_EMAIL }}
+          DEFAULT_FROM_EMAIL: ${{ steps.scw.outputs.DEFAULT_FROM_EMAIL }}
+          TIME_ZONE: ${{ steps.scw.outputs.TIME_ZONE }}
+          DB_POOL_MAX_SIZE: ${{ steps.scw.outputs.DB_POOL_MAX_SIZE }}
         run: |
           set -euo pipefail
+          [ -n "$DEFAULT_FROM_EMAIL" ] || { echo "::error::the container has no DEFAULT_FROM_EMAIL to keep; set it in deploy/scaleway.env and run provision.sh"; exit 1; }
+          [ -n "$MCP_API_TOKEN" ] || echo "::warning::MCP_API_TOKEN secret is not set: the /mcp connector endpoint will be off after this run."
           . deploy/scaleway-env.lib.sh
           scw_host_settings
           scw_plain_env; scw_container_secrets; scw_job_env
@@ -165,7 +143,7 @@ jobs:
           printf '  %s\n' "${PLAIN_ENV[@]}" "${scale[@]}"
           printf '  %s\n' "${CONTAINER_SECRETS[@]}" | sed -E 's/=.*/=<secret>/'
           echo "## jobs $JOB_MIGRATE_ID, $JOB_NOTIFIER_ID"
-          printf '  %s\n' "${JOB_ENV[@]}" | sed -E 's/^(environment-variables\.(SECRET_KEY|DATABASE_URL|ZEPTOMAIL_SEND_MAIL_TOKEN|EMAIL_HOST_PASSWORD))=.*/\1=<secret>/'
+          printf '  %s\n' "${JOB_ENV[@]}" | sed -E 's/^(environment-variables\.(SECRET_KEY|DATABASE_URL|EMAIL_HOST_PASSWORD))=.*/\1=<secret>/'
 
           if [ "$DRY_RUN" = "true" ]; then
             echo; echo "Dry run: nothing changed. Re-run with dry_run unticked to apply."
