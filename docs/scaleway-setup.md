@@ -474,10 +474,12 @@ approval step if you ever want one). Then push to `main`: once *CI* is green,
 push, run migrations as a job and wait for them, repoint the notifier job,
 redeploy the container, then smoke-test `/_health`.
 
-Four more workflows use the same secrets from *Actions → Run workflow*:
+Five more workflows use the same secrets from *Actions → Run workflow*:
 *Inspect hosting estate* (read-only listing), *Scaleway: configure the estate*
 (apply `deploy/scaleway-env.lib.sh` to the container and jobs), *Scaleway:
-attach domains*, and *Scaleway: move production from Render* (the data copy).
+rotate the ZeptoMail token* (a new Send Mail token, see *Operating it*),
+*Scaleway: attach domains*, and *Scaleway: move production from Render* (the
+data copy).
 
 Note what is *not* in GitHub: no database URL, no SMTP password, no WhatsApp
 token. Application secrets live in Scaleway; GitHub only gets a key that can
@@ -511,6 +513,33 @@ images are in it. Restoring one elsewhere is the same script with
 exercises the probe, the public pages, login and admin, hashed statics, the
 security headers and `/mcp` from outside; add `MCP_API_TOKEN=...` to make a
 real tool call.
+
+**Changing the ZeptoMail token.** A replaced Mail Agent, or a regenerated
+token on the same agent, invalidates the token the estate holds: every send
+fails with HTTP 401 and notifications pile up as retries. Put the new one on
+the estate without touching anything else:
+
+1. ZeptoMail → *Mail Agents* → the agent → *SMTP/API* → copy *Send Mail
+   token*. The copy button includes the `Zoho-enczapikey` prefix; that is fine.
+2. GitHub → *Settings → Secrets and variables → Actions* → environment
+   `production` → new secret `ZEPTOMAIL_SEND_MAIL_TOKEN` with that value. It is
+   read only by the next step and can be deleted afterwards; the estate is the
+   store of record.
+3. *Actions → Scaleway: rotate the ZeptoMail token → Run workflow* with
+   `test_recipient` set to your own address. With `dry_run` ticked (the
+   default) it sends one test email through ZeptoMail with the new token and
+   prints the plan; a 401 there means the token was copied wrong, a 400 means
+   the agent does not own the From domain or is on the other data centre.
+   Run it once more with `dry_run` unticked to apply.
+
+The container gets the token as a platform secret, the migrate and notifier
+jobs as the plain variable jobs support (their other variables are read back
+and re-sent unchanged). Rows that had already exhausted their retries are
+marked `FAILED` and stay so: select them in *Admin → Notifications* and run
+*Retry failed notifications*. Check also that `DEFAULT_FROM_EMAIL` is on the
+new agent's domain and `ZEPTOMAIL_API_URL` matches its *Host*
+(`api.zeptomail.eu` or `api.zeptomail.com`); those two are plain variables,
+changed via *Scaleway: configure the estate* or `deploy/scaleway-env.lib.sh`.
 
 **Freezing the site.** `MAINTENANCE_MODE=true` on the container answers
 everything but the health probe with a 503 and `Retry-After`

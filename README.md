@@ -567,8 +567,9 @@ in `deploy/provision.sh` and explained in
 notes. The environment the container and jobs run with is described once, in
 `deploy/scaleway-env.lib.sh`, and applied by that script or by the *Scaleway:
 configure the estate* workflow. Other operator workflows under *Actions*:
-*Inspect hosting estate* (read-only), *Scaleway: move production from Render*
-(the data copy, rehearsal or cutover), *Scaleway: attach domains*. The Render
+*Inspect hosting estate* (read-only), *Scaleway: rotate the ZeptoMail token*
+(after a Mail Agent change), *Scaleway: move production from Render* (the data
+copy, rehearsal or cutover), *Scaleway: attach domains*. The Render
 pipeline (`deploy-render.yml`, `render.yaml`, `docs/render-setup.md`) is kept
 but only runs by hand.
 
@@ -638,7 +639,9 @@ tests/                # pytest suite (services, capacity race, notifications, vi
 .github/workflows/
   ci.yml              # tests on SQLite + Postgres, deploy checks, image build
   deploy.yml          # after CI on main: build → migrate job → notifier job → container → smoke test
-  scaleway-configure.yml, migrate-to-scaleway.yml, scaleway-domains.yml, estate-inspect.yml
-                      # operator workflows: environment, data copy, TLS domains, read-only inspection
+  scaleway-configure.yml, scaleway-email-token.yml, migrate-to-scaleway.yml,
+  scaleway-domains.yml, estate-inspect.yml
+                      # operator workflows: environment, ZeptoMail token, data copy, TLS domains,
+                      # read-only inspection
   deploy-render.yml   # legacy Render deploy, manual trigger only
 ```

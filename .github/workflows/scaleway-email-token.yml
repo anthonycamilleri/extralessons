@@ -1,0 +1,197 @@
+name: "Scaleway: rotate the ZeptoMail token"
+
+# Puts a new ZeptoMail Send Mail token on the running estate — the web
+# container (as a platform secret) and the migrate and notifier jobs (as the
+# plain variable jobs support) — without a human running `scw` locally and
+# without touching anything else on those resources.
+#
+# When to run it: the Mail Agent in ZeptoMail was replaced or its token
+# regenerated, so every send fails with HTTP 401 and the outbox fills with
+# retries. The token is the only thing that changed, so it is the only thing
+# this workflow changes; the configure workflow re-applies the whole
+# environment and reads its secrets from Render, which is retired.
+#
+# Before running:
+#   1. ZeptoMail → Mail Agents → the agent → SMTP/API tab → copy "Send Mail
+#      token". The copy button includes the "Zoho-enczapikey " prefix; either
+#      form is accepted.
+#   2. GitHub → Settings → Secrets and variables → Actions → environment
+#      "production" → add ZEPTOMAIL_SEND_MAIL_TOKEN with that value.
+#      (A repository-level secret of the same name works too.)
+#   3. Actions → this workflow → Run workflow. Leave dry_run ticked once to see
+#      the plan; set test_recipient to your own address so the token is proved
+#      against ZeptoMail before anything is written; then re-run with dry_run
+#      unticked.
+#
+# Rows that already reached FAILED while the old token was in place are not
+# retried automatically: select them in Admin → Notifications and use the
+# "Retry failed notifications" action, or wait for the nightly notifier for
+# the ones still within their retry budget.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only show what would change (the test send still happens)"
+        type: boolean
+        default: true
+      test_recipient:
+        description: "Send one test email to this address with the new token first; empty = skip"
+        type: string
+        default: ""
+  # A push that touches this file only registers the workflow with GitHub so
+  # it can be dispatched; the job below refuses to run on it.
+  push:
+    paths: [".github/workflows/scaleway-email-token.yml"]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rotate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      CONTAINER_ID: ${{ vars.SCW_CONTAINER_ID }}
+      JOB_MIGRATE_ID: ${{ vars.SCW_JOB_MIGRATE_ID }}
+      JOB_NOTIFIER_ID: ${{ vars.SCW_JOB_NOTIFIER_ID }}
+      RAW_TOKEN: ${{ secrets.ZEPTOMAIL_SEND_MAIL_TOKEN }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      TEST_RECIPIENT: ${{ inputs.test_recipient }}
+    steps:
+      - name: Check required configuration is present
+        run: |
+          missing=""
+          for n in SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID \
+                   CONTAINER_ID JOB_MIGRATE_ID JOB_NOTIFIER_ID RAW_TOKEN; do
+            [ -n "${!n}" ] || missing="$missing ${n/RAW_TOKEN/ZEPTOMAIL_SEND_MAIL_TOKEN}"
+          done
+          [ -z "$missing" ] || {
+            echo "::error::Missing secrets/variables:$missing"
+            echo "ZEPTOMAIL_SEND_MAIL_TOKEN goes under Settings → Secrets and variables → Actions,"
+            echo "as a secret of the 'production' environment (or of the repository)."
+            exit 1
+          }
+
+      - name: Install the Scaleway CLI
+        run: curl -sS https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sudo sh
+
+      - name: Normalise the token and read the sender settings
+        id: prep
+        run: |
+          set -euo pipefail
+          # ZeptoMail's copy button yields "Zoho-enczapikey <token>"; the app
+          # accepts both forms (apps/notifications/backends/zeptomail.py), but
+          # store the bare token so the container and the jobs hold one shape.
+          token="$(printf '%s' "$RAW_TOKEN" | tr -d '\r\n' | sed -E 's/^[[:space:]]*[Zz]oho-enczapikey[[:space:]]+//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+          [ -n "$token" ] || { echo "::error::ZEPTOMAIL_SEND_MAIL_TOKEN is blank after trimming"; exit 1; }
+          echo "::add-mask::$token"
+          echo "TOKEN=$token" >> "$GITHUB_OUTPUT"
+          echo "token: ${#token} characters (bare, prefix stripped)"
+
+          cjson="$(scw container container get "$CONTAINER_ID" -o json)"
+          from="$(jq -r '.environment_variables.DEFAULT_FROM_EMAIL // empty' <<<"$cjson")"
+          api="$(jq -r '.environment_variables.ZEPTOMAIL_API_URL // "https://api.zeptomail.eu/v1.1/email"' <<<"$cjson")"
+          [ -n "$from" ] || { echo "::error::the container carries no DEFAULT_FROM_EMAIL"; exit 1; }
+          echo "FROM=$from" >> "$GITHUB_OUTPUT"
+          echo "API_URL=$api" >> "$GITHUB_OUTPUT"
+          echo "container status: $(jq -r .status <<<"$cjson")"
+          echo "sends as:         $from"
+          echo "via:              $api"
+          echo "secret keys now:  $(jq -r '.secret_environment_variables | map(.key) | join(",")' <<<"$cjson")"
+          echo "The Mail Agent must own the domain of the From address, and the API URL"
+          echo "must match the data centre shown as Host on the agent's API tab"
+          echo "(api.zeptomail.eu → .eu URL, api.zeptomail.com → .com URL)."
+
+      - name: Prove the token against ZeptoMail with one test email
+        if: ${{ inputs.test_recipient != '' }}
+        env:
+          TOKEN: ${{ steps.prep.outputs.TOKEN }}
+          FROM: ${{ steps.prep.outputs.FROM }}
+          API_URL: ${{ steps.prep.outputs.API_URL }}
+        run: |
+          set -euo pipefail
+          # The same request the app makes, so a pass here is a pass there.
+          payload="$(jq -n --arg from "$FROM" --arg to "$TEST_RECIPIENT" --arg run "$GITHUB_RUN_ID" '
+            def addr: capture("^(?:(?<name>[^<]*?)\\s*<)?(?<address>[^<>]+)>?$")
+                      | {address: .address} + (if (.name // "") != "" then {name: .name} else {} end);
+            {
+              from: ($from | addr),
+              to: [{email_address: ($to | addr)}],
+              subject: "ZeptoMail token check (GitHub Actions run \($run))",
+              textbody: "If you are reading this, the new ZeptoMail Send Mail token works for \($from)."
+            }')"
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' -X POST "$API_URL" \
+            -H "Authorization: Zoho-enczapikey $TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json" \
+            --data "$payload")"
+          echo "ZeptoMail answered HTTP $code"
+          jq . "$body" 2>/dev/null || cat "$body"; echo
+          case "$code" in
+            2*) echo "Test email accepted for $TEST_RECIPIENT — the token is valid for this agent." ;;
+            401) echo "::error::401: ZeptoMail does not recognise this token. Copy it again from the agent's SMTP/API tab (the whole 'Send Mail token' field) and update the GitHub secret."; exit 1 ;;
+            400|422)
+              echo "::error::ZeptoMail rejected the message. Usual causes: the From domain ($FROM) is not verified on this Mail Agent, or the agent's data centre does not match $API_URL."; exit 1 ;;
+            *) echo "::error::Unexpected response from ZeptoMail; nothing was changed."; exit 1 ;;
+          esac
+
+      - name: Apply the token to the container and both jobs
+        env:
+          TOKEN: ${{ steps.prep.outputs.TOKEN }}
+        run: |
+          set -euo pipefail
+          # Jobs: `environment-variables.*` replaces the whole map, so read
+          # the current map, swap the one key, and send everything back.
+          job_args() { # job_args <definition-id> -> fills JOB_ARGS
+            local id="$1" json
+            json="$(scw jobs definition get "$id" -o json)"
+            jq -e '.environment_variables | has("ZEPTOMAIL_SEND_MAIL_TOKEN")' <<<"$json" > /dev/null \
+              || echo "::warning::job $id carried no ZEPTOMAIL_SEND_MAIL_TOKEN before; adding it"
+            mapfile -t JOB_ARGS < <(jq -r --arg t "$TOKEN" \
+              '.environment_variables + {ZEPTOMAIL_SEND_MAIL_TOKEN: $t}
+               | to_entries[] | "environment-variables.\(.key)=\(.value)"' <<<"$json")
+            echo "  job $id: $(jq -r '.name' <<<"$json"), $(jq -r '.environment_variables | keys | length' <<<"$json") variables kept, ZEPTOMAIL_SEND_MAIL_TOKEN replaced"
+          }
+
+          echo "## plan"
+          echo "  container $CONTAINER_ID: secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN=<secret> (other secrets kept)"
+          job_args "$JOB_MIGRATE_ID";  MIGRATE_ARGS=("${JOB_ARGS[@]}")
+          job_args "$JOB_NOTIFIER_ID"; NOTIFIER_ARGS=("${JOB_ARGS[@]}")
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo; echo "Dry run: nothing changed. Re-run with dry_run unticked to apply."
+            exit 0
+          fi
+
+          scw container container update "$CONTAINER_ID" \
+            secret-environment-variables.ZEPTOMAIL_SEND_MAIL_TOKEN="$TOKEN" -o json > /dev/null
+          echo "container updated; redeploying"
+          scw jobs definition update "$JOB_MIGRATE_ID"  "${MIGRATE_ARGS[@]}"  -o json > /dev/null
+          scw jobs definition update "$JOB_NOTIFIER_ID" "${NOTIFIER_ARGS[@]}" -o json > /dev/null
+          echo "jobs updated"
+
+          # A secret change redeploys the container; wait for it.
+          sleep 10
+          for attempt in $(seq 1 60); do
+            status="$(scw container container get "$CONTAINER_ID" -o json | jq -r .status)"
+            echo "attempt $attempt: $status"
+            [ "$status" = "ready" ] && break
+            [ "$status" = "error" ] && { echo "::error::container in error"; exit 1; }
+            sleep 5
+          done
+          [ "$status" = "ready" ] || { echo "::error::container not ready after five minutes"; exit 1; }
+          echo
+          echo "Done. Queued notifications go out on the next request or nightly drain;"
+          echo "rows already marked FAILED need Admin → Notifications → 'Retry failed notifications'."
