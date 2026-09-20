@@ -53,6 +53,11 @@ class Enrollment(models.Model):
         WAITLISTED ── admin offers seat ──► OFFERED ── parent confirms ──► ENROLLED
         OFFERED ── parent declines / offer expires ──► CANCELLED
         any active state ── parent withdraws / admin cancels / class cancelled ──► CANCELLED
+        any active state ── admin moves the child ──► CANCELLED (moved), plus a new
+            ENROLLED row in the other class
+
+    The office can also register a child itself (services.admin_register):
+    that creates an ENROLLED row directly, with no request to approve.
 
     Leaving a class has two shapes, decided by the withdrawal window
     (SiteConfig.withdrawal_window_days, counted from registration):
@@ -81,6 +86,7 @@ class Enrollment(models.Model):
         CLASS_CANCELLED = "CLASS_CANCELLED", "Class cancelled"
         OFFER_EXPIRED = "OFFER_EXPIRED", "Offer expired"
         OFFER_DECLINED = "OFFER_DECLINED", "Offer declined"
+        TRANSFERRED = "TRANSFERRED", "Moved to another class"
 
     # Statuses that occupy one of the class's seats.
     SEAT_HOLDING_STATUSES = [Status.ENROLLED, Status.OFFERED]

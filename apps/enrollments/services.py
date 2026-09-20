@@ -125,6 +125,104 @@ def register(child, activity_class, *, terms_accepted=False):
     return enrollment
 
 
+def admin_register(child, activity_class, admin_user):
+    """The office registers a child itself, and the place is confirmed at once.
+
+    For the family that wrote or phoned rather than using the site, or the
+    child the office is placing: there is no request to approve, the row is
+    ENROLLED from the start and the family gets the usual confirmation. The
+    same rules as a parent's registration apply (published class, active
+    term, no duplicate). Capacity is not: as with offer_seat, the roster says
+    when the class is full and enrolling anyway is the administrator's call.
+    Nobody ticked the terms box, so terms_accepted_at stays empty.
+    """
+    with transaction.atomic():
+        cls = _locked_class(activity_class.pk)
+        _validate_registration(cls, child)
+        now = timezone.now()
+        enrollment = Enrollment.objects.create(
+            child=child,
+            activity_class=cls,
+            status=Enrollment.Status.ENROLLED,
+            approved_at=now,
+            enrolled_at=now,
+            decided_by=admin_user,
+        )
+        notifications.queue_event(Event.REGISTRATION_CONFIRMED, enrollment)
+    return enrollment
+
+
+def transfer(enrollment, target_class, admin_user):
+    """Move a child from one class to another in one step.
+
+    The old registration ends with the reason "moved to another class" — so
+    the child's history says what happened rather than looking like a
+    cancellation — and a new, confirmed place is created in the target class.
+    Any active registration can be moved (a request or a waiting-list entry
+    included): the office is deciding, so the result is always ENROLLED, and
+    capacity in the target is not enforced, exactly as for offer_seat. The
+    family gets one email about the move, not a cancellation and a
+    confirmation; the seat freed in the old class alerts the admins if
+    anyone is waiting there. The parent's acceptance of the terms travels
+    with the child.
+
+    Both classes are locked, in primary-key order, so two moves in opposite
+    directions cannot deadlock. Returns the new enrollment.
+    """
+    with transaction.atomic():
+        pks = sorted({enrollment.activity_class_id, target_class.pk})
+        locked = {pk: _locked_class(pk) for pk in pks}
+        source, target = locked[enrollment.activity_class_id], locked[target_class.pk]
+        if source.pk == target.pk:
+            raise EnrollmentError(
+                f"{enrollment.child.full_name} is already registered for {target.title}."
+            )
+        _require_open(target)
+        enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
+        if enrollment.status not in Enrollment.ACTIVE_STATUSES:
+            raise EnrollmentError(
+                "This registration is no longer active, so there is nothing to move."
+            )
+        if Enrollment.objects.filter(
+            child=enrollment.child,
+            activity_class=target,
+            status__in=Enrollment.ACTIVE_STATUSES,
+        ).exists():
+            raise EnrollmentError(
+                f"{enrollment.child.full_name} already has an active registration for "
+                f"{target.title}."
+            )
+        held_seat = enrollment.status in Enrollment.SEAT_HOLDING_STATUSES
+        now = timezone.now()
+        enrollment.status = Enrollment.Status.CANCELLED
+        enrollment.cancelled_at = now
+        enrollment.cancel_reason = Enrollment.CancelReason.TRANSFERRED
+        enrollment.decided_by = admin_user
+        # A pending cancellation request is answered by the move.
+        enrollment.cancel_requested_at = None
+        enrollment.cancel_requested_by = None
+        enrollment.save()
+        moved = Enrollment.objects.create(
+            child=enrollment.child,
+            activity_class=target,
+            status=Enrollment.Status.ENROLLED,
+            approved_at=now,
+            enrolled_at=now,
+            decided_by=admin_user,
+            terms_accepted_at=enrollment.terms_accepted_at,
+        )
+        notifications.queue_event(
+            Event.ENROLLMENT_TRANSFERRED,
+            moved,
+            from_class_title=source.title,
+            from_provider_name=source.provider.name,
+            from_schedule=source.schedule_display,
+        )
+        if held_seat:
+            _alert_if_waiting(source, enrollment)
+    return moved
+
+
 def approve_request(enrollment, admin_user):
     """Admin approves a request: enrolled if a seat is free, else waitlisted."""
     with transaction.atomic():
@@ -288,14 +386,18 @@ def cancel(enrollment, reason, actor=None):
             _CANCEL_EVENTS.get(reason, Event.SUBSCRIPTION_CANCELLED), enrollment
         )
         if held_seat:
-            waitlist_count = cls.enrollments.filter(
-                status=Enrollment.Status.WAITLISTED
-            ).count()
-            if waitlist_count:
-                notifications.queue_admin_event(
-                    Event.ADMIN_SEAT_FREED, enrollment, waitlist_count=waitlist_count
-                )
+            _alert_if_waiting(cls, enrollment)
     return enrollment
+
+
+def _alert_if_waiting(cls, enrollment):
+    """A seat has just been freed in `cls`: tell its admins if anyone is
+    waiting for it. Caller holds the class lock."""
+    waitlist_count = cls.enrollments.filter(status=Enrollment.Status.WAITLISTED).count()
+    if waitlist_count:
+        notifications.queue_admin_event(
+            Event.ADMIN_SEAT_FREED, enrollment, waitlist_count=waitlist_count
+        )
 
 
 def withdrawal_window_days():

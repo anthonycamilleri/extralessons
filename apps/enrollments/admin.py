@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseNotAllowed
@@ -14,6 +15,7 @@ from apps.catalog.admin import ManagedByFilter, ScopedByClassMixin
 from apps.catalog.models import ActivityClass
 
 from . import services
+from .ages import outside_recommended_range
 from .models import Attendance, Enrollment
 from .services import EnrollmentError
 
@@ -30,6 +32,65 @@ def flag_own_children(user, *groups):
     for group in groups:
         for enrollment in group:
             enrollment.own_child = enrollment.child_id in own
+
+
+def placement_notes(enrollment):
+    """What is worth a second flash message after the office has placed a
+    child directly (registered them, or moved them): the class is now over
+    its capacity, or the child is outside its recommended ages. Neither
+    stops the placement — both are the administrator's call — but neither
+    should happen quietly."""
+    cls, child = enrollment.activity_class, enrollment.child
+    notes = []
+    over = services.seats_over_capacity(cls)
+    if over:
+        notes.append(
+            f"{cls.title} is now {over} seat{'s' if over != 1 else ''} over its "
+            f"capacity of {cls.capacity}."
+        )
+    age = outside_recommended_range(cls, child)
+    if age is not None:
+        notes.append(
+            f"{child.first_name} is {age} at the start of term, outside the recommended "
+            f"ages {cls.age_min}–{cls.age_max} for {cls.title}."
+        )
+    return notes
+
+
+class TransferTargetField(forms.ModelChoiceField):
+    """A class as a radio option: what it is, when it runs, and whether a
+    seat is free — the same numbers the roster's pills show."""
+
+    def label_from_instance(self, cls):
+        if cls.places_free > 0:
+            seats = f"{cls.places_free} seat{'s' if cls.places_free != 1 else ''} free"
+        else:
+            seats = f"full ({cls.enrolled_count} of {cls.capacity} seats taken)"
+        return f"{cls.title} · {cls.schedule_display} · {cls.provider.name} · {seats}"
+
+
+class TransferForm(forms.Form):
+    """Where a child can be moved: the open classes this administrator looks
+    after, minus the one the child is in."""
+
+    target = TransferTargetField(
+        queryset=ActivityClass.objects.none(),
+        label="Move to",
+        widget=forms.RadioSelect,
+        empty_label=None,
+        error_messages={"required": "Choose the class to move the child to."},
+    )
+
+    def __init__(self, enrollment, user, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["target"].queryset = (
+            ActivityClass.objects.managed_by(user)
+            .published()
+            .exclude(pk=enrollment.activity_class_id)
+            .with_counts()
+            .select_related("provider", "term")
+            .order_by("title")
+        )
 
 
 def guardian_contacts(child):
@@ -124,6 +185,16 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
                 "<int:object_id>/keep-place/",
                 wrap(self.keep_place_view),
                 name="enrollments_enrollment_keep_place",
+            ),
+            path(
+                "<int:object_id>/cancel/",
+                wrap(self.cancel_view),
+                name="enrollments_enrollment_cancel",
+            ),
+            path(
+                "<int:object_id>/move/",
+                wrap(self.move_view),
+                name="enrollments_enrollment_move",
             ),
         ]
         # Before Django's own patterns: the trailing <path:object_id>/ would
@@ -286,6 +357,89 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
             )
 
         return self._transition(request, object_id, services.decline_cancellation, outcome)
+
+    def cancel_view(self, request, object_id):
+        """The office ends one registration from the roster — a confirmed
+        place, an offer, a waiting-list entry or a request alike. The family
+        gets the school's cancellation notice; a freed seat with a waiting
+        list raises the usual alert."""
+
+        def outcome(enrollment):
+            return messages.INFO, (
+                f"{enrollment.child.full_name} has been removed from "
+                f"{enrollment.activity_class.title}; the family has been told."
+            )
+
+        def transition(enrollment, user):
+            return services.cancel(enrollment, Enrollment.CancelReason.ADMIN, actor=user)
+
+        return self._transition(request, object_id, transition, outcome)
+
+    # -- Moving a child to another class --------------------------------------
+
+    def move_view(self, request, object_id):
+        """Move one child to another class: pick the class, confirm if it is
+        full, done. Lands on the new class's roster, where the child now is."""
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        enrollment = get_object_or_404(
+            self.get_queryset(request).select_related(
+                "child", "activity_class__provider", "activity_class__term"
+            ),
+            pk=object_id,
+        )
+        source = enrollment.activity_class
+        back = reverse("admin:catalog_activityclass_roster", kwargs={"object_id": source.pk})
+        if enrollment.status not in Enrollment.ACTIVE_STATUSES:
+            messages.error(
+                request,
+                f"{enrollment.child.full_name}'s registration for {source.title} is no "
+                "longer active, so there is nothing to move.",
+            )
+            return redirect(back)
+
+        # Bound on any POST, an empty one included: "nothing chosen" is an
+        # answer the form should give, not a page that silently reloads.
+        form = TransferForm(
+            enrollment, request.user, request.POST if request.method == "POST" else None
+        )
+        confirm_target = None
+        if request.method == "POST" and form.is_valid():
+            target = form.cleaned_data["target"]
+            # A full class is a legitimate destination, but never a silent
+            # one: the page says so and asks again, as offering a seat does.
+            if target.places_free < 1 and not request.POST.get("confirm_full"):
+                confirm_target = target
+            else:
+                try:
+                    moved = services.transfer(enrollment, target, request.user)
+                except EnrollmentError as exc:
+                    form.add_error("target", str(exc))
+                else:
+                    messages.success(
+                        request,
+                        f"{moved.child.full_name} moved from {source.title} to "
+                        f"{target.title}; the family has been told.",
+                    )
+                    for note in placement_notes(moved):
+                        messages.warning(request, note)
+                    return redirect(
+                        reverse(
+                            "admin:catalog_activityclass_roster",
+                            kwargs={"object_id": target.pk},
+                        )
+                    )
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.opts,
+            "title": f"Move {enrollment.child.full_name}",
+            "enrollment": enrollment,
+            "source": source,
+            "form": form,
+            "confirm_target": confirm_target,
+            "back": back,
+        }
+        return TemplateResponse(request, "admin/enrollments/enrollment/move.html", context)
 
     # -- Bulk actions ---------------------------------------------------------
 

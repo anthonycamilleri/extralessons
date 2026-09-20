@@ -47,4 +47,13 @@ def default_notification_templates(db):
                 "wa_param_order": leaving.WA_PARAMS.get(event, []),
             },
         )
+    moved = importlib.import_module("apps.notifications.migrations.0015_transfer_event")
+    NotificationTemplate.objects.get_or_create(
+        event=moved.EVENT,
+        defaults={
+            "email_subject": moved.SUBJECT,
+            "email_body": moved.BODY,
+            "wa_param_order": moved.WA_PARAMS,
+        },
+    )
     return NotificationTemplate.objects.all()

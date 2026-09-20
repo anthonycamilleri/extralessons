@@ -76,6 +76,11 @@ ADMIN = Audience(
             summary="How children join a waiting list, and how you hand a freed seat to one of them.",
         ),
         Topic(
+            slug="adding-and-moving-children",
+            title="Adding, moving and removing children",
+            summary="Register a child yourself, move one to another class, or end a place — from the roster.",
+        ),
+        Topic(
             slug="announcements",
             title="Sending an announcement",
             summary="Write to the families of one class or all of them, and check it arrived.",

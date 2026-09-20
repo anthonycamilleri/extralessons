@@ -1,0 +1,65 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  › <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  › <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  › <a href="{{ back }}">{{ source.title }}</a>
+  › Move {{ enrollment.child.full_name }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+{% comment %}Django nests object-tools inside the content block, so a page
+   that overrides content has to render the bar itself.{% endcomment %}
+<ul class="object-tools">
+  <li><a href="{{ back }}">Back to the roster</a></li>
+  <li><a href="{% url 'admin:accounts_child_change' enrollment.child.pk %}">The child</a></li>
+  <li><a href="{% url 'admin:help_topic' 'adding-and-moving-children' %}#move">Help with moving</a></li>
+</ul>
+  <p class="desk-scope">
+    <b>{{ enrollment.child.display_name }}</b> · {{ enrollment.child.date_of_birth|date:"j M Y" }} ·
+    {{ source.title }} ({{ source.schedule_display }}, {{ source.provider.name }}) ·
+    <span class="status status-{{ enrollment.status|lower }}">{{ enrollment.get_status_display }}</span>
+  </p>
+  <p class="help-inline">
+    Moving ends {{ enrollment.child.first_name }}'s registration for <b>{{ source.title }}</b> and gives them a
+    confirmed place in the class you choose — straight away, whatever the state of the old registration.
+    The family gets one email saying where {{ enrollment.child.first_name }} now goes; the old class's seat
+    is free again for someone else.
+  </p>
+
+  {% if confirm_target %}
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="target" value="{{ confirm_target.pk }}">
+    <input type="hidden" name="confirm_full" value="1">
+    <div class="desk-notice">
+      <b>{{ confirm_target.title }} is full</b> — {{ confirm_target.enrolled_count }} of {{ confirm_target.capacity }} seats are taken.
+      Moving {{ enrollment.child.first_name }} there takes it over its capacity; the roster will say so.
+    </div>
+    <div class="submit-row">
+      <input type="submit" value="Move anyway (over capacity)" class="default">
+      <a href="{{ request.path }}" class="button cancel-link">Choose another class</a>
+    </div>
+  </form>
+  {% elif form.fields.target.queryset %}
+  <form method="post">
+    {% csrf_token %}
+    {{ form.target.errors }}
+    <ul class="desk-choice-list">
+      {% for radio in form.target %}<li>{{ radio }}</li>{% endfor %}
+    </ul>
+    <div class="submit-row">
+      <input type="submit" value="Move {{ enrollment.child.first_name }}" class="default">
+      <a href="{{ back }}" class="button cancel-link">Cancel</a>
+    </div>
+  </form>
+  {% else %}
+  <p class="desk-empty">There is no other open class{% if not request.user.is_superuser %} among the ones you look after{% endif %} to move {{ enrollment.child.first_name }} to.</p>
+  {% endif %}
+</div>
+{% endblock %}

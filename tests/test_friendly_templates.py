@@ -20,6 +20,7 @@ NEW = importlib.import_module("apps.notifications.migrations.0005_friendly_templ
 LEAVING = importlib.import_module("apps.notifications.migrations.0008_cancellation_events")
 LESSON = importlib.import_module("apps.notifications.migrations.0011_lesson_cancelled_event")
 INSTRUCTOR = importlib.import_module("apps.notifications.migrations.0012_instructor_invite")
+MOVED = importlib.import_module("apps.notifications.migrations.0015_transfer_event")
 LATER = {
     importlib.import_module(
         "apps.notifications.migrations.0006_contact_form_messages"
@@ -27,6 +28,7 @@ LATER = {
     *LEAVING.TEMPLATES,
     LESSON.EVENT,
     INSTRUCTOR.EVENT,
+    MOVED.EVENT,
 }
 
 
@@ -52,6 +54,17 @@ def test_leaving_templates_speak_like_the_others():
         if not event.startswith("ADMIN_"):
             assert "{{ sender_name }}" in body, event
             assert "Hi {{ parent_first_name }}" in body, event
+
+
+def test_moved_speaks_like_the_others():
+    assert "Dear " not in MOVED.BODY
+    assert "Hi {{ parent_first_name }}" in MOVED.BODY
+    assert "{{ sender_name }}" in MOVED.BODY
+    # One email replaces a cancellation and a confirmation, so it must name
+    # both ends of the move and the new details.
+    for var in ("from_class_title", "class_title", "schedule", "provider_name"):
+        assert "{{ %s }}" % var in MOVED.BODY, var
+    assert "{{ class_title }}" in MOVED.SUBJECT
 
 
 def test_lesson_cancelled_speaks_like_the_others():

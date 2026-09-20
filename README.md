@@ -32,6 +32,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Set up the school year once — term dates plus every holiday period — and every class generated in it skips those days automatically.
 - Review queue: approve or reject enrolment requests (approve enrols directly if a seat is free, otherwise waitlists). The dashboard shows, per class, the registrations (every live request), the confirmed places, and what parents see as still available.
 - Cancellation requests on the same page and on the roster: a family that asks to leave after the withdrawal window keeps the seat until an admin confirms the cancellation (the family is told, and a freed seat with a waiting list raises the usual alert) or keeps the place (the family is told to expect a word). Both count towards the requests badge.
+- Place children directly from a class's roster, for the family that wrote to the office instead of registering, or when a child is in the wrong class: **Add a child** enrols a child at once (no request to approve; the family gets the usual confirmation), **Move…** moves an enrolled or waitlisted child to another class in one step (the old registration is marked *moved*, the new place is confirmed, and the family gets one email saying where the child now goes rather than a cancellation and a confirmation), and every row has a button to end that registration (**Cancel place**, **Withdraw offer**, **Remove**), with the school's cancellation notice to the family. Adding to or moving into a full class is allowed, on purpose, after a confirmation, and the roster then shows the class as over capacity.
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48). A full class can still be offered to: the roster warns and asks for confirmation, then shows how far over capacity the class is.
 - Optional email alerts on new requests and freed seats.
 - Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. See *Who sees what* under Architecture.
@@ -115,13 +116,21 @@ WAITLISTED ── admin offers seat ──► OFFERED ── parent confirms ─
 OFFERED ── parent declines / offer expires (48h, configurable) ──► CANCELLED
 
 any active state ── withdrawal / admin cancel / class cancelled ──► CANCELLED
+any active state ── admin moves the child ──► CANCELLED (moved) + a new ENROLLED row in the other class
+office registers a child itself ──► ENROLLED (no request step)
 
 ENROLLED, after the withdrawal window ── parent asks to cancel ──► cancel_requested_at set
     ── admin confirms ──► CANCELLED          ── admin keeps the place ──► cleared
 ```
 
 `ENROLLED` and `OFFERED` hold a seat; an offer reserves the seat until
-confirmed, declined, or expired. A cancellation request is a flag on an
+confirmed, declined, or expired. Two transitions skip the request step
+because the office is the one deciding: `admin_register` (the roster's *Add a
+child*) creates an `ENROLLED` row directly, and `transfer` (*Move…*) ends the
+old row with the reason `TRANSFERRED` and creates an `ENROLLED` one in the
+target class under both classes' locks, sending the family a single
+`ENROLLMENT_TRANSFERRED` email. Neither is gated by capacity, like
+`offer_seat`: the roster warns, and the administrator confirms. A cancellation request is a flag on an
 `ENROLLED` row, not a status: the seat stays held and the child keeps
 attending until the office decides. `Enrollment.can_withdraw()` is the single
 definition of the window — always open while nothing is confirmed, and for a

@@ -3,8 +3,9 @@ import datetime
 
 from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.widgets import AutocompleteSelect
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
@@ -12,7 +13,10 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
 from apps.accounts.admin_permissions import SchoolAdminPermissionMixin, is_school_admin
-from apps.accounts.models import User
+from apps.accounts.models import Child, User
+from apps.enrollments import services as enrollment_services
+from apps.enrollments.models import Enrollment
+from apps.enrollments.services import EnrollmentError
 from apps.notifications import services as notification_services
 from apps.notifications.forms import RichTextField
 from apps.notifications.models import Broadcast
@@ -497,6 +501,31 @@ class ClassAnnouncementForm(forms.Form):
         ]
 
 
+class RegisterChildForm(forms.Form):
+    """The office adds a child to a class from its roster.
+
+    The picker is the admin's own autocomplete, so the roster does not carry
+    a list of every child in the school; it searches the children this
+    administrator may see (the child list's scope: everyone for a super
+    admin, the children of families already in their classes otherwise),
+    and the same queryset validates the choice.
+    """
+
+    child = forms.ModelChoiceField(
+        queryset=Child.objects.none(),
+        label="Child",
+        widget=AutocompleteSelect(
+            Enrollment._meta.get_field("child"),
+            admin.site,
+            attrs={"data-placeholder": "Type the child's name…"},
+        ),
+    )
+
+    def __init__(self, children, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["child"].queryset = children
+
+
 class ClassSessionInline(admin.TabularInline):
     model = ClassSession
     extra = 0
@@ -723,8 +752,18 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
                 self.admin_site.admin_view(self.announce_view),
                 name="catalog_activityclass_announce",
             ),
+            path(
+                "<int:object_id>/register/",
+                self.admin_site.admin_view(self.register_view),
+                name="catalog_activityclass_register",
+            ),
         ]
         return extra + super().get_urls()
+
+    def _children(self, request):
+        """The children this administrator may register: the child list's
+        own scope, asked of the ChildAdmin so it is defined once."""
+        return self.admin_site.get_model_admin(Child).get_queryset(request)
 
     def roster_view(self, request, object_id):
         """Everyone in one class, by state, with the actions that move them."""
@@ -760,6 +799,8 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             "opts": self.opts,
             "title": f"{cls.title} · roster",
             "cls": cls,
+            "can_register": cls.status == ActivityClass.Status.PUBLISHED and cls.term.is_active,
+            "register_form": RegisterChildForm(self._children(request)),
             "enrolled": enrolled,
             "offered": offered,
             "waitlisted": waitlisted,
@@ -816,6 +857,35 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
                     ]
                 )
         return response
+
+    def register_view(self, request, object_id):
+        """The office adds a child to this class from the roster: enrolled
+        straight away, no request to approve, the family told. POST only,
+        back to the roster with the outcome as a message."""
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        cls = get_object_or_404(self.get_queryset(request), pk=object_id)
+        if not self.has_change_permission(request, cls):
+            raise PermissionDenied
+        back = reverse("admin:catalog_activityclass_roster", kwargs={"object_id": cls.pk})
+        form = RegisterChildForm(self._children(request), request.POST)
+        if not form.is_valid():
+            messages.error(request, "Pick a child from the list first.")
+            return redirect(back)
+        child = form.cleaned_data["child"]
+        try:
+            enrollment = enrollment_services.admin_register(child, cls, request.user)
+        except EnrollmentError as exc:
+            messages.error(request, str(exc))
+            return redirect(back)
+        from apps.enrollments.admin import placement_notes
+
+        messages.success(
+            request, f"{child.full_name} enrolled in {cls.title}; the family has been told."
+        )
+        for note in placement_notes(enrollment):
+            messages.warning(request, note)
+        return redirect(back)
 
     # -- Announcement to one class -------------------------------------------
 

@@ -8,6 +8,7 @@ class Event(models.TextChoices):
     # Parent-facing
     ENROLLMENT_REQUESTED = "ENROLLMENT_REQUESTED", "Enrolment requested (receipt)"
     REGISTRATION_CONFIRMED = "REGISTRATION_CONFIRMED", "Registration confirmed"
+    ENROLLMENT_TRANSFERRED = "ENROLLMENT_TRANSFERRED", "Moved to another class"
     REQUEST_REJECTED = "REQUEST_REJECTED", "Request not approved"
     WAITLISTED = "WAITLISTED", "Added to waiting list"
     WAITLIST_OFFER = "WAITLIST_OFFER", "Seat offered from waiting list"

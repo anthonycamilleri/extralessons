@@ -1,6 +1,8 @@
 {% extends "admin/base_site.html" %}
 {% load i18n admin_urls %}
 
+{% block extrahead %}{{ block.super }}{{ register_form.media }}{% endblock %}
+
 {% block breadcrumbs %}
 <div class="breadcrumbs">
   <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
@@ -44,11 +46,29 @@
     <span class="pill{% if cls.places_available == 0 %} pill-warn{% endif %}">Parents see {{ cls.places_available }} available</span>
   </p>
 
+  <section id="add-child">
+  <h2>Add a child</h2>
+  {% if can_register %}
+  <form method="post" action="{% url 'admin:catalog_activityclass_register' cls.pk %}" class="desk-inline-form"
+        {% if seats_free < 1 %}onsubmit="return confirm('{{ cls.title|escapejs }} is full ({{ cls.enrolled_count }} of {{ cls.capacity }} seats taken). Enrol this child over capacity?');"{% endif %}>{% csrf_token %}
+    <label for="{{ register_form.child.id_for_label }}">{{ register_form.child.label }}:</label>
+    {{ register_form.child }}
+    <button type="submit" class="button default">{% if seats_free > 0 %}Enrol{% else %}Enrol (over capacity){% endif %}</button>
+  </form>
+  <p class="quiet">For a family that wrote to you instead of registering on the site. The child is enrolled
+    straight away — there is no request to approve — and the family gets the usual confirmation email.
+    {% if not request.user.is_superuser %}You can pick from the children of families already in one of your classes.{% endif %}
+    <a href="{% url 'admin:help_topic' 'adding-and-moving-children' %}">More about adding, moving and removing children.</a></p>
+  {% else %}
+  <p class="desk-empty">This class is not open for registration — it is {{ cls.get_status_display|lower }}{% if not cls.term.is_active %} and its term is not the active one{% endif %} — so nobody can be added to it.</p>
+  {% endif %}
+  </section>
+
   <section id="enrolled">
   <h2>Enrolled ({{ enrolled|length }})</h2>
   {% if enrolled %}
   <table class="desk-table">
-    <thead><tr><th>Child</th><th>School class</th><th>Going home</th><th>Notes</th><th>Guardians</th><th>Since</th></tr></thead>
+    <thead><tr><th>Child</th><th>School class</th><th>Going home</th><th>Notes</th><th>Guardians</th><th>Since</th><th></th></tr></thead>
     <tbody>
     {% for e in enrolled %}
     <tr>
@@ -73,6 +93,18 @@
       <td class="quiet">{{ e.child.notes|default:"—" }}</td>
       <td class="quiet">{% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
       <td class="quiet">{{ e.enrolled_at|date:"j M" }}</td>
+      <td>
+        <div class="desk-actions">
+          <a class="button" href="{% url 'admin:enrollments_enrollment_move' e.pk %}">Move…</a>
+          {% if not e.cancellation_requested %}
+          <form method="post" action="{% url 'admin:enrollments_enrollment_cancel' e.pk %}"
+                onsubmit="return confirm('Cancel {{ e.child.first_name|escapejs }}\'s place in {{ cls.title|escapejs }}? The family will be told the school has cancelled it.');">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="button danger">Cancel place</button>
+          </form>
+          {% endif %}
+        </div>
+      </td>
     </tr>
     {% endfor %}
     </tbody>
@@ -84,7 +116,7 @@
   <section id="offers">
   <h2>Outstanding offers ({{ offered|length }})</h2>
   <table class="desk-table">
-    <thead><tr><th>Child</th><th>Guardians</th><th>Offered</th><th>Expires</th></tr></thead>
+    <thead><tr><th>Child</th><th>Guardians</th><th>Offered</th><th>Expires</th><th></th></tr></thead>
     <tbody>
     {% for e in offered %}
     <tr>
@@ -92,6 +124,15 @@
       <td class="quiet">{% for g in e.child.guardians.all %}{{ g }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
       <td class="quiet">{{ e.offered_at|date:"j M, H:i" }}</td>
       <td>{{ e.offer_expires_at|date:"l j M, H:i" }}</td>
+      <td>
+        <div class="desk-actions">
+          <form method="post" action="{% url 'admin:enrollments_enrollment_cancel' e.pk %}"
+                onsubmit="return confirm('Withdraw the offer to {{ e.child.first_name|escapejs }}\'s family? They will be told the school has cancelled it, and the seat is free again.');">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="button danger">Withdraw offer</button>
+          </form>
+        </div>
+      </td>
     </tr>
     {% endfor %}
     </tbody>
@@ -120,6 +161,12 @@
                 {% if seats_free < 1 %}onsubmit="return confirm('{{ cls.title|escapejs }} is full ({{ cls.enrolled_count }} of {{ cls.capacity }} seats taken). Offer {{ e.child.first_name|escapejs }} a place over capacity?');"{% endif %}>{% csrf_token %}
             <input type="hidden" name="next" value="{{ request.path }}">
             <button type="submit" class="button{% if seats_free > 0 %} default{% endif %}">{% if seats_free > 0 %}Offer seat{% else %}Offer seat (over capacity){% endif %}</button>
+          </form>
+          <a class="button" href="{% url 'admin:enrollments_enrollment_move' e.pk %}">Move…</a>
+          <form method="post" action="{% url 'admin:enrollments_enrollment_cancel' e.pk %}"
+                onsubmit="return confirm('Take {{ e.child.first_name|escapejs }} off the waiting list? The family will be told the school has cancelled the registration.');">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="button danger">Remove</button>
           </form>
         </div>
       </td>

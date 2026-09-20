@@ -48,6 +48,20 @@
 .desk-scope a[aria-current] { font-weight: 700; text-decoration: underline; }
 .desk-empty { padding: 1rem 1.25rem; border: 1px dashed var(--hairline-color); border-radius: .5rem; color: var(--body-quiet-color); }
 
+/* A one-line form on a desk page: the roster's "Add a child" picker. */
+.desk-inline-form { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: 0 0 .5rem; }
+.desk-inline-form .select2-container { min-width: 22rem; }
+.desk-inline-form .button { padding: .45rem .9rem; }
+
+/* The move page: the class picker as a list, one class per line. */
+.desk-choice-list { list-style: none; padding: 0; margin: 0 0 1rem; }
+.desk-choice-list li { padding: .35rem 0; }
+.desk-choice-list label { font-weight: normal; }
+.desk-notice {
+  margin: 0 0 1rem; padding: .75rem 1rem; border-radius: .35rem;
+  background: #fdf1d8; color: #7a4d00; border: 1px solid #f2d799;
+}
+
 /* Help pages (/admin/help/). Prose, not a dashboard: a narrow measure, and
    screenshots framed so a light-theme capture still reads in the dark theme. */
 .help-intro { max-width: 46rem; color: var(--body-quiet-color); }
