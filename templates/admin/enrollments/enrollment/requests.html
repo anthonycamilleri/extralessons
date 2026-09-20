@@ -17,15 +17,18 @@
 <ul class="object-tools">
   <li><a href="{% url 'admin:catalog_activityclass_changelist' %}?term__is_active__exact=1">Classes this term</a></li>
   <li><a href="{% url opts|admin_urlname:'changelist' %}">All enrolments</a></li>
-  <li><a href="{% url 'admin:notifications_broadcast_add' %}" class="addlink">Send announcement</a></li>
+  {% if can_act %}<li><a href="{% url 'admin:notifications_broadcast_add' %}" class="addlink">Send announcement</a></li>{% endif %}
   <li><a href="{% url 'admin:help_topic' 'approving-requests' %}">Help with approving</a></li>
 </ul>
+  {% if not can_act %}
+  <p class="desk-scope">You have read-only access: every request is listed here, but deciding on them is for the administrators.</p>
+  {% endif %}
   {% if show_scope %}
   <p class="desk-scope">
     <a href="?scope=mine"{% if scope == "mine" %} aria-current="true"{% endif %}>Only my classes</a>
     <a href="?scope=all"{% if scope == "all" %} aria-current="true"{% endif %}>All classes</a>
   </p>
-  {% elif not is_super_admin %}
+  {% elif not sees_everything %}
   <p class="desk-scope">
     {% if my_classes %}
       You look after {% for cls in my_classes %}<b>{{ cls.title }}</b>{% if not forloop.last %}, {% endif %}{% endfor %}.
@@ -51,7 +54,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="quiet">Approve enrols the child if the class has a free place and puts them on the waiting list otherwise. Reject tells the family.</p>
+  {% if can_act %}<p class="quiet">Approve enrols the child if the class has a free place and puts them on the waiting list otherwise. Reject tells the family.</p>{% endif %}
   {% else %}
   <p class="desk-empty">No pending requests. 🎉</p>
   {% endif %}
@@ -66,7 +69,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="quiet">These families asked to leave after the withdrawal window closed, so the place is still theirs until you decide. Confirm ends the place and tells the family (and alerts you if someone is waiting for the seat); Keep place tells the family you'll be in touch.</p>
+  {% if can_act %}<p class="quiet">These families asked to leave after the withdrawal window closed, so the place is still theirs until you decide. Confirm ends the place and tells the family (and alerts you if someone is waiting for the seat); Keep place tells the family you'll be in touch.</p>{% endif %}
   {% else %}
   <p class="desk-empty">Nobody is asking to cancel a place.</p>
   {% endif %}

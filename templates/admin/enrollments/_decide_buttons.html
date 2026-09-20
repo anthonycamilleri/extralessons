@@ -1,6 +1,8 @@
 {% comment %}Approve / Reject for one pending request. `next` sends the admin
-   back to the page the button was on. Needs `e` (the enrollment) and
-   `back` (a same-site path) in context.{% endcomment %}
+   back to the page the button was on. Needs `e` (the enrollment), `back` (a
+   same-site path) and `can_act` (whether this admin may decide; a read-only
+   admin gets no buttons) in context.{% endcomment %}
+{% if can_act %}
 <div class="desk-actions">
   <form method="post" action="{% url 'admin:enrollments_enrollment_approve' e.pk %}">{% csrf_token %}
     <input type="hidden" name="next" value="{{ back }}">
@@ -12,3 +14,4 @@
     <button type="submit" class="button danger">Reject</button>
   </form>
 </div>
+{% endif %}

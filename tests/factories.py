@@ -38,6 +38,13 @@ class SuperAdminFactory(AdminFactory):
     is_superuser = True
 
 
+class ReadOnlyAdminFactory(UserFactory):
+    """A read-only admin: sees everything a super admin sees, changes nothing."""
+
+    role = User.Role.READONLY_ADMIN
+    is_staff = True
+
+
 class ProviderUserFactory(UserFactory):
     role = User.Role.PROVIDER
 

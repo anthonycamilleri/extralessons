@@ -66,7 +66,7 @@ def post_login(request):
     role = request.user.role
     if role == User.Role.PROVIDER:
         return redirect("provider_home")
-    if role == User.Role.ADMIN:
+    if role in User.ADMIN_ROLES:
         return redirect("admin:enrollments_enrollment_requests")
     return redirect("parent_home")
 

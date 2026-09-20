@@ -3,12 +3,12 @@ from apps.accounts.models import User
 
 def admin_badge(request):
     """The site nav's requests count (new requests plus cancellation requests),
-    for logged-in admins only.
+    for logged-in admins only, read-only ones included.
 
     Two COUNTs per page for admins; nothing at all for everyone else.
     """
     user = getattr(request, "user", None)
-    if user is None or not user.is_authenticated or user.role != User.Role.ADMIN:
+    if user is None or not user.is_authenticated or not user.uses_admin:
         return {}
     from apps.enrollments.models import Enrollment
 

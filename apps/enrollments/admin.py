@@ -204,7 +204,8 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
     def requests_view(self, request):
         """Pending requests for this admin's classes, oldest first, with the
         class's availability and one-click approve/reject — and, below them,
-        the families asking to cancel a confirmed place."""
+        the families asking to cancel a confirmed place. A read-only admin
+        sees every request and no buttons."""
         if not self.has_view_permission(request):
             raise PermissionDenied
         user = request.user
@@ -268,7 +269,8 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
             "focus": focus,
             "scope": scope,
             "show_scope": show_scope,
-            "is_super_admin": user.is_super_admin,
+            "sees_everything": user.sees_everything,
+            "can_act": self.has_change_permission(request),
             "my_classes": user.managed_classes.filter(term__is_active=True).order_by("title"),
         }
         return TemplateResponse(request, "admin/enrollments/enrollment/requests.html", context)

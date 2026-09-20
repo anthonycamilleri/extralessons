@@ -120,7 +120,7 @@ class BroadcastAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related("sender")
-        if request.user.is_superuser:
+        if request.user.sees_everything:
             return qs
         managed = ActivityClass.objects.managed_by(request.user)
         return qs.filter(Q(sender=request.user) | Q(classes__in=managed)).distinct()
@@ -216,7 +216,7 @@ class NotificationAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         return False
 
-    @admin.action(description="Retry failed notifications")
+    @admin.action(description="Retry failed notifications", permissions=["change"])
     def retry_failed(self, request, queryset):
         updated = queryset.filter(status=Notification.Status.FAILED).update(
             status=Notification.Status.PENDING,

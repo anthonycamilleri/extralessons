@@ -208,7 +208,7 @@ class Instructor(models.Model):
             return True
         from apps.accounts.models import User
 
-        if user.role == User.Role.ADMIN and user.is_staff:
+        if user.uses_admin and user.is_staff:
             return True
         return self.provider.is_managed_by(user)
 
@@ -397,10 +397,11 @@ class ActivityClassQuerySet(models.QuerySet):
         Single source of admin scoping, the counterpart of
         Child.objects.for_guardian(): the dashboard, the alert emails and the
         Django admin all ask this one question. A super admin (superuser) is
-        responsible for everything; any other admin only for the classes
-        assigned to them, and for nothing at all until someone assigns one.
+        responsible for everything, and a read-only admin sees everything
+        (User.sees_everything); any other admin only gets the classes
+        assigned to them, and nothing at all until someone assigns one.
         """
-        if user.is_superuser:
+        if user.sees_everything:
             return self
         return self.filter(administrators=user)
 

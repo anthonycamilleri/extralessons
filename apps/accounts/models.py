@@ -3,6 +3,7 @@ import secrets
 import markdown
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.safestring import mark_safe
 
@@ -56,17 +57,30 @@ class UserManager(BaseUserManager):
         return supers if supers.exists() else self.active_admins()
 
 
+def is_view_permission(perm):
+    """Whether ``perm`` ("app_label.codename") is one of Django's ``view_*``
+    permissions: the only kind a read-only admin ever holds."""
+    _, _, codename = perm.rpartition(".")
+    return codename.startswith("view_")
+
+
 class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = "ADMIN", "School admin"
+        READONLY_ADMIN = "READONLY", "School admin (read-only)"
         PROVIDER = "PROVIDER", "Course provider"
         PARENT = "PARENT", "Parent"
 
+    # The roles that work in the Django admin. The read-only one sees
+    # everything a super admin sees and changes nothing: for the head, a board
+    # member or an auditor who needs the full picture but not the controls.
+    ADMIN_ROLES = frozenset({Role.ADMIN, Role.READONLY_ADMIN})
+
     # The roles that may use the family pages: add children, register them,
     # answer offers, accept a co-parent invitation. School admins are usually
-    # parents at the school too, so the admin role includes the parent one
+    # parents at the school too, so the admin roles include the parent one
     # rather than forcing a second account under a second email address.
-    FAMILY_ROLES = frozenset({Role.PARENT, Role.ADMIN})
+    FAMILY_ROLES = frozenset({Role.PARENT, Role.ADMIN, Role.READONLY_ADMIN})
 
     username = None
     email = models.EmailField("email address", unique=True)
@@ -95,11 +109,26 @@ class User(AbstractUser):
         full_name = self.get_full_name()
         return f"{full_name} <{self.email}>" if full_name else self.email
 
+    def clean(self):
+        super().clean()
+        # Superuser status is Django's every-permission switch, and the
+        # direct is_superuser checks around the admin would honour it: the
+        # combination would make "read-only" a lie, so it is refused here,
+        # where the account form shows the message.
+        if self.is_read_only_admin and self.is_superuser:
+            raise ValidationError(
+                {
+                    "is_superuser": "A read-only admin cannot be a superuser: superuser "
+                    "status would let them change everything. Give the account the "
+                    "School admin role instead."
+                }
+            )
+
     def save(self, *args, **kwargs):
         # Every school admin works in the Django admin, which needs the staff
         # flag; nobody should have to remember to tick it. Other roles are left
         # alone (demotion is a deliberate act, done by hand).
-        if self.role == self.Role.ADMIN and not self.is_staff:
+        if self.role in self.ADMIN_ROLES and not self.is_staff:
             self.is_staff = True
             if kwargs.get("update_fields") is not None:
                 kwargs["update_fields"] = set(kwargs["update_fields"]) | {"is_staff"}
@@ -113,11 +142,50 @@ class User(AbstractUser):
         return self.role in self.FAMILY_ROLES
 
     @property
+    def uses_admin(self):
+        """May sign in to the Django admin, whatever they may do there: the
+        admin role and the read-only one (ADMIN_ROLES)."""
+        return self.role in self.ADMIN_ROLES
+
+    @property
+    def is_read_only_admin(self):
+        """Sees everything in the admin and changes nothing (see has_perm)."""
+        return self.role == self.Role.READONLY_ADMIN
+
+    @property
     def is_super_admin(self):
         """An admin who sees every class, not just the ones assigned to them:
         the superuser flag doubles as the school's "head of admin" switch (see
         ActivityClass.objects.managed_by)."""
         return self.role == self.Role.ADMIN and self.is_superuser
+
+    @property
+    def sees_everything(self):
+        """Whose view of the admin is not narrowed to assigned classes: super
+        admins, and read-only admins. The one question behind every "show all
+        rows" shortcut (ScopedByClassMixin, the children and instructor lists,
+        the sent announcements)."""
+        return self.is_superuser or self.is_read_only_admin
+
+    # -- Permissions ----------------------------------------------------------
+    #
+    # Nobody ticks permissions on an account here; a role carries them. Django
+    # asks these two questions for every admin page, so answering them from
+    # the role gives a read-only admin every model's "view" and nothing else,
+    # without a mixin on each ModelAdmin (apps/accounts/admin_permissions.py
+    # covers what the regular admin role may do on top of Django's defaults).
+
+    def has_perm(self, perm, obj=None):
+        if self.is_read_only_admin:
+            # Deliberately not deferring to super(): the superuser shortcut
+            # would grant everything, and read-only must mean read-only.
+            return self.is_active and is_view_permission(perm)
+        return super().has_perm(perm, obj)
+
+    def has_module_perms(self, app_label):
+        if self.is_read_only_admin:
+            return self.is_active
+        return super().has_module_perms(app_label)
 
 
 class ChildQuerySet(models.QuerySet):

@@ -35,7 +35,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 - Place children directly from a class's roster, for the family that wrote to the office instead of registering, or when a child is in the wrong class: **Add a child** enrols a child at once (no request to approve; the family gets the usual confirmation), **Move…** moves an enrolled or waitlisted child to another class in one step (the old registration is marked *moved*, the new place is confirmed, and the family gets one email saying where the child now goes rather than a cancellation and a confirmation), and every row has a button to end that registration (**Cancel place**, **Withdraw offer**, **Remove**), with the school's cancellation notice to the family. Adding to or moving into a full class is allowed, on purpose, after a confirmation, and the roster then shows the class as over capacity.
 - When a seat frees up, hand-pick which waitlisted family gets the offer; offers expire automatically after a configurable number of hours (default 48). A full class can still be offered to: the roster warns and asks for confirmation, then shows how far over capacity the class is.
 - Optional email alerts on new requests and freed seats.
-- Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. See *Who sees what* under Architecture.
+- Share the work: assign classes to administrators (per class, or in bulk with the *"Assign administrators…"* action). An admin sees, acts on and is alerted about only their classes; a super admin (an admin account with superuser status) runs the programme and sees everything. A third role, *School admin (read-only)*, is for the head, a board member or an auditor: the whole admin exactly as a super admin sees it — every class, roster, request, child, account and setting — with nothing to press. See *Who sees what* under Architecture.
 - Instructors in the admin: every instructor with their provider, classes and where their certificate of police conduct stands (not uploaded, uploaded, checked), a download link for the document, and a *Mark police conduct certificate as checked* action that turns on the "checked by the school" badge parents see. The class form and the roster show who teaches a class; a class's instructors can also be set there.
 - Everything happens in one place, the Django admin at `/admin/`: a Requests page with one-click approve/reject and a pending-count badge on every page, the class list as the term's dashboard (registrations, confirmed, available, waiting, pending per class), a roster page per class (enrolled, offers, waiting list with "offer seat", pending requests; CSV download), children with their guardians' contacts and every registration, the announcement composer (a small rich-text editor: emphasis, headings, lists, links and uploaded pictures, sent as an HTML email with a plain-text twin, with a "send me a test email" button that delivers the draft to the author first, addressed to every family with a live place in the chosen classes, to their waiting list alone, or to everyone who ever had a place), plus terms, providers, notification templates and site settings.
 - Write to one class from the class list: every row carries an *Announce* link (and the class page and its roster a *Send announcement* one) that opens the same editor already addressed to that class. It is the way to reach a class the main composer does not list — a cancelled one, or one whose term is over — without those classes cluttering its picker, and each audience on the page carries the number of families it would reach right now, so *Everyone with a live place — 0 families* on a cancelled class says plainly which one to pick.
@@ -152,20 +152,29 @@ waiting list?" step use the second; the review queue and the waiting-list page
 use the first, and the admin dashboard shows both side by side.
 
 **Who sees what (class administrators).** A class can be assigned to one or
-more admin accounts (`ActivityClass.administrators`). Every account with the
-admin role can use the Django admin; what they see there is one question asked
-in one place, `ActivityClass.objects.managed_by(user)`, and what they may do is
-declared per ModelAdmin (`school_admin_can`, apps/accounts/admin_permissions.py):
+more admin accounts (`ActivityClass.administrators`). Every account with an
+admin role (`User.ADMIN_ROLES`) can use the Django admin; what they see there
+is one question asked in one place, `ActivityClass.objects.managed_by(user)`,
+and what they may do is declared per ModelAdmin (`school_admin_can`,
+apps/accounts/admin_permissions.py):
 
 | Account | In the admin |
 |---------|--------------|
 | Admin | The class-bound controls for the classes assigned to them: their classes and sessions (edit, publish, cancel), requests, rosters, waiting lists, attendance, the children in those classes (read-only, with guardian contacts and every registration), and announcements to those families ("all classes" means all of theirs). Other classes' rows 404. Nothing assigned yet shows an empty desk that says so. |
 | Super admin (admin role + superuser status) | Everything, plus the programme itself: school years, holidays, terms, providers, creating, cloning, archiving and handing out classes, user accounts, site configuration, notification templates and log. The class and enrolment lists offer a "looked after by: me" filter, and the Requests page an *Only my classes / All* link, when they have classes of their own. |
+| Read-only admin (`User.Role.READONLY_ADMIN`, "School admin (read-only)") | Everything a super admin sees, and nothing a super admin does: every list and every row opens as a view page, the desk shows requests and rosters without their buttons, the composer and the bulk actions are absent, and a *Read-only* pill sits in the desk nav. They are never assigned a class and never alerted. The role cannot be combined with superuser status (the account form refuses it). |
 
-The role implies staff status (`User.save()` keeps them in step), so nobody has
+The read-only role is not a set of ticked permissions: `User.has_perm` answers
+every `view_*` permission with yes for it and everything else with no, so
+Django's own checks make each ModelAdmin read-only, mixin or not, and a model
+added tomorrow is covered on the day. The custom actions each declare the verb
+they need (`@admin.action(permissions=[...])`) so none of them is offered to a
+role that never holds it, and the desk templates take a `can_act` flag.
+
+The roles imply staff status (`User.save()` keeps them in step), so nobody has
 to tick anything on a new volunteer's account.
 
-The admin role includes the parent one (`User.FAMILY_ROLES`, asked as
+The admin roles include the parent one (`User.FAMILY_ROLES`, asked as
 `user.is_parent`): the family pages, the register form on a class page and
 co-parent invitations accept both, so promoting a parent to admin keeps their
 family, and an admin never needs a second account to register their own
@@ -277,6 +286,7 @@ Demo accounts (all with password `demo1234`):
 | Account                | Role                                    |
 |------------------------|-----------------------------------------|
 | `admin@school.test`    | School admin (staff + superuser)        |
+| `viewer@school.test`   | School admin, read-only                 |
 | `coach@provider.test`  | Provider — AllStars Sports, also an instructor |
 | `instructor@provider.test` | Instructor — AllStars Sports, Football Juniors only |
 | `tutor@provider.test`  | Provider — Bright Minds                 |

@@ -31,6 +31,11 @@ class UserAdmin(DjangoUserAdmin):
                 "Superuser status makes them a <b>super admin</b>: every class, plus the "
                 "programme itself (school years, terms, providers, new classes, accounts, "
                 "settings). Alerts for a class with nobody assigned go to the super admins. "
+                "The <b>School admin (read-only)</b> role sees everything a super admin "
+                "sees — every class, roster, request, child, account and setting — and "
+                "can change nothing: no buttons, no actions, no announcements, and it is "
+                "never assigned a class or alerted. It cannot be combined with superuser "
+                "status. "
                 "Admins are parents too: the same account can add its own children and "
                 "register them from the public site (<i>My family</i> in the navigation); "
                 "their own children are marked on the Requests page and rosters.",
@@ -117,7 +122,8 @@ class EnrollmentInline(ScopedByClassMixin, admin.TabularInline):
 @admin.register(Child)
 class ChildAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
     """Regular admins see the children in their classes, read-only, with the
-    guardians' contact details and every registration."""
+    guardians' contact details and every registration; super admins and
+    read-only admins see every child."""
 
     school_admin_can = frozenset({"view"})
     list_display = [
@@ -136,7 +142,7 @@ class ChildAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
     def get_queryset(self, request):
         managed = ActivityClass.objects.managed_by(request.user)
         qs = super().get_queryset(request)
-        if not request.user.is_superuser:
+        if not request.user.sees_everything:
             qs = qs.filter(enrollments__activity_class__in=managed).distinct()
         return qs.prefetch_related(
             "guardians",

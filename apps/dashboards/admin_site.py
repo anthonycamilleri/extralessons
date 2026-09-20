@@ -18,16 +18,10 @@ class SchoolAdminSite(admin.AdminSite):
     index_title = "Activities"
 
     def has_permission(self, request):
-        """Admins and superusers only: a provider given staff status by
-        mistake still cannot open the door."""
-        from apps.accounts.models import User
-
+        """Admins (read-only included) and superusers only: a provider given
+        staff status by mistake still cannot open the door."""
         user = request.user
-        return (
-            user.is_active
-            and user.is_staff
-            and (user.role == User.Role.ADMIN or user.is_superuser)
-        )
+        return user.is_active and user.is_staff and (user.uses_admin or user.is_superuser)
 
     def each_context(self, request):
         from apps.accounts.models import SiteConfig
@@ -41,6 +35,12 @@ class SchoolAdminSite(admin.AdminSite):
             Enrollment.objects.desk_count(request.user)
             if request.user.is_authenticated and self.has_permission(request)
             else None
+        )
+        # Templates hide the controls a read-only admin may not use (the
+        # composer links, the desk buttons) and show them the pill that says
+        # why.
+        context["read_only_admin"] = (
+            request.user.is_authenticated and request.user.is_read_only_admin
         )
         return context
 

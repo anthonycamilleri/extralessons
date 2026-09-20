@@ -1,5 +1,6 @@
 {% comment %}One cancellation request. Needs `e` (with `waitlist_count`
-   attached), `back`, and `show_class` (whether to repeat the class column).{% endcomment %}
+   attached), `back`, `show_class` (whether to repeat the class column) and
+   `can_act` (whether this admin may decide).{% endcomment %}
 <tr>
   <td class="quiet">{{ e.cancel_requested_at|date:"j M, H:i" }}
     {% if e.cancel_requested_by %}<div class="quiet">by {{ e.cancel_requested_by }}</div>{% endif %}</td>
@@ -17,6 +18,7 @@
     {% else %}<span class="pill">Nobody waiting</span>{% endif %}
   </td>
   <td>
+    {% if can_act %}
     <div class="desk-actions">
       <form method="post" action="{% url 'admin:enrollments_enrollment_confirm_cancellation' e.pk %}"
             onsubmit="return confirm('Cancel this place? The family will be told it is confirmed.');">{% csrf_token %}
@@ -29,5 +31,6 @@
         <button type="submit" class="button">Keep place</button>
       </form>
     </div>
+    {% endif %}
   </td>
 </tr>

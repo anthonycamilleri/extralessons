@@ -11,14 +11,16 @@
 
 {% block nav-global %}
 {% comment %}The office desk, on every admin page: requests with their count,
-   the announcement composer, and the guides to how it all works.{% endcomment %}
+   the announcement composer, and the guides to how it all works. A read-only
+   admin gets no composer and a pill that says so.{% endcomment %}
 {% if pending_requests_count is not None %}
 <nav class="desk-nav" aria-label="Office desk">
   <a href="{% url 'admin:enrollments_enrollment_requests' %}">Requests
     <span class="desk-badge{% if pending_requests_count %} desk-badge-live{% endif %}">{{ pending_requests_count }}</span></a>
   <a href="{% url 'admin:catalog_activityclass_changelist' %}?term__is_active__exact=1">Classes</a>
-  <a href="{% url 'admin:notifications_broadcast_add' %}">Send announcement</a>
+  {% if not read_only_admin %}<a href="{% url 'admin:notifications_broadcast_add' %}">Send announcement</a>{% endif %}
   <a href="{% url 'admin:help_index' %}" class="desk-help">Help</a>
+  {% if read_only_admin %}<span class="desk-readonly" title="You can see everything here but change nothing.">Read-only</span>{% endif %}
 </nav>
 {% endif %}
 {% endblock %}

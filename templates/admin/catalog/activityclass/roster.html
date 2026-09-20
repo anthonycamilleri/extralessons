@@ -19,8 +19,8 @@
    that overrides content has to render the bar itself.{% endcomment %}
 <ul class="object-tools">
   <li><a href="?format=csv">Download CSV</a></li>
-  <li><a href="{% url opts|admin_urlname:'change' cls.pk %}">Edit class</a></li>
-  <li><a href="{% url 'admin:catalog_activityclass_announce' cls.pk %}">Send announcement</a></li>
+  <li><a href="{% url opts|admin_urlname:'change' cls.pk %}">{% if can_act %}Edit{% else %}View{% endif %} class</a></li>
+  {% if can_act %}<li><a href="{% url 'admin:catalog_activityclass_announce' cls.pk %}">Send announcement</a></li>{% endif %}
   <li><a href="{% url 'admin:enrollments_enrollment_requests' %}">All requests</a></li>
   <li><a href="{{ cls.get_absolute_url }}">View on site</a></li>
   <li><a href="{% url 'admin:help_topic' 'waiting-lists' %}">Help with waiting lists</a></li>
@@ -46,6 +46,7 @@
     <span class="pill{% if cls.places_available == 0 %} pill-warn{% endif %}">Parents see {{ cls.places_available }} available</span>
   </p>
 
+  {% if can_act %}
   <section id="add-child">
   <h2>Add a child</h2>
   {% if can_register %}
@@ -63,6 +64,7 @@
   <p class="desk-empty">This class is not open for registration — it is {{ cls.get_status_display|lower }}{% if not cls.term.is_active %} and its term is not the active one{% endif %} — so nobody can be added to it.</p>
   {% endif %}
   </section>
+  {% endif %}
 
   <section id="enrolled">
   <h2>Enrolled ({{ enrolled|length }})</h2>
@@ -76,6 +78,7 @@
         <div class="quiet">{{ e.child.date_of_birth|date:"j M Y" }}</div>
         {% if e.cancellation_requested %}
           <span class="pill pill-warn">Asked to cancel {{ e.cancel_requested_at|date:"j M" }}</span>
+          {% if can_act %}
           <div class="desk-actions">
             <form method="post" action="{% url 'admin:enrollments_enrollment_confirm_cancellation' e.pk %}"
                   onsubmit="return confirm('Cancel this place? The family will be told it is confirmed.');">{% csrf_token %}
@@ -87,6 +90,7 @@
               <button type="submit" class="button">Keep place</button>
             </form>
           </div>
+          {% endif %}
         {% endif %}</td>
       <td>{{ e.child.school_class|default:"—" }}</td>
       <td>{% if e.child.may_leave_alone %}<span class="pill pill-ok">May leave alone</span>{% else %}<span class="pill pill-warn">Must be collected</span>{% endif %}</td>
@@ -94,6 +98,7 @@
       <td class="quiet">{% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
       <td class="quiet">{{ e.enrolled_at|date:"j M" }}</td>
       <td>
+        {% if can_act %}
         <div class="desk-actions">
           <a class="button" href="{% url 'admin:enrollments_enrollment_move' e.pk %}">Move…</a>
           {% if not e.cancellation_requested %}
@@ -104,6 +109,7 @@
           </form>
           {% endif %}
         </div>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -125,6 +131,7 @@
       <td class="quiet">{{ e.offered_at|date:"j M, H:i" }}</td>
       <td>{{ e.offer_expires_at|date:"l j M, H:i" }}</td>
       <td>
+        {% if can_act %}
         <div class="desk-actions">
           <form method="post" action="{% url 'admin:enrollments_enrollment_cancel' e.pk %}"
                 onsubmit="return confirm('Withdraw the offer to {{ e.child.first_name|escapejs }}\'s family? They will be told the school has cancelled it, and the seat is free again.');">{% csrf_token %}
@@ -132,6 +139,7 @@
             <button type="submit" class="button danger">Withdraw offer</button>
           </form>
         </div>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -143,7 +151,7 @@
   <section id="waiting-list">
   <h2>Waiting list ({{ waitlisted|length }})</h2>
   {% if waitlisted %}
-  <p class="quiet">First-come order shown as guidance; you choose who gets a freed seat.
+  <p class="quiet">First-come order shown as guidance; {% if can_act %}you choose{% else %}the administrators choose{% endif %} who gets a freed seat.
     {% if seats_free < 1 %}The class is full: offering now takes it over its capacity of {{ cls.capacity }}.{% endif %}</p>
   <table class="desk-table">
     <thead><tr><th>#</th><th>Child</th><th>Guardians</th><th>Waiting since</th><th></th></tr></thead>
@@ -156,6 +164,7 @@
       <td class="quiet">{% for g in e.child.guardians.all %}{{ g }}{% if g.phone_e164 %} · {{ g.phone_e164 }}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
       <td class="quiet">{{ e.waitlisted_at|date:"j M, H:i" }}</td>
       <td>
+        {% if can_act %}
         <div class="desk-actions">
           <form method="post" action="{% url 'admin:enrollments_enrollment_offer' e.pk %}"
                 {% if seats_free < 1 %}onsubmit="return confirm('{{ cls.title|escapejs }} is full ({{ cls.enrolled_count }} of {{ cls.capacity }} seats taken). Offer {{ e.child.first_name|escapejs }} a place over capacity?');"{% endif %}>{% csrf_token %}
@@ -169,6 +178,7 @@
             <button type="submit" class="button danger">Remove</button>
           </form>
         </div>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

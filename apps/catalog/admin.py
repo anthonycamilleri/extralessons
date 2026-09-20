@@ -162,7 +162,8 @@ class InstructorAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
     Regular admins see the instructors of their classes and can mark a
     certificate as checked, which is the office's one job here; the profile
     itself is the instructor's to write and the provider's to manage, so it
-    is read-only for everyone but super admins.
+    is read-only for everyone but super admins. Read-only admins see every
+    instructor and the certificate, and mark nothing.
     """
 
     school_admin_can = frozenset({"view"})
@@ -212,7 +213,7 @@ class InstructorAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related("user", "provider")
-        if not request.user.is_superuser:
+        if not request.user.sees_everything:
             qs = qs.filter(classes__in=ActivityClass.objects.managed_by(request.user)).distinct()
         return qs.prefetch_related("classes")
 
@@ -277,7 +278,15 @@ class InstructorAdmin(SchoolAdminPermissionMixin, admin.ModelAdmin):
             else "",
         )
 
-    @admin.action(description="Mark police conduct certificate as checked")
+    def has_mark_certificate_permission(self, request):
+        """The action's own verb: the acting admins, whose model permission
+        here is view only, and superusers. Read-only admins look on."""
+        return is_school_admin(request) or request.user.is_superuser
+
+    @admin.action(
+        description="Mark police conduct certificate as checked",
+        permissions=["mark_certificate"],
+    )
     def mark_certificate_checked(self, request, queryset):
         checked = sum(
             int(instructor.mark_certificate_checked(request.user)) for instructor in queryset
@@ -318,7 +327,7 @@ class SchoolYearAdmin(admin.ModelAdmin):
     def term_count(self, obj):
         return obj.terms.count()
 
-    @admin.action(description="Copy holidays into another school year…")
+    @admin.action(description="Copy holidays into another school year…", permissions=["change"])
     def copy_holidays(self, request, queryset):
         """Set up next year's calendar from this year's in one step.
 
@@ -385,18 +394,19 @@ class TermAdmin(admin.ModelAdmin):
 
 
 class ScopedByClassMixin:
-    """Show a non-superuser admin only the rows of the classes they look after.
+    """Show a regular admin only the rows of the classes they look after.
 
     `class_lookup` is the ORM path from the model to its ActivityClass ("" for
     ActivityClass itself). Superusers always see everything: they are the ones
-    who hand classes out, and must be able to see a class to reassign it.
+    who hand classes out, and must be able to see a class to reassign it. So
+    do read-only admins, whose whole purpose is the full picture.
     """
 
     class_lookup = ""
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        if request.user.is_superuser:
+        if request.user.sees_everything:
             return qs
         scope = ActivityClass.objects.managed_by(request.user)
         lookup = f"{self.class_lookup}__in" if self.class_lookup else "pk__in"
@@ -585,7 +595,9 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
 
     Regular admins can look after their classes (edit, publish, cancel, take
     the roster) but not create, clone, archive or hand them out: that is
-    setting up the programme, which stays with the super admins.
+    setting up the programme, which stays with the super admins. Read-only
+    admins get the whole dashboard and every roster, and none of the actions
+    (each declares the verb it needs, which they never hold).
     """
 
     school_admin_can = frozenset({"view", "change"})
@@ -645,6 +657,14 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             for name in self.SUPERUSER_ACTIONS:
                 actions.pop(name, None)
         return actions
+
+    def get_list_display(self, request):
+        # The Announce link opens the composer, which a read-only admin may
+        # not use: no point in a column of links to a 403.
+        columns = super().get_list_display(request)
+        if request.user.is_read_only_admin:
+            columns = [column for column in columns if column != "announce_link"]
+        return columns
 
     def get_readonly_fields(self, request, obj=None):
         # Lifecycle changes must go through the actions (publish, cancel,
@@ -766,7 +786,8 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         return self.admin_site.get_model_admin(Child).get_queryset(request)
 
     def roster_view(self, request, object_id):
-        """Everyone in one class, by state, with the actions that move them."""
+        """Everyone in one class, by state, with the actions that move them —
+        for whoever may move them; a read-only admin gets the lists alone."""
         if not self.has_view_permission(request):
             raise PermissionDenied
         cls = get_object_or_404(self.get_queryset(request), pk=object_id)
@@ -794,13 +815,19 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         if request.GET.get("format") == "csv":
             return self._roster_csv(cls, enrolled, offered, waitlisted, pending)
 
+        # The buttons add, move and remove children: the same verb the
+        # transitions check. A read-only admin gets the lists alone.
+        can_act = self.has_change_permission(request, cls)
         context = {
             **self.admin_site.each_context(request),
             "opts": self.opts,
             "title": f"{cls.title} · roster",
             "cls": cls,
-            "can_register": cls.status == ActivityClass.Status.PUBLISHED and cls.term.is_active,
-            "register_form": RegisterChildForm(self._children(request)),
+            "can_act": can_act,
+            "can_register": can_act
+            and cls.status == ActivityClass.Status.PUBLISHED
+            and cls.term.is_active,
+            "register_form": RegisterChildForm(self._children(request)) if can_act else None,
             "enrolled": enrolled,
             "offered": offered,
             "waitlisted": waitlisted,
@@ -939,7 +966,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             request, "admin/catalog/activityclass/announce.html", context
         )
 
-    @admin.action(description="Assign administrators…")
+    @admin.action(description="Assign administrators…", permissions=["change"])
     def assign_administrators(self, request, queryset):
         """Hand a batch of classes to one or more admins in one go.
 
@@ -969,7 +996,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             {"classes": queryset, "form": form, "title": "Assign administrators"},
         )
 
-    @admin.action(description="Publish and generate sessions")
+    @admin.action(description="Publish and generate sessions", permissions=["change"])
     def publish_classes(self, request, queryset):
         published = 0
         plans = []
@@ -982,7 +1009,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             request, f"Published {published} class(es): {_totals(plans)}."
         )
 
-    @admin.action(description="Regenerate sessions (skips school holidays)")
+    @admin.action(description="Regenerate sessions (skips school holidays)", permissions=["change"])
     def regenerate_sessions(self, request, queryset):
         """Re-run the calendar against the current schedule and holidays.
 
@@ -994,7 +1021,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             request, f"Reconciled {len(plans)} class(es): {_totals(plans)}."
         )
 
-    @admin.action(description="Clone into another term…")
+    @admin.action(description="Clone into another term…", permissions=["change"])
     def clone_into_term(self, request, queryset):
         if "apply" in request.POST:
             form = CloneIntoTermForm(request.POST)
@@ -1024,7 +1051,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             {"classes": queryset, "form": form, "title": "Clone classes into term"},
         )
 
-    @admin.action(description="Cancel class (notifies all affected families)")
+    @admin.action(description="Cancel class (notifies all affected families)", permissions=["change"])
     def cancel_classes(self, request, queryset):
         from apps.enrollments.services import cancel_class
 
@@ -1036,7 +1063,7 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             messages.WARNING,
         )
 
-    @admin.action(description="Archive classes (only allowed with no active enrolments)")
+    @admin.action(description="Archive classes (only allowed with no active enrolments)", permissions=["change"])
     def archive_classes(self, request, queryset):
         from apps.enrollments.models import Enrollment
 

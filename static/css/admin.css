@@ -9,6 +9,11 @@
   background: var(--header-branding-color); color: var(--header-bg);
 }
 .desk-badge-live { background: #f5a623; color: #1b1b1b; }
+/* The read-only admin's reminder, beside the desk links. */
+.desk-readonly {
+  display: inline-block; padding: 0 .6em; border-radius: 999px; font-size: .8rem; font-weight: 600;
+  line-height: 1.5em; border: 1px solid var(--header-link-color); color: var(--header-link-color);
+}
 
 .desk-panel { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0 0 1.5rem; }
 .desk-tile {

@@ -35,6 +35,8 @@ class Command(BaseCommand):
 
         admin = self._user("admin@school.test", User.Role.ADMIN, "Amy", "Admin",
                            is_staff=True, is_superuser=True)
+        # Sees everything the super admin sees, changes nothing.
+        self._user("viewer@school.test", User.Role.READONLY_ADMIN, "Vera", "Viewer")
         coach = self._user("coach@provider.test", User.Role.PROVIDER, "Carlos", "Coach")
         tutor = self._user("tutor@provider.test", User.Role.PROVIDER, "Tina", "Tutor")
         # An instructor who is not a provider account: sees only the classes
@@ -160,6 +162,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             "Demo data ready. Accounts (password 'demo1234'):\n"
             "  admin@school.test    — school admin (staff)\n"
+            "  viewer@school.test   — school admin, read-only (sees everything, changes nothing)\n"
             "  coach@provider.test  — provider (AllStars Sports), also an instructor\n"
             "  instructor@provider.test — instructor (AllStars Sports, Football Juniors only)\n"
             "  tutor@provider.test  — provider (Bright Minds)\n"
