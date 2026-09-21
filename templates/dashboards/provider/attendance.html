@@ -1,32 +1,70 @@
 {% extends "base.html" %}
-{% block title %}Attendance — {{ session.date }}{% endblock %}
+{% block title %}Attendance — {{ cls.title }}, {{ session.date|date:"j M" }}{% endblock %}
 {% block content %}
-<h1>Attendance <span class="muted">— {{ cls.title }}, {{ session.date|date:"l j F Y" }}</span></h1>
-{% if taken %}<p class="muted small">Attendance was already taken for this session — you are editing it.</p>{% endif %}
+<div class="att-head">
+  <p class="small"><a href="{{ back_url }}">← {% if back_home %}Back to today{% else %}Back to {{ cls.title }}{% endif %}</a></p>
+  <h1>{{ cls.title }}</h1>
+  <p class="att-date">
+    {{ session.date|date:"l j F Y" }}
+    {% if session.date == today %}<span class="badge badge-info">Today</span>{% endif %}
+    {% if session.date > today %}<span class="badge">Upcoming</span>{% endif %}
+    <span class="muted small">{{ cls.schedule_display }}</span>
+  </p>
+  <nav class="session-nav" aria-label="Other lessons">
+    {% if previous_session %}<a href="{% url 'provider_attendance' cls.pk previous_session.pk %}{% if back_home %}?back=home{% endif %}">← {{ previous_session.date|date:"j M" }}</a>{% else %}<span></span>{% endif %}
+    {% if next_session %}<a href="{% url 'provider_attendance' cls.pk next_session.pk %}{% if back_home %}?back=home{% endif %}">{{ next_session.date|date:"j M" }} →</a>{% endif %}
+  </nav>
+</div>
 
 {% if rows %}
-<form method="post">
+<form method="post" class="att-form">
   {% csrf_token %}
-  <div class="table-wrap"><table class="list checklist">
-    <tr><th>Present</th><th>Child</th><th>Notes</th></tr>
+  {% if taken %}
+    <p class="muted small">Register taken{% if last_mark %}{% if last_mark.marked_by %} by {{ last_mark.marked_by.get_full_name|default:last_mark.marked_by.email }}{% endif %} on {{ last_mark.marked_at|date:"j M, H:i" }}{% endif %} — you are editing it.</p>
+  {% else %}
+    <p class="muted small">Everyone starts as present. Tap a child to mark them absent, then save.</p>
+  {% endif %}
+
+  <ul class="att-list">
     {% for row in rows %}
-    <tr>
-      <td>
+    <li>
+      <label class="att-row">
         <input type="checkbox" name="present" value="{{ row.enrollment.child_id }}"
-               id="child-{{ row.enrollment.child_id }}"
-               {% if row.present %}checked{% endif %}
-               {% if not row.marked %}checked{% endif %}>
-      </td>
-      <td><label for="child-{{ row.enrollment.child_id }}">{{ row.enrollment.child.full_name }}</label></td>
-      <td class="small muted">{{ row.enrollment.child.notes|default:"" }}</td>
-    </tr>
+               {% if row.present %}checked{% endif %}>
+        <span class="att-body">
+          <span class="att-name">{{ row.enrollment.child.full_name }}</span>
+          <span class="att-meta small">
+            {% if row.enrollment.child.may_leave_alone %}May leave alone{% else %}Must be collected{% endif %}
+            {% if row.enrollment.child.notes %} · {{ row.enrollment.child.notes }}{% endif %}
+          </span>
+        </span>
+        <span class="att-state" aria-hidden="true"></span>
+      </label>
+    </li>
     {% endfor %}
-  </table></div>
-  <p class="small muted">Untick children who are absent, then save.</p>
-  <button type="submit" class="btn">Save attendance</button>
-  <a class="btn btn-secondary" href="{% url 'provider_class' cls.pk %}">Back</a>
+  </ul>
+
+  <div class="sticky-cta att-save">
+    <button type="submit" class="btn">
+      Save attendance — <span data-present-count>{{ present_count }}</span> of {{ rows|length }} present
+    </button>
+  </div>
 </form>
 {% else %}
 <div class="panel"><p>No enrolled children to take attendance for.</p></div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Progressive enhancement: the present count in the Save button follows the ticks.
+  (function () {
+    var form = document.querySelector(".att-form");
+    if (!form) return;
+    var counter = form.querySelector("[data-present-count]");
+    form.addEventListener("change", function () {
+      counter.textContent = form.querySelectorAll('input[name="present"]:checked').length;
+    });
+  })();
+</script>
 {% endblock %}

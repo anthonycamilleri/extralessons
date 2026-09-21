@@ -225,3 +225,137 @@ class TestProviderBroadcast:
 
         assert response.status_code == 200  # form redisplayed with errors
         assert not Notification.objects.filter(event=Event.BROADCAST).exists()
+
+
+def _lesson_today(cls_kwargs=None, days_ago=0):
+    """A provider's published class whose first generated session is `days_ago` days back."""
+    import datetime
+
+    from django.utils import timezone
+
+    from apps.catalog.models import generate_sessions
+
+    date = timezone.localdate() - datetime.timedelta(days=days_ago)
+    provider_user, cls = provider_with_class(
+        weekday=date.weekday(), **{"capacity": 5, **(cls_kwargs or {})}
+    )
+    generate_sessions(cls)
+    return provider_user, cls, cls.sessions.get(date=date)
+
+
+class TestTodayPanel:
+    def test_home_offers_todays_register_then_shows_it_taken(self, client):
+        admin = AdminFactory()
+        provider_user, cls, session = _lesson_today({"title": "Monday Chess"})
+        children = [ChildFactory() for _ in range(3)]
+        for child in children:
+            services.approve_request(services.register(child, cls), admin)
+        client.force_login(provider_user)
+
+        content = client.get(reverse("provider_home")).content.decode()
+        url = reverse("provider_attendance", args=[cls.pk, session.pk])
+        assert f'href="{url}?back=home"' in content
+        assert "Take attendance" in content
+        assert "No lessons today" not in content
+
+        # Saving from the Today panel lands back on it, with the count.
+        response = client.post(url + "?back=home", {"present": [children[0].pk, children[1].pk]})
+        assert response.status_code == 302
+        assert response.url == reverse("provider_home")
+        content = client.get(reverse("provider_home")).content.decode()
+        assert "2 of 3 present" in content
+        assert "Taken" in content
+
+    def test_home_lists_registers_never_taken_last_week(self, client):
+        admin = AdminFactory()
+        provider_user, cls, forgotten = _lesson_today({"title": "Forgotten Judo"}, days_ago=3)
+        services.approve_request(services.register(ChildFactory(), cls), admin)
+        # A cancelled lesson has no register to take, and one long ago is left alone.
+        cancelled = cls.sessions.filter(date__lt=forgotten.date).first()
+        if cancelled is None:
+            # The term started a week ago; make an older lesson by hand.
+            import datetime
+
+            cancelled = cls.sessions.create(
+                date=forgotten.date - datetime.timedelta(days=1), cancelled=True
+            )
+        else:
+            cancelled.cancelled = True
+            cancelled.save()
+        client.force_login(provider_user)
+
+        content = client.get(reverse("provider_home")).content.decode()
+        assert "Registers still to take" in content
+        assert reverse("provider_attendance", args=[cls.pk, forgotten.pk]) in content
+        assert reverse("provider_attendance", args=[cls.pk, cancelled.pk]) not in content
+
+        client.post(reverse("provider_attendance", args=[cls.pk, forgotten.pk]), {"present": []})
+        content = client.get(reverse("provider_home")).content.decode()
+        assert "Registers still to take" not in content
+
+    def test_home_without_a_lesson_today_names_the_next_one(self, client):
+        provider_user, cls, _ = _lesson_today({"title": "Tomorrow Tennis"}, days_ago=-1)
+        client.force_login(provider_user)
+        content = client.get(reverse("provider_home")).content.decode()
+        assert "No lessons today" in content
+        assert "Tomorrow Tennis" in content
+
+
+class TestRegisterState:
+    def test_class_page_shows_each_lessons_register_state(self, client):
+        admin = AdminFactory()
+        provider_user, cls, session = _lesson_today(days_ago=2)
+        provider_user.first_name, provider_user.last_name = "Anna", "Coach"
+        provider_user.save()
+        children = [ChildFactory() for _ in range(3)]
+        for child in children:
+            services.approve_request(services.register(child, cls), admin)
+        client.force_login(provider_user)
+
+        content = client.get(reverse("provider_class", args=[cls.pk])).content.decode()
+        assert "Not taken" in content
+        assert "Take attendance" in content
+        # The partial's comment must stay a comment.
+        assert "{#" not in content and "{% comment" not in content
+
+        client.post(
+            reverse("provider_attendance", args=[cls.pk, session.pk]),
+            {"present": [children[0].pk, children[2].pk]},
+        )
+        content = client.get(reverse("provider_class", args=[cls.pk])).content.decode()
+        assert "Taken · 2 of 3 present" in content
+        assert "by Anna Coach" in content
+        assert "Edit attendance" in content
+        # Nothing to take any more for that lesson; the next one is still planned.
+        assert "Not taken" not in content
+        assert "Planned" in content
+
+    def test_register_page_ticks_everyone_first_and_navigates_between_lessons(self, client):
+        admin = AdminFactory()
+        provider_user, cls, session = _lesson_today()
+        child = ChildFactory(first_name="Solo", may_leave_alone=True)
+        services.approve_request(services.register(child, cls), admin)
+        client.force_login(provider_user)
+
+        response = client.get(reverse("provider_attendance", args=[cls.pk, session.pk]))
+        content = response.content.decode()
+        assert response.context["present_count"] == 1
+        assert "May leave alone" in content
+        assert "Everyone starts as present" in content
+        next_session = cls.sessions.filter(date__gt=session.date).first()
+        assert reverse("provider_attendance", args=[cls.pk, next_session.pk]) in content
+        assert "Back to " in content
+
+
+class TestManifest:
+    def test_manifest_carries_the_school_name(self, client):
+        from apps.accounts.models import SiteConfig
+
+        config = SiteConfig.get()
+        config.school_name = "Test School"
+        config.save()
+        response = client.get("/manifest.webmanifest")
+        assert response.status_code == 200
+        assert response["Content-Type"].startswith("application/manifest+json")
+        assert response.json()["name"] == "Test School Activities"
+        assert response.json()["display"] == "standalone"

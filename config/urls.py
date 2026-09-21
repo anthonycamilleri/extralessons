@@ -8,12 +8,15 @@ from apps.catalog.mcp_http import mcp_endpoint
 from apps.media.views import serve_stored_file
 from apps.notifications.views import send_test_announcement, upload_announcement_image
 
+from .manifest import manifest
 from .robots import robots_txt
 
 urlpatterns = [
     # Crawlers: the catalogue is public, the rest is logins and helpers that
     # only wake the container for nothing. No database behind it.
     path("robots.txt", robots_txt, name="robots_txt"),
+    # "Add to home screen" for instructors taking the register on a phone.
+    path("manifest.webmanifest", manifest, name="manifest"),
     # Ahead of the admin so its "Change password" link lands on our view, which
     # does not ask for the current password (the admin's own form does).
     path("admin/password_change/", PasswordChangeView.as_view(), name="admin_password_change"),

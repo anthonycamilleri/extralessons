@@ -10,6 +10,47 @@
   </div>
 </div>
 
+{% if classes %}
+<div class="panel today-panel">
+  <h2>Today <span class="muted">— {{ today|date:"l j F" }}</span></h2>
+  {% if todays_sessions %}
+  <ul class="session-list">
+    {% for session in todays_sessions %}
+    <li class="session-row">
+      <div class="session-info">
+        <a class="session-title" href="{% url 'provider_class' session.activity_class.pk %}">{{ session.activity_class.title }}</a>
+        <div class="muted small">{{ session.activity_class.start_time|time:"H:i" }}–{{ session.activity_class.end_time|time:"H:i" }}</div>
+      </div>
+      {% if session.taken_count %}
+        <span class="badge badge-ok">Taken · {{ session.present_count }} of {{ session.taken_count }} present</span>
+        <a class="btn btn-secondary btn-small" href="{% url 'provider_attendance' session.activity_class.pk session.pk %}?back=home">Edit</a>
+      {% else %}
+        <a class="btn" href="{% url 'provider_attendance' session.activity_class.pk session.pk %}?back=home">Take attendance</a>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No lessons today.{% if next_session %} Next: <b>{{ next_session.activity_class.title }}</b> on {{ next_session.date|date:"l j F" }}.{% endif %}</p>
+  {% endif %}
+
+  {% if untaken_sessions %}
+  <h3 class="session-subhead">Registers still to take</h3>
+  <ul class="session-list">
+    {% for session in untaken_sessions %}
+    <li class="session-row">
+      <div class="session-info">
+        <a class="session-title" href="{% url 'provider_class' session.activity_class.pk %}">{{ session.activity_class.title }}</a>
+        <div class="muted small">{{ session.date|date:"l j F" }}</div>
+      </div>
+      <a class="btn btn-secondary btn-small" href="{% url 'provider_attendance' session.activity_class.pk session.pk %}?back=home">Take attendance</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
+
 {% for profile in my_profiles %}
   {% if not profile.has_certificate or not profile.bio %}
   <div class="panel panel-accent">

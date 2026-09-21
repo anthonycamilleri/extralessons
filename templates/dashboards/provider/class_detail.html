@@ -71,20 +71,20 @@
 </p>
 {% endif %}
 <div class="table-wrap"><table class="list stacked">
-  <tr><th>Date</th><th>Status</th><th></th></tr>
+  <tr><th>Date</th><th>Register</th><th></th></tr>
   {% for session in sessions %}
-  <tr {% if session.date < today %}class="muted"{% endif %}>
+  <tr {% if session.date < today and not session.taken_count %}class="muted"{% endif %}>
     <td data-label="Date">{{ session.date|date:"l j F Y" }}</td>
-    <td data-label="Status">
-      {% if session.cancelled %}<span class="badge badge-bad">Cancelled</span>
-      {% elif session.date < today %}<span class="badge">Past</span>
-      {% else %}<span class="badge badge-ok">Planned</span>{% endif %}
-      {% if session.holiday_override %}<span class="badge badge-warn">Holiday exception</span>{% endif %}
-      {% if session.notes %}<span class="small muted">{{ session.notes }}</span>{% endif %}
-    </td>
+    <td data-label="Register">{% include "dashboards/provider/_session_state.html" %}</td>
     <td>
       {% if not session.cancelled %}
-        <a href="{% url 'provider_attendance' cls.pk session.pk %}">Attendance</a>
+        {% if session.taken_count %}
+          <a href="{% url 'provider_attendance' cls.pk session.pk %}">Edit attendance</a>
+        {% elif session.date <= today %}
+          <a class="btn btn-small" href="{% url 'provider_attendance' cls.pk session.pk %}">Take attendance</a>
+        {% else %}
+          <a href="{% url 'provider_attendance' cls.pk session.pk %}">Attendance</a>
+        {% endif %}
       {% endif %}
     </td>
   </tr>

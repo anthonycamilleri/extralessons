@@ -9,9 +9,13 @@ class pages do not care which one is asking, only that the class is theirs.
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from datetime import timedelta
+
 from django.db import transaction
+from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -50,9 +54,71 @@ def _managed_instructor_or_404(user, instructor_id):
     )
 
 
+# How far back the home page chases a register that was never taken. A week:
+# long enough to catch a forgotten lesson, short enough that the list is
+# never a wall of old dates the provider has already given up on.
+UNTAKEN_LOOKBACK_DAYS = 7
+
+
+def _with_attendance_counts(sessions):
+    """Annotate sessions with how many marks were saved and how many were present.
+
+    A session with marks is one whose register was taken; the two counts read
+    as "12 of 14 present". Present is counted with a filtered aggregate so a
+    single query covers both.
+    """
+    return sessions.annotate(
+        taken_count=Count("attendance"),
+        present_count=Count("attendance", filter=Q(attendance__present=True)),
+    )
+
+
+def _last_marks(sessions):
+    """Who last saved each session's register, and when: {session_id: Attendance}.
+
+    marked_at is auto_now, so the newest row of a session is its last save.
+    One query for the whole class rather than one subquery per session.
+    """
+    last = {}
+    marks = (
+        Attendance.objects.filter(session__in=sessions)
+        .select_related("marked_by")
+        .order_by("marked_at")
+    )
+    for mark in marks:
+        last[mark.session_id] = mark
+    return last
+
+
+def _live_sessions(user):
+    """Sessions a provider can still act on: their published classes, not cancelled."""
+    return (
+        ClassSession.objects.filter(
+            activity_class__in=_own_classes(user).filter(
+                status=ActivityClass.Status.PUBLISHED
+            ),
+            cancelled=False,
+        )
+        .select_related("activity_class")
+        .order_by("date", "activity_class__start_time", "activity_class__title")
+    )
+
+
 @provider_required
 def home(request):
     classes = _own_classes(request.user).with_counts().prefetch_related("instructors__user")
+    today = timezone.localdate()
+    live = _with_attendance_counts(_live_sessions(request.user))
+    todays_sessions = list(live.filter(date=today))
+    # Registers not taken for lessons already held: what the coach forgot.
+    untaken = list(
+        live.filter(
+            date__lt=today, date__gte=today - timedelta(days=UNTAKEN_LOOKBACK_DAYS)
+        ).filter(taken_count=0)
+    )
+    next_session = None
+    if not todays_sessions:
+        next_session = live.filter(date__gt=today).first()
     return render(
         request,
         "dashboards/provider/home.html",
@@ -60,6 +126,10 @@ def home(request):
             "classes": classes,
             "managed_providers": _managed_providers(request.user),
             "my_profiles": Instructor.objects.for_user(request.user).select_related("provider"),
+            "today": today,
+            "todays_sessions": todays_sessions,
+            "untaken_sessions": untaken,
+            "next_session": next_session,
         },
     )
 
@@ -75,7 +145,10 @@ def class_detail(request, class_id):
     )
     waitlisted = cls.enrollments.waitlist_fifo().select_related("child")
     today = timezone.localdate()
-    sessions = cls.sessions.all()
+    sessions = list(_with_attendance_counts(cls.sessions.all()))
+    last_marks = _last_marks(sessions)
+    for session in sessions:
+        session.last_mark = last_marks.get(session.pk)
     next_session = cls.sessions.filter(cancelled=False, date__gte=today).first()
     return render(
         request,
@@ -103,6 +176,10 @@ def attendance(request, class_id, session_id):
         .select_related("child")
         .order_by("child__first_name", "child__last_name")
     )
+    # Where "Back" and the post-save redirect go. The home page's Today panel
+    # links here with ?back=home so a coach working through the day's classes
+    # lands back on the list rather than on this class's page.
+    back_home = request.GET.get("back") == "home"
 
     if request.method == "POST":
         present_ids = {
@@ -118,7 +195,14 @@ def attendance(request, class_id, session_id):
                         "marked_by": request.user,
                     },
                 )
-        messages.success(request, f"Attendance saved for {session.date}.")
+        present_count = sum(1 for e in roster if e.child_id in present_ids)
+        messages.success(
+            request,
+            f"Attendance saved for {cls.title}, {session.date:%-d %B}: "
+            f"{present_count} of {len(roster)} present.",
+        )
+        if back_home:
+            return redirect("provider_home")
         return redirect("provider_class", class_id=cls.pk)
 
     existing = {
@@ -127,15 +211,30 @@ def attendance(request, class_id, session_id):
     rows = [
         {
             "enrollment": enrollment,
-            "present": existing.get(enrollment.child_id),
+            # Not yet marked children start ticked: the coach unticks absentees.
+            "present": existing.get(enrollment.child_id, True),
             "marked": enrollment.child_id in existing,
         }
         for enrollment in roster
     ]
+    last_mark = _last_marks([session]).get(session.pk)
+    siblings = cls.sessions.filter(cancelled=False)
     return render(
         request,
         "dashboards/provider/attendance.html",
-        {"cls": cls, "session": session, "rows": rows, "taken": bool(existing)},
+        {
+            "cls": cls,
+            "session": session,
+            "rows": rows,
+            "taken": bool(existing),
+            "last_mark": last_mark,
+            "present_count": sum(1 for row in rows if row["present"]),
+            "previous_session": siblings.filter(date__lt=session.date).order_by("-date").first(),
+            "next_session": siblings.filter(date__gt=session.date).first(),
+            "today": timezone.localdate(),
+            "back_home": back_home,
+            "back_url": reverse("provider_home") if back_home else reverse("provider_class", args=[cls.pk]),
+        },
     )
 
 

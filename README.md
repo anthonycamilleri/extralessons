@@ -22,7 +22,7 @@ A booking system for school extra-curricular activities. The school publishes a 
 
 **Providers**
 - Dashboard with class rosters for their own classes.
-- Per-session attendance taking.
+- Per-session attendance, built for a phone at the door: the dashboard opens on *Today* with a one-tap **Take attendance** for each of the day's lessons and a list of registers not yet taken from the past week; the register itself is one full-width tappable row per child, everyone ticked to start, with the going-home arrangement under each name and a sticky save button showing how many are present. Each lesson on the class page shows whether its register was taken, how many were present, and who saved it.
 - Message the families of their classes (announcements/broadcasts), with formatting and pictures, addressed to everyone with a live place, to the waiting list alone, or to everyone who ever had a place — the last being the only audience a cancelled class still has.
 - Two kinds of account under one provider (see *Provider accounts and instructors* under Architecture). A **provider account** sees every class of the provider and manages its **instructors**: it creates their accounts from the dashboard (the instructor gets an email with a set-your-password link), assigns each one the classes they teach, re-sends a lapsed invitation, and removes people who have left. A provider account can also list itself as an instructor (*I teach too*).
 - An **instructor** sees only the classes assigned to them: the register with the children's going-home arrangements and care notes, attendance for every session, and the announcement composer for those families.

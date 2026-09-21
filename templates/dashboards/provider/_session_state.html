@@ -1,0 +1,11 @@
+{% comment %}The state of one lesson's register: session is annotated with taken_count
+and present_count (provider_views._with_attendance_counts); last_mark is optional.{% endcomment %}
+{% if session.cancelled %}<span class="badge badge-bad">Cancelled</span>
+{% elif session.taken_count %}
+  <span class="badge badge-ok">Taken · {{ session.present_count }} of {{ session.taken_count }} present</span>
+  {% if session.last_mark %}<span class="small muted">by {% if session.last_mark.marked_by %}{{ session.last_mark.marked_by.get_full_name|default:session.last_mark.marked_by.email }}{% else %}—{% endif %}, {{ session.last_mark.marked_at|date:"j M, H:i" }}</span>{% endif %}
+{% elif session.date < today %}<span class="badge badge-warn">Not taken</span>
+{% elif session.date == today %}<span class="badge badge-info">Today</span>
+{% else %}<span class="badge">Planned</span>{% endif %}
+{% if session.holiday_override %}<span class="badge badge-warn">Holiday exception</span>{% endif %}
+{% if session.notes %}<span class="small muted">{{ session.notes }}</span>{% endif %}

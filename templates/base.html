@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#0072bb">
   <link rel="icon" href="{% static 'img/icon-32.png' %}" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="{% static 'img/icon-180.png' %}">
+  <link rel="manifest" href="{% url 'manifest' %}">
   {# Self-hosted display face: the page makes no third-party requests. #}
   <link rel="preload" as="font" type="font/woff2" crossorigin href="{% static 'fonts/fredoka-latin.woff2' %}">
   <link rel="stylesheet" href="{% static 'css/main.css' %}">
