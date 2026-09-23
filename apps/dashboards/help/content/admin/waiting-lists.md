@@ -92,3 +92,9 @@ the number waiting. They cannot offer seats — that is yours.
 The **Download CSV** link on the roster gives you everyone in one file:
 enrolled, offered, waiting and requested, with waiting-list positions filled
 in.
+
+For every class at once, use **Download participants by day** at the top of
+the class list. It is a spreadsheet with one sheet per weekday, listing each
+enrolled child with their school class and the class they attend, for every
+class this term that has not been cancelled. You get the classes you look
+after; super admins and read-only admins get them all.

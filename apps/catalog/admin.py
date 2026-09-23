@@ -773,6 +773,11 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
                 name="catalog_activityclass_announce",
             ),
             path(
+                "participants-by-day/",
+                self.admin_site.admin_view(self.participants_by_day_view),
+                name="catalog_activityclass_participants_by_day",
+            ),
+            path(
                 "<int:object_id>/register/",
                 self.admin_site.admin_view(self.register_view),
                 name="catalog_activityclass_register",
@@ -883,6 +888,70 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
                         stamp.date().isoformat() if stamp else "",
                     ]
                 )
+        return response
+
+    def participants_by_day_view(self, request):
+        """Every enrolled child of every class this term that is not
+        cancelled, as a workbook with one sheet per weekday: the list the
+        office prints for the gate or hands to the after-school staff."""
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        classes = (
+            self.get_queryset(request)
+            .filter(term__is_active=True)
+            .exclude(status=ActivityClass.Status.CANCELLED)
+        )
+        enrollments = (
+            Enrollment.objects.filter(
+                activity_class__in=classes, status=Enrollment.Status.ENROLLED
+            )
+            .select_related("child", "activity_class__provider")
+            .order_by(
+                "activity_class__weekday",
+                "activity_class__start_time",
+                "activity_class__title",
+                "child__last_name",
+                "child__first_name",
+            )
+        )
+        days = dict(ActivityClass.WEEKDAYS)
+        by_day = {}
+        for enrollment in enrollments:
+            by_day.setdefault(enrollment.activity_class.weekday, []).append(enrollment)
+
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+        headers = ["Student", "School class", "Class", "Time", "Location", "Provider"]
+        for weekday in sorted(by_day) or [None]:
+            sheet = workbook.create_sheet(days[weekday] if weekday is not None else "No participants")
+            sheet.append(headers)
+            for cell in sheet[1]:
+                cell.font = Font(bold=True)
+            sheet.freeze_panes = "A2"
+            for enrollment in by_day.get(weekday, []):
+                cls = enrollment.activity_class
+                sheet.append(
+                    [
+                        enrollment.child.full_name,
+                        enrollment.child.school_class,
+                        cls.title,
+                        f"{cls.start_time:%H:%M}–{cls.end_time:%H:%M}",
+                        cls.location,
+                        cls.provider.name,
+                    ]
+                )
+            for column, width in zip("ABCDEF", [28, 12, 32, 13, 20, 24]):
+                sheet.column_dimensions[column].width = width
+            sheet.auto_filter.ref = sheet.dimensions
+
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response["Content-Disposition"] = 'attachment; filename="participants-by-day.xlsx"'
+        workbook.save(response)
         return response
 
     def register_view(self, request, object_id):

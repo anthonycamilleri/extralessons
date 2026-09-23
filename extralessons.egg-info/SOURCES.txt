@@ -33,6 +33,7 @@ tests/test_notifier_job.py
 tests/test_office_accepts_offer.py
 tests/test_office_placements.py
 tests/test_parent_admins.py
+tests/test_participants_by_day.py
 tests/test_password_change.py
 tests/test_provider_dashboard.py
 tests/test_readonly_admin.py

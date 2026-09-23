@@ -20,6 +20,9 @@ dependencies = [
     # The MCP SDK ships in the runtime image: the web service serves the
     # catalogue tools at /mcp (apps.catalog.mcp_http) as well as over stdio.
     "mcp>=1.29,<2",
+    # Writes the participants-by-day workbook (one sheet per weekday) in the
+    # class admin.
+    "openpyxl~=3.1",
 ]
 
 [project.optional-dependencies]
