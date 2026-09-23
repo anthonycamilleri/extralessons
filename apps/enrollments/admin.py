@@ -177,6 +177,11 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
                 name="enrollments_enrollment_offer",
             ),
             path(
+                "<int:object_id>/accept-offer/",
+                wrap(self.accept_offer_view),
+                name="enrollments_enrollment_accept_offer",
+            ),
+            path(
                 "<int:object_id>/confirm-cancellation/",
                 wrap(self.confirm_cancellation_view),
                 name="enrollments_enrollment_confirm_cancellation",
@@ -340,6 +345,18 @@ class EnrollmentAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mode
             return messages.SUCCESS, text
 
         return self._transition(request, object_id, services.offer_seat, outcome)
+
+    def accept_offer_view(self, request, object_id):
+        """The office accepts an outstanding offer for a family that said yes
+        outside the site (a phone call, a reply to the email)."""
+
+        def outcome(enrollment):
+            return messages.SUCCESS, (
+                f"{enrollment.child.full_name} enrolled in {enrollment.activity_class.title}; "
+                "the family has been sent the usual confirmation."
+            )
+
+        return self._transition(request, object_id, services.confirm_offer, outcome)
 
     def confirm_cancellation_view(self, request, object_id):
         def outcome(enrollment):

@@ -6,6 +6,7 @@ Pillow~=11.0
 django-environ~=0.12
 requests~=2.32
 markdown~=3.7
+nh3~=0.3
 django-storages[s3]~=1.14
 mcp<2,>=1.29
 

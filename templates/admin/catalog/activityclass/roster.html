@@ -133,6 +133,11 @@
       <td>
         {% if can_act %}
         <div class="desk-actions">
+          <form method="post" action="{% url 'admin:enrollments_enrollment_accept_offer' e.pk %}"
+                onsubmit="return confirm('Accept the offer for {{ e.child.first_name|escapejs }}? Only do this if the family has told you they want the place. They will be enrolled and sent the usual confirmation email.');">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="button default">Accept for family</button>
+          </form>
           <form method="post" action="{% url 'admin:enrollments_enrollment_cancel' e.pk %}"
                 onsubmit="return confirm('Withdraw the offer to {{ e.child.first_name|escapejs }}\'s family? They will be told the school has cancelled it, and the seat is free again.');">{% csrf_token %}
             <input type="hidden" name="next" value="{{ request.path }}">

@@ -64,7 +64,9 @@ seat count — you cannot accidentally give the same place away twice.
 Three things can happen:
 
 - **The family confirms.** The child is enrolled and gets the usual
-  confirmation email.
+  confirmation email. If they tell you instead — a phone call, a reply to the
+  email — click **Accept for family** on their row under **Outstanding
+  offers**, and it is as if they had clicked it themselves.
 - **The family declines.** The place comes back to you and you get an alert.
 - **Nobody answers in time.** The offer expires by itself, the family is told
   the place has gone, and you get an alert. The seat is free again straight

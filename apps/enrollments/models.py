@@ -50,7 +50,7 @@ class Enrollment(models.Model):
         parent registers ──► REQUESTED ── admin approves ──► ENROLLED (seat free)
                                  │                        └► WAITLISTED (class full)
                                  └───── admin rejects ────► CANCELLED
-        WAITLISTED ── admin offers seat ──► OFFERED ── parent confirms ──► ENROLLED
+        WAITLISTED ── admin offers seat ──► OFFERED ── parent (or admin for them) confirms ──► ENROLLED
         OFFERED ── parent declines / offer expires ──► CANCELLED
         any active state ── parent withdraws / admin cancels / class cancelled ──► CANCELLED
         any active state ── admin moves the child ──► CANCELLED (moved), plus a new

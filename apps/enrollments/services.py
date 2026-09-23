@@ -297,8 +297,13 @@ def offer_seat(enrollment, admin_user):
     return enrollment
 
 
-def confirm_offer(enrollment):
-    """Parent confirms an offered seat. The seat is already reserved."""
+def confirm_offer(enrollment, admin_user=None):
+    """Parent confirms an offered seat. The seat is already reserved.
+
+    The office can confirm on the family's behalf (they said yes by phone or
+    email): pass admin_user, and the acceptance is recorded as theirs. The
+    family gets the same confirmation email either way.
+    """
     with transaction.atomic():
         cls = _locked_class(enrollment.activity_class_id)
         _require_open(cls)
@@ -310,6 +315,8 @@ def confirm_offer(enrollment):
         enrollment.status = Enrollment.Status.ENROLLED
         enrollment.enrolled_at = timezone.now()
         enrollment.promoted_from_waitlist = True
+        if admin_user is not None:
+            enrollment.decided_by = admin_user
         enrollment.save()
         notifications.queue_event(Event.REGISTRATION_CONFIRMED, enrollment)
     return enrollment
