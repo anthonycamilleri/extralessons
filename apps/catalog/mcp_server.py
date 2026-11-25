@@ -850,7 +850,10 @@ def cancel_sessions(class_id: int, dates: list[str], notes: str = "") -> dict:
     parents see that the lesson is off and regenerate_sessions will not bring
     them back. Optional notes are shown against each cancelled date and are
     emailed to the enrolled families as the reason, in one message per child
-    covering every date in the call. Dates already past are not announced, so
+    covering every date in the call. The class's instructors (or, with none
+    assigned, the provider's contact address) are emailed too, and families
+    and teachers get a reminder the day before each date. Dates already past
+    are not announced, so
     `dates_announced` can be lower than the number cancelled. Lessons whose
     attendance has already been recorded cannot be cancelled. Use
     restore_sessions to undo.
@@ -877,6 +880,7 @@ def cancel_sessions(class_id: int, dates: list[str], notes: str = "") -> dict:
         "cancelled": [s.date.isoformat() for s in sessions],
         "cancelled_total": cls.sessions.filter(cancelled=True).count(),
         "children_notified": notice.children,
+        "teachers_notified": notice.teachers,
         "dates_announced": notice.dates,
         **_class_dict(_class(cls.id)),
     }

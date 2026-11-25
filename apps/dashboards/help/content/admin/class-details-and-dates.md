@@ -97,8 +97,18 @@ Everything you tick in one save goes out as **one email per child** listing
 all of it, so calling off a run of dates does not mean a run of emails (a
 family with two children in the class gets one email for each, naming them). Save
 the page and the green message tells you how many children's families were
-written to, and how many dates they were told about. A date that was already
-cancelled is not announced twice.
+written to, how many teachers, and how many dates they were told about. A date
+that was already cancelled is not announced twice.
+
+**The teacher is told too.** The instructors assigned to the class get their
+own email with the same dates and note, and how many families were told. If
+nobody is assigned, it goes to the provider's contact email instead.
+
+**Everyone is reminded the day before.** Families and teachers get a short
+reminder the day before each cancelled date, sent early that morning by the
+nightly job — you do not need to do anything. A date you cancel on the day
+before (or on the day) gets no reminder, since the first email has only just
+gone out. If you untick **cancelled** before then, no reminder is sent.
 
 ## A lesson during a holiday {#holidays}
 

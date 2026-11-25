@@ -252,6 +252,58 @@ def queue_admin_event(event, enrollment, **extra_context):
     schedule_delivery()
 
 
+def class_teachers(activity_class):
+    """Who teaches a class, as (user or None, email, first name, full name).
+
+    The instructors assigned to the class, whose accounts are active. A class
+    nobody has been assigned to falls back to the provider's contact address,
+    so a single coach who never set up an instructor profile still hears that
+    their lesson is off.
+    """
+    teachers = []
+    for instructor in activity_class.instructors.filter(
+        user__is_active=True
+    ).select_related("user"):
+        user = instructor.user
+        name = user.get_full_name() or user.email
+        teachers.append((user, user.email, user.first_name or name, name))
+    if not teachers and activity_class.provider.contact_email:
+        provider = activity_class.provider
+        teachers.append((None, provider.contact_email, provider.name, provider.name))
+    return teachers
+
+
+def queue_instructor_event(event, activity_class, **extra_context):
+    """Email the people who teach a class about it. Returns how many were told.
+
+    Email only, like every provider-facing message: WhatsApp templates target
+    parents. An instructor who has turned email off is recorded as skipped,
+    as anyone else would be.
+    """
+    template = _get_template(event)
+    if template is None:
+        return 0
+    rows = []
+    for user, email, first_name, full_name in class_teachers(activity_class):
+        context = base_context(
+            instructor_first_name=first_name,
+            instructor_name=full_name,
+            class_title=activity_class.title,
+            provider_name=activity_class.provider.name,
+            schedule=activity_class.schedule_display,
+            term_name=activity_class.term.name,
+            location=activity_class.location,
+            action_url=_absolute(
+                reverse("provider_class", kwargs={"class_id": activity_class.pk})
+            ),
+            **extra_context,
+        )
+        rows.append(_email_row(template, context, recipient=user, email=email, event=event))
+    Notification.objects.bulk_create(rows)
+    schedule_delivery()
+    return len(rows)
+
+
 def queue_contact_message(*, name, email, subject, message, submitted_by=""):
     """Public contact form -> the school's inbox, through the same outbox.
 

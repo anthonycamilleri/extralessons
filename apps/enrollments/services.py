@@ -507,11 +507,13 @@ class LessonNotice(NamedTuple):
     """What one batch of cancelled dates announced, for admin feedback.
 
     `dates` counts the dates actually announced, which is not always the
-    number the office ticked: dates already past are left out.
+    number the office ticked: dates already past are left out. `teachers`
+    counts the instructors (or the provider's address) told alongside.
     """
 
     children: int
     dates: int
+    teachers: int = 0
 
 
 def _lesson_date(date):
@@ -519,8 +521,60 @@ def _lesson_date(date):
     return formats.date_format(date, "l j F")
 
 
+def _cancelled_dates_context(sessions):
+    """The template context describing cancelled dates, nearest first.
+
+    One note for the whole batch reads as a single reason; differing notes
+    belong against their own dates instead.
+    """
+    notes = {session.notes.strip() for session in sessions}
+    shared = notes.pop() if len(notes) == 1 else ""
+    if shared:
+        lines = [_lesson_date(session.date) for session in sessions]
+    else:
+        lines = [
+            _lesson_date(session.date)
+            + (f" — {session.notes.strip()}" if session.notes.strip() else "")
+            for session in sessions
+        ]
+    if len(sessions) == 1:
+        dates, summary = lines[0], _lesson_date(sessions[0].date)
+    else:
+        others = len(sessions) - 1
+        dates = "\n".join(f"· {line}" for line in lines)
+        summary = (
+            f"{_lesson_date(sessions[0].date)} and {others} more "
+            f"date{'s' if others > 1 else ''}"
+        )
+    return {
+        "dates": dates,
+        "dates_summary": summary,
+        "date_count": len(sessions),
+        "reason": shared,
+    }
+
+
+def _tell_class(activity_class, family_event, teacher_event, context):
+    """Tell every enrolled family, then the teacher, about cancelled dates.
+
+    Only confirmed places hear: a child on the waiting list has no lesson to
+    miss. The teacher's email says how many families were told, so they know
+    nobody will be waiting at the door. Returns (children, teachers).
+    """
+    children = 0
+    for enrollment in activity_class.enrollments.filter(
+        status=Enrollment.Status.ENROLLED
+    ).select_related("child"):
+        notifications.queue_event(family_event, enrollment, **context)
+        children += 1
+    teachers = notifications.queue_instructor_event(
+        teacher_event, activity_class, children_count=children, **context
+    )
+    return children, teachers
+
+
 def notify_lessons_cancelled(activity_class, sessions):
-    """Tell the families in a class that specific lessons are off.
+    """Tell the families in a class, and its teacher, that specific lessons are off.
 
     `sessions` are the dates that have just been marked cancelled. Dates
     already past are dropped: an office ticking last month's rows is tidying
@@ -528,6 +582,8 @@ def notify_lessons_cancelled(activity_class, sessions):
     so calling off a run of dates costs a child one message rather than one
     per date — and the note against the date travels as the reason. Siblings
     get one each, naming them, as every other event here does.
+
+    Each date is announced again the day before it (send_lesson_reminders).
 
     Returns a LessonNotice counting what went out.
     """
@@ -539,40 +595,77 @@ def notify_lessons_cancelled(activity_class, sessions):
     upcoming = [by_date[date] for date in sorted(by_date)]
     if not upcoming:
         return LessonNotice(0, 0)
-    notes = {session.notes.strip() for session in upcoming}
-    # One note for the whole batch reads as a single reason; differing notes
-    # belong against their own dates instead.
-    shared = notes.pop() if len(notes) == 1 else ""
-    if shared:
-        lines = [_lesson_date(session.date) for session in upcoming]
-    else:
-        lines = [
-            _lesson_date(session.date)
-            + (f" — {session.notes.strip()}" if session.notes.strip() else "")
-            for session in upcoming
-        ]
-    if len(upcoming) == 1:
-        dates, summary = lines[0], _lesson_date(upcoming[0].date)
-    else:
-        others = len(upcoming) - 1
-        dates = "\n".join(f"· {line}" for line in lines)
-        summary = (
-            f"{_lesson_date(upcoming[0].date)} and {others} more "
-            f"date{'s' if others > 1 else ''}"
+    children, teachers = _tell_class(
+        activity_class,
+        Event.LESSON_CANCELLED,
+        Event.INSTRUCTOR_LESSON_CANCELLED,
+        _cancelled_dates_context(upcoming),
+    )
+    return LessonNotice(children, len(upcoming), teachers)
+
+
+def _reminder_is_due(session, today):
+    """Whether a cancelled date still needs its day-before reminder.
+
+    A date called off on the day before, or on the day itself, was announced
+    close enough to the lesson that the announcement already is the reminder.
+    A date cancelled before the reminder existed has no stamp, and is treated
+    as called off long ago.
+    """
+    if session.cancelled_at is None:
+        return True
+    reminder_day = session.date - datetime.timedelta(days=1)
+    return timezone.localdate(session.cancelled_at) < reminder_day
+
+
+def send_lesson_reminders(today=None):
+    """Remind families and teachers, the day before, that a lesson is off.
+
+    Run by the scheduled notifier (apps.notifications.worker.run_once), so it
+    needs nothing running in between: the nightly job picks up tomorrow's
+    cancelled dates and queues the reminders it then delivers. Today's dates
+    are swept too, so a night the job did not run still gets its reminder out
+    on the morning of the lesson rather than never.
+
+    Each date is reminded once (`reminder_sent_at`), and a date put back on
+    loses its stamp, so it is never reminded about as being off. Families are
+    the ones with a confirmed place *now*, not when the date was cancelled.
+
+    Returns the number of dates reminded.
+    """
+    from apps.catalog.models import ClassSession
+
+    today = today or timezone.localdate()
+    tomorrow = today + datetime.timedelta(days=1)
+    reminded = 0
+    with transaction.atomic():
+        due = (
+            ClassSession.objects.select_for_update(skip_locked=True, of=("self",))
+            .select_related("activity_class__provider", "activity_class__term")
+            .filter(
+                cancelled=True,
+                reminder_sent_at__isnull=True,
+                date__gte=today,
+                date__lte=tomorrow,
+            )
+            .exclude(activity_class__status=ActivityClass.Status.CANCELLED)
+            .order_by("date", "pk")
         )
-    context = {
-        "dates": dates,
-        "dates_summary": summary,
-        "date_count": len(upcoming),
-        "reason": shared,
-    }
-    notified = 0
-    for enrollment in activity_class.enrollments.filter(
-        status=Enrollment.Status.ENROLLED
-    ).select_related("child"):
-        notifications.queue_event(Event.LESSON_CANCELLED, enrollment, **context)
-        notified += 1
-    return LessonNotice(notified, len(upcoming))
+        for session in due:
+            if not _reminder_is_due(session, today):
+                continue
+            context = _cancelled_dates_context([session])
+            context["when"] = "tomorrow" if session.date == tomorrow else "today"
+            _tell_class(
+                session.activity_class,
+                Event.LESSON_CANCELLED_REMINDER,
+                Event.INSTRUCTOR_LESSON_REMINDER,
+                context,
+            )
+            session.reminder_sent_at = timezone.now()
+            session.save(update_fields=["reminder_sent_at"])
+            reminded += 1
+    return reminded
 
 
 def cancel_class(activity_class):

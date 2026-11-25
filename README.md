@@ -260,8 +260,8 @@ python manage.py runserver
 No services, no containers. The app is at http://localhost:8000 and the admin
 at http://localhost:8000/admin/. Notifications deliver inline, so they print to
 the console (dev settings use the console email backend) as you click. To
-exercise the nightly safety net — offer expiry, stuck-row recovery — run
-`python manage.py run_notifier --once`.
+exercise the nightly safety net — offer expiry, day-before reminders for
+cancelled lessons, stuck-row recovery — run `python manage.py run_notifier --once`.
 
 The one thing SQLite cannot do is row-level locking, so
 `tests/test_capacity_race.py` skips itself. Anything touching
@@ -443,7 +443,7 @@ once you have looked them over.
 | `upsert_class(term, provider, title, description, age_min, age_max, weekday, start_time, end_time, capacity?, location?, extra_details?, runs_during_holidays?, slug?, rebuild_sessions?)` | Create as DRAFT or update; matched by slug within the term. Updating never touches existing lesson dates; the result flags a schedule change, and `rebuild_sessions` opts in to regenerating them. `capacity: 0` opens the class for the waiting list only — parents register, but no place is given out until the capacity is raised. |
 | `publish_class(class_id)` | Set PUBLISHED and generate sessions around the school holidays. |
 | `regenerate_sessions(class_id)` | Re-run the calendar reconciliation only. Cancelled lessons stay cancelled. |
-| `cancel_sessions(class_id, dates, notes?)` | Cancel individual lessons by date. They stay in the calendar marked cancelled, survive regeneration, and are refused once attendance is recorded. |
+| `cancel_sessions(class_id, dates, notes?)` | Cancel individual lessons by date. They stay in the calendar marked cancelled, survive regeneration, and are refused once attendance is recorded. The enrolled families and the class's instructors (or the provider's contact address, if none is assigned) are emailed, and reminded the day before. |
 | `restore_sessions(class_id, dates)` | Undo `cancel_sessions`. |
 | `delete_term(name, school_year?)` | Delete a term that has no classes. |
 | `archive_class(class_id)` | Archive a finished class; refused while enrolments are active. |

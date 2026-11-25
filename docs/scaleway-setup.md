@@ -349,7 +349,7 @@ each time but booting a job and waking the database, so it no longer does.
 Delivery does **not** depend on this job. Notifications go out inline, in the
 request that caused them, as soon as the state change commits — see
 `schedule_delivery()` in `apps/notifications/services.py`. This job is the
-safety net for the three things no user action can trigger.
+safety net for the things no user action can trigger.
 
 ```sh
 scw jobs definition create name="$APP_NAME-notifier" \
@@ -377,8 +377,8 @@ scw jobs definition create name="$APP_NAME-notifier" \
 `--drain` keeps cycling until the outbox is empty, then exits. `--max-seconds
 240` keeps a run comfortably inside the 600-second job timeout.
 
-**Why once a night is enough.** The job does three things that inline delivery
-cannot, because all three happen when nothing else is happening:
+**Why once a night is enough.** The job does four things that inline delivery
+cannot, because all four happen when nothing else is happening:
 
 1. **Retries whose backoff came due while the site was idle.** A failed send is
    rescheduled 2, 4, 8… minutes out. No click will land at that moment.
@@ -386,6 +386,15 @@ cannot, because all three happen when nothing else is happening:
    definition whatever would have retried them is gone.
 3. **Waiting-list offers reaching their deadline**, 48 hours after an admin
    made them.
+4. **The day before a cancelled lesson.** Families and the class's teacher
+   are told when a date is called off, and reminded the day before
+   (`send_lesson_reminders()` in `apps/enrollments/services.py`). The 03:00
+   run queues and sends tomorrow's reminders, so they are in inboxes by the
+   morning. A date cancelled on the day before is not reminded: the
+   announcement itself went out hours earlier. A night the job missed is
+   caught up on the morning of the lesson. **This is the one item that does
+   depend on the schedule**: keep the job running at least once a day, early
+   in the day, or reminders arrive late.
 
 None of these needs to be prompt, for a reason worth understanding before you
 change the schedule: **a delivery pass claims every due row, not just the ones

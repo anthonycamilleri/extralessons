@@ -6,8 +6,9 @@ Two callers, same machinery:
     (apps.notifications.services.schedule_delivery), so a parent sees their
     email in seconds rather than whenever a timer next fires.
   * `run_once()` is the scheduled safety net — it additionally expires stale
-    offers and recovers rows stranded by a crash, neither of which any user
-    action can trigger.
+    offers, queues the day-before reminders for cancelled lessons, and
+    recovers rows stranded by a crash, none of which any user action can
+    trigger.
 
 Claiming uses SELECT ... FOR UPDATE SKIP LOCKED so the two can overlap safely.
 Sending happens outside any transaction so a slow SMTP/Meta call never holds a
@@ -221,18 +222,27 @@ def drain(max_seconds=None, max_rows=None):
 
 
 def run_once():
-    """One scheduled cycle: expire offers, recover stuck rows, deliver a batch.
+    """One scheduled cycle: expire offers, queue day-before reminders for
+    cancelled lessons, recover stuck rows, deliver a batch.
 
-    The two sweeps here are the reason a timer still exists at all: an offer
-    reaching its deadline and a row stranded mid-send by a crash are both
-    things that happen when nothing else is happening, so no user action can
-    stand in for them.
+    The sweeps here are the reason a timer still exists at all: an offer
+    reaching its deadline, the day before a cancelled lesson, and a row
+    stranded mid-send by a crash all happen when nothing else is happening,
+    so no user action can stand in for them.
     """
-    from apps.enrollments.services import expire_offers
+    from apps.enrollments.services import expire_offers, send_lesson_reminders
 
     expired = expire_offers()
     if expired:
         logger.info("Expired %s waiting-list offer(s)", expired)
+    # A fault in the reminder sweep must not hold up the rest of the queue.
+    try:
+        reminded = send_lesson_reminders()
+    except Exception:
+        logger.exception("Cancelled-lesson reminder sweep failed; delivering anyway")
+    else:
+        if reminded:
+            logger.info("Queued reminders for %s cancelled lesson(s)", reminded)
     recovered = recover_stuck()
     if recovered:
         logger.warning("Recovered %s stuck notification(s)", recovered)

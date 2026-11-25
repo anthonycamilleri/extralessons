@@ -21,6 +21,9 @@ LEAVING = importlib.import_module("apps.notifications.migrations.0008_cancellati
 LESSON = importlib.import_module("apps.notifications.migrations.0011_lesson_cancelled_event")
 INSTRUCTOR = importlib.import_module("apps.notifications.migrations.0012_instructor_invite")
 MOVED = importlib.import_module("apps.notifications.migrations.0015_transfer_event")
+REMINDERS = importlib.import_module(
+    "apps.notifications.migrations.0016_lesson_reminders_and_teachers"
+)
 LATER = {
     importlib.import_module(
         "apps.notifications.migrations.0006_contact_form_messages"
@@ -29,6 +32,7 @@ LATER = {
     LESSON.EVENT,
     INSTRUCTOR.EVENT,
     MOVED.EVENT,
+    *REMINDERS.TEMPLATES,
 }
 
 
@@ -75,6 +79,19 @@ def test_lesson_cancelled_speaks_like_the_others():
     # sending, so both halves must carry the payload.
     assert "{{ reason }}" in LESSON.BODY and "{{ dates }}" in LESSON.BODY
     assert "{{ dates_summary }}" in LESSON.SUBJECT
+
+
+def test_lesson_reminders_speak_like_the_others():
+    for event, (subject, body) in REMINDERS.TEMPLATES.items():
+        assert "Dear " not in body, event
+        assert "{{ sender_name }}" in body, event
+        assert "{{ reason }}" in body and "{{ dates_summary }}" in subject, event
+        greeting = (
+            "Hi {{ instructor_first_name }}"
+            if event.startswith("INSTRUCTOR_")
+            else "Hi {{ parent_first_name }}"
+        )
+        assert greeting in body, event
 
 
 def test_school_cancellation_wording_is_narrowed_only_if_untouched():

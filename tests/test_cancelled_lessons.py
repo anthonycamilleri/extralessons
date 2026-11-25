@@ -137,7 +137,7 @@ class TestTheAnnouncement:
         past.cancelled, past.notes = True, "Tidying the calendar"
         past.save()
 
-        assert notify_lessons_cancelled(cls, [past]) == (0, 0)
+        assert notify_lessons_cancelled(cls, [past]) == (0, 0, 0)
         assert not emails().exists()
 
     def test_a_mixed_batch_counts_only_what_it_announced(self):
@@ -156,7 +156,7 @@ class TestTheAnnouncement:
 
         notice = notify_lessons_cancelled(cls, [past, future])
 
-        assert notice == (1, 1)
+        assert notice == (1, 1, 0)
         body = emails().get().rendered_body
         assert _written(future.date) in body
         assert _written(past.date) not in body
@@ -309,3 +309,296 @@ class TestTheMcpTool:
 
         assert result["children_notified"] == 0
         assert emails().count() == 1
+
+
+def teacher_emails(**filters):
+    return Notification.objects.filter(event=Event.INSTRUCTOR_LESSON_CANCELLED, **filters)
+
+
+def assign_teacher(cls, **user_fields):
+    from apps.catalog.models import Instructor
+
+    user = UserFactory(**user_fields)
+    cls.instructors.add(Instructor.objects.create(provider=cls.provider, user=user))
+    return user
+
+
+class TestTheTeacherIsTold:
+    def test_the_assigned_instructor_gets_the_dates_and_the_reason(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        teacher = assign_teacher(cls, first_name="Tess")
+        off = future_sessions(cls)[:2]
+        for session in off:
+            session.cancelled, session.notes = True, "Hall booked"
+            session.save()
+
+        notice = notify_lessons_cancelled(cls, off)
+
+        assert notice == (1, 2, 1)
+        row = teacher_emails(recipient=teacher).get()  # one email for the batch
+        assert row.channel == Notification.Channel.EMAIL
+        assert row.enrollment is None
+        assert row.rendered_body.startswith("Hi Tess,")
+        assert "Hall booked" in row.rendered_body
+        for session in off:
+            assert _written(session.date) in row.rendered_body
+        assert "family of the 1 enrolled child know" in row.rendered_body
+        assert cls.title in row.rendered_subject
+        assert f"/provider/classes/{cls.pk}/" in row.rendered_body
+
+    def test_every_assigned_instructor_is_told(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        assign_teacher(cls)
+        assign_teacher(cls)
+        session = future_sessions(cls)[0]
+        session.cancelled = True
+        session.save()
+
+        assert notify_lessons_cancelled(cls, [session]).teachers == 2
+        assert teacher_emails().count() == 2
+
+    def test_with_nobody_assigned_the_provider_address_is_told(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        cls.provider.contact_email = "coach@example.com"
+        cls.provider.save()
+        session = future_sessions(cls)[0]
+        session.cancelled = True
+        session.save()
+
+        assert notify_lessons_cancelled(cls, [session]).teachers == 1
+        row = teacher_emails().get()
+        assert row.recipient is None
+        assert row.recipient_email == "coach@example.com"
+        assert row.rendered_body.startswith(f"Hi {cls.provider.name},")
+
+    def test_with_nobody_to_tell_the_families_still_hear(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        session = future_sessions(cls)[0]
+        session.cancelled = True
+        session.save()
+
+        assert notify_lessons_cancelled(cls, [session]) == (1, 1, 0)
+        assert not teacher_emails().exists()
+
+    def test_the_teacher_hears_even_when_nobody_is_enrolled(self):
+        cls = ActivityClassFactory()
+        generate_sessions(cls)
+        assign_teacher(cls)
+        session = future_sessions(cls)[0]
+        session.cancelled = True
+        session.save()
+
+        assert notify_lessons_cancelled(cls, [session]) == (0, 1, 1)
+        assert "No children are enrolled" in teacher_emails().get().rendered_body
+
+    def test_an_instructor_who_turned_email_off_is_skipped(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        teacher = assign_teacher(cls, notify_email=False)
+        session = future_sessions(cls)[0]
+        session.cancelled = True
+        session.save()
+
+        notify_lessons_cancelled(cls, [session])
+
+        assert teacher_emails(recipient=teacher).get().status == Notification.Status.SKIPPED
+
+    def test_the_admin_screen_says_the_teacher_was_told(self, admin_client):
+        cls, _ = a_class_with_one_enrolled_child()
+        assign_teacher(cls)
+        session = future_sessions(cls)[0]
+
+        response = admin_client.post(
+            reverse("admin:catalog_classsession_change", args=[session.pk]),
+            {
+                "activity_class": cls.pk,
+                "date": session.date.isoformat(),
+                "cancelled": "on",
+                "notes": "Snow",
+            },
+            follow=True,
+        )
+
+        text = response.content.decode()
+        assert "the families of 1 child(ren) and 1 teacher(s)" in text
+        assert teacher_emails().exists()
+
+    def test_the_mcp_tool_reports_the_teachers_told(self):
+        from apps.catalog import mcp_server as tools
+
+        cls, _ = a_class_with_one_enrolled_child()
+        assign_teacher(cls)
+        date = future_sessions(cls)[0].date.isoformat()
+
+        result = tools.cancel_sessions(cls.pk, [date], notes="Coach away")
+
+        assert result["teachers_notified"] == 1
+        assert "Coach away" in teacher_emails().get().rendered_body
+
+
+def reminders(**filters):
+    return Notification.objects.filter(
+        event=Event.LESSON_CANCELLED_REMINDER, channel=Notification.Channel.EMAIL, **filters
+    )
+
+
+def teacher_reminders(**filters):
+    return Notification.objects.filter(event=Event.INSTRUCTOR_LESSON_REMINDER, **filters)
+
+
+def called_off(cls, date, *, days_before, notes="Coach away"):
+    """A lesson on `date`, cancelled `days_before` days ahead of it."""
+    from apps.catalog.models import ClassSession
+
+    session, _ = ClassSession.objects.get_or_create(activity_class=cls, date=date)
+    session.cancelled, session.notes = True, notes
+    session.save()
+    when = timezone.make_aware(
+        datetime.datetime.combine(date - datetime.timedelta(days=days_before), datetime.time(10))
+    )
+    ClassSession.objects.filter(pk=session.pk).update(cancelled_at=when)
+    session.refresh_from_db()
+    return session
+
+
+class TestTheDayBeforeReminder:
+    def test_families_and_teacher_are_reminded_the_day_before(self):
+        cls, enrollment = a_class_with_one_enrolled_child()
+        teacher = assign_teacher(cls, first_name="Tess")
+        session = future_sessions(cls)[0]
+        session = called_off(cls, session.date, days_before=5)
+        day_before = session.date - datetime.timedelta(days=1)
+
+        assert services.send_lesson_reminders(today=day_before) == 1
+
+        row = reminders(enrollment=enrollment).get()
+        assert "Reminder" in row.rendered_subject
+        assert "tomorrow" in row.rendered_subject
+        assert _written(session.date) in row.rendered_body
+        assert "Coach away" in row.rendered_body
+        assert "Ann" in row.rendered_body
+        teacher_row = teacher_reminders(recipient=teacher).get()
+        assert teacher_row.rendered_body.startswith("Hi Tess,")
+        assert "cancelled tomorrow" in teacher_row.rendered_body
+        session.refresh_from_db()
+        assert session.reminder_sent_at is not None
+
+    def test_a_date_is_reminded_only_once(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=5)
+        day_before = session.date - datetime.timedelta(days=1)
+
+        services.send_lesson_reminders(today=day_before)
+        assert services.send_lesson_reminders(today=day_before) == 0
+
+        assert reminders().count() == 1
+
+    def test_dates_further_out_wait_for_their_own_day_before(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=10)
+
+        assert services.send_lesson_reminders(
+            today=session.date - datetime.timedelta(days=3)
+        ) == 0
+        assert not reminders().exists()
+
+    def test_a_date_cancelled_on_the_day_before_is_not_reminded(self):
+        """The announcement went out hours ago: a reminder would be a repeat."""
+        cls, _ = a_class_with_one_enrolled_child()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=1)
+
+        assert services.send_lesson_reminders(
+            today=session.date - datetime.timedelta(days=1)
+        ) == 0
+        assert services.send_lesson_reminders(today=session.date) == 0
+        assert not reminders().exists()
+
+    def test_a_missed_night_is_caught_up_on_the_morning_of_the_lesson(self):
+        cls, enrollment = a_class_with_one_enrolled_child()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=5)
+
+        assert services.send_lesson_reminders(today=session.date) == 1
+
+        assert "today" in reminders(enrollment=enrollment).get().rendered_subject
+
+    def test_a_date_put_back_on_is_not_reminded(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=5)
+        session.cancelled = False
+        session.save(update_fields=["cancelled"])
+
+        session.refresh_from_db()
+        assert session.cancelled_at is None
+        assert services.send_lesson_reminders(
+            today=session.date - datetime.timedelta(days=1)
+        ) == 0
+        assert not reminders().exists()
+
+    def test_cancelling_again_after_a_restore_starts_afresh(self):
+        from apps.catalog import mcp_server as tools
+
+        cls, _ = a_class_with_one_enrolled_child()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=5)
+        services.send_lesson_reminders(today=session.date - datetime.timedelta(days=1))
+        tools.restore_sessions(cls.pk, [session.date.isoformat()])
+        session.refresh_from_db()
+        assert (session.cancelled_at, session.reminder_sent_at) == (None, None)
+
+        tools.cancel_sessions(cls.pk, [session.date.isoformat()])
+
+        session.refresh_from_db()
+        assert session.cancelled and session.cancelled_at is not None
+        assert session.reminder_sent_at is None
+
+    def test_a_date_cancelled_before_the_stamp_existed_is_reminded(self):
+        from apps.catalog.models import ClassSession
+
+        cls, _ = a_class_with_one_enrolled_child()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=5)
+        ClassSession.objects.filter(pk=session.pk).update(cancelled_at=None)
+
+        assert services.send_lesson_reminders(
+            today=session.date - datetime.timedelta(days=1)
+        ) == 1
+
+    def test_only_confirmed_places_are_reminded(self):
+        cls, enrolled = a_class_with_one_enrolled_child(capacity=1)
+        waiting = services.approve_request(
+            services.register(ChildFactory(), cls), AdminFactory()
+        )
+        Notification.objects.all().delete()
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=5)
+
+        services.send_lesson_reminders(today=session.date - datetime.timedelta(days=1))
+
+        assert reminders(enrollment=enrolled).exists()
+        assert not reminders(enrollment=waiting).exists()
+
+    def test_a_cancelled_class_sends_no_reminders(self):
+        cls, _ = a_class_with_one_enrolled_child()
+        assign_teacher(cls)
+        session = called_off(cls, future_sessions(cls)[0].date, days_before=5)
+        services.cancel_class(cls)
+
+        assert services.send_lesson_reminders(
+            today=session.date - datetime.timedelta(days=1)
+        ) == 0
+        assert not teacher_reminders().exists()
+
+    def test_the_nightly_notifier_queues_and_delivers_tomorrows_reminder(self, mailoutbox):
+        """End to end, on the real calendar: nothing runs between the
+        cancellation and the scheduled job, which does both halves."""
+        from apps.notifications import worker
+
+        cls, enrollment = a_class_with_one_enrolled_child()
+        teacher = assign_teacher(cls)
+        tomorrow = timezone.localdate() + datetime.timedelta(days=1)
+        called_off(cls, tomorrow, days_before=4)
+        mailoutbox.clear()
+
+        worker.run_once()
+
+        to = {address for message in mailoutbox for address in message.to}
+        assert enrollment.child.guardians.get().email in to
+        assert teacher.email in to
+        assert reminders().exists()
+        assert all(row.status == Notification.Status.SENT for row in reminders())

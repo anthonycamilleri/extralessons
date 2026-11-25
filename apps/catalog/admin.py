@@ -699,12 +699,9 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         notice = notify_lessons_cancelled(
             form.instance, list(cancelled.exclude(pk__in=before))
         )
-        if notice.children:
-            self.message_user(
-                request,
-                f"Emailed the families of {notice.children} child(ren) about "
-                f"{notice.dates} cancelled date(s).",
-            )
+        message = lesson_notice_message(notice, f"{notice.dates} cancelled date(s)")
+        if message:
+            self.message_user(request, message)
 
     # -- Dashboard columns (annotations from with_counts) ---------------------
 
@@ -1152,6 +1149,18 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
             self.message_user(request, f"Archived {archived} class(es).")
 
 
+def lesson_notice_message(notice, what):
+    """The office's confirmation of who was told about cancelled dates."""
+    told = []
+    if notice.children:
+        told.append(f"the families of {notice.children} child(ren)")
+    if notice.teachers:
+        told.append(f"{notice.teachers} teacher(s)")
+    if not told:
+        return ""
+    return f"Emailed {' and '.join(told)} about {what}."
+
+
 @admin.register(ClassSession)
 class ClassSessionAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.ModelAdmin):
     class_lookup = "activity_class"
@@ -1174,9 +1183,6 @@ class ClassSessionAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mo
         super().save_model(request, obj, form, change)
         if obj.cancelled and not was_off:
             notice = notify_lessons_cancelled(obj.activity_class, [obj])
-            if notice.children:
-                self.message_user(
-                    request,
-                    f"Emailed the families of {notice.children} child(ren) about "
-                    "this cancelled date.",
-                )
+            message = lesson_notice_message(notice, "this cancelled date")
+            if message:
+                self.message_user(request, message)

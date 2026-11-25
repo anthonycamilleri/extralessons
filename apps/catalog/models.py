@@ -622,6 +622,12 @@ class ClassSession(models.Model):
         help_text="Keep this session even though it falls in a school holiday. "
         "Set it on the one-off dates a class does meet over the break.",
     )
+    # When the date was called off, and when the day-before reminder went out
+    # (apps.enrollments.services.send_lesson_reminders). Both are kept in step
+    # with `cancelled` by save(): a date put back on loses them, so cancelling
+    # it again later starts afresh.
+    cancelled_at = models.DateTimeField(null=True, blank=True, editable=False)
+    reminder_sent_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         ordering = ["date"]
@@ -631,6 +637,25 @@ class ClassSession(models.Model):
 
     def __str__(self):
         return f"{self.activity_class.title} — {self.date}"
+
+    def save(self, *args, **kwargs):
+        # Stamp the moment a date goes off, and forget it when it comes back
+        # on. Done here rather than in each screen so every door a date is
+        # cancelled through (the inline, the one-row screen, the MCP tool)
+        # records it the same way.
+        update_fields = kwargs.get("update_fields")
+        touches_cancelled = update_fields is None or "cancelled" in update_fields
+        stamped = set()
+        if touches_cancelled:
+            if self.cancelled and self.cancelled_at is None:
+                self.cancelled_at = timezone.now()
+                stamped.add("cancelled_at")
+            elif not self.cancelled and (self.cancelled_at or self.reminder_sent_at):
+                self.cancelled_at = self.reminder_sent_at = None
+                stamped |= {"cancelled_at", "reminder_sent_at"}
+        if update_fields is not None and stamped:
+            kwargs["update_fields"] = set(update_fields) | stamped
+        super().save(*args, **kwargs)
 
 
 class SessionPlan(NamedTuple):

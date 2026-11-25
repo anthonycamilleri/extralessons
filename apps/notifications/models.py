@@ -20,10 +20,22 @@ class Event(models.TextChoices):
     CANCELLATION_DECLINED = "CANCELLATION_DECLINED", "Cancellation not accepted, place kept"
     CLASS_CANCELLED = "CLASS_CANCELLED", "Class cancelled"
     LESSON_CANCELLED = "LESSON_CANCELLED", "Lesson cancelled (one or more dates off)"
+    LESSON_CANCELLED_REMINDER = (
+        "LESSON_CANCELLED_REMINDER",
+        "Lesson cancelled: reminder the day before",
+    )
     GUARDIAN_INVITE = "GUARDIAN_INVITE", "Co-parent invitation"
     BROADCAST = "BROADCAST", "Announcement"
     # Provider-facing (email only)
     INSTRUCTOR_INVITE = "INSTRUCTOR_INVITE", "Instructor: account invitation"
+    INSTRUCTOR_LESSON_CANCELLED = (
+        "INSTRUCTOR_LESSON_CANCELLED",
+        "Instructor: lesson cancelled",
+    )
+    INSTRUCTOR_LESSON_REMINDER = (
+        "INSTRUCTOR_LESSON_REMINDER",
+        "Instructor: lesson cancelled, reminder the day before",
+    )
     # Admin-facing (email only)
     ADMIN_NEW_REQUEST = "ADMIN_NEW_REQUEST", "Admin: new enrolment request"
     ADMIN_SEAT_FREED = "ADMIN_SEAT_FREED", "Admin: seat freed"
@@ -43,7 +55,10 @@ class NotificationTemplate(models.Model):
     parent_name, parent_first_name, child_name, child_first_name, class_title,
     provider_name, schedule, term_name, location, subject, body, action_url,
     offer_expires_at, withdrawal_deadline, cancel_requested_at, and — for
-    LESSON_CANCELLED — dates, dates_summary, date_count, reason (where
+    LESSON_CANCELLED and its reminder — dates, dates_summary, date_count,
+    reason, and `when` ("today"/"tomorrow", reminders only). The instructor
+    lesson emails get instructor_first_name, instructor_name and
+    children_count instead of the parent and child fields (where
     applicable).
 
     WhatsApp business-initiated messages must use templates pre-approved in
