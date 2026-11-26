@@ -14,7 +14,7 @@
   <tr><th>Date</th><th>Attendance</th></tr>
   {% for row in rows %}
   <tr>
-    <td data-label="Date">{{ row.session.date|date:"l j F Y" }}</td>
+    <td data-label="Date">{{ row.session.date|date:"l j F Y" }}{% if row.session.is_extra %} <span class="badge">Extra lesson</span>{% endif %}</td>
     <td data-label="Attendance">
       {% if row.state == "present" %}<span class="badge badge-ok">Present</span>
       {% elif row.state == "absent" %}<span class="badge badge-bad">Absent</span>

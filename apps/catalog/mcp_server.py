@@ -46,6 +46,7 @@ from apps.catalog.models import (
 from apps.enrollments.models import Enrollment
 from apps.enrollments.services import EnrollmentError
 from apps.enrollments.services import cancel_class as _cancel_class_service
+from apps.enrollments.services import add_extra_lesson as _add_extra_lesson_service
 from apps.enrollments.services import notify_lessons_cancelled
 
 SERVER_NAME = "extralessons"
@@ -57,8 +58,9 @@ SERVER_INSTRUCTIONS = (
     "duplicating it. New classes are created as DRAFT and only appear to "
     "parents after publish_class. Editing a class never changes its lesson "
     "dates; use cancel_sessions for individual dates that are off, and "
-    "regenerate_sessions only when the whole calendar should follow a new "
-    "schedule. Ask the user before cancel_class: it cancels every family's "
+    "add_extra_lesson for a one-off date on top of the weekly schedule (it "
+    "emails the families and the teacher), and regenerate_sessions only when "
+    "the whole calendar should follow a new schedule. Ask the user before cancel_class: it cancels every family's "
     "place and notifies them. Who is registered for what is read-only: "
     "list_registrations across classes, get_class_register for one class's "
     "register. Those return children's personal data, so ask for contact "
@@ -412,6 +414,10 @@ def get_class(class_id: int) -> dict:
                 "date": s.date.isoformat(),
                 "cancelled": s.cancelled,
                 "runs_despite_holiday": s.holiday_override,
+                "extra_lesson": s.is_extra,
+                "start_time": s.starts_at.strftime("%H:%M"),
+                "end_time": s.ends_at.strftime("%H:%M"),
+                "location": s.place,
                 "notes": s.notes,
             }
             for s in cls.sessions.all()
@@ -887,6 +893,60 @@ def cancel_sessions(class_id: int, dates: list[str], notes: str = "") -> dict:
 
 
 @tool_errors
+def add_extra_lesson(
+    class_id: int,
+    date: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    location: str = "",
+    notes: str = "",
+    notify: bool = True,
+) -> dict:
+    """Add one extra lesson (YYYY-MM-DD) to a class, on top of its weekly schedule, and tell everyone.
+
+    For a make-up lesson, a rehearsal, an extra session before a show. The
+    date can be any day, weekends and school holidays included, and
+    regenerate_sessions never removes it. start_time/end_time (HH:MM) and
+    location default to the class's own; give both times or neither. Notes
+    are emailed with the date, so write them for the families ("Make-up for
+    the lesson lost on 12 November").
+
+    Unless notify is false, every family with a confirmed place is emailed,
+    and so are the class's instructors (or, with none assigned, the
+    provider's contact address). Refused for a date the class already has,
+    a past date, or a cancelled or archived class. To take it back, use
+    cancel_sessions, which tells the families it is off.
+    """
+    cls = _class(class_id)
+    day = _date(date, "date")
+    if (start_time is None) != (end_time is None):
+        raise ValueError("Give both start_time and end_time, or neither.")
+    start = _time(start_time, "start_time") if start_time is not None else cls.start_time
+    end = _time(end_time, "end_time") if end_time is not None else cls.end_time
+    session, notice = _add_extra_lesson_service(
+        cls,
+        day,
+        start_time=start,
+        end_time=end,
+        location=location or cls.location,
+        notes=notes,
+        notify=notify,
+    )
+    return {
+        "added": {
+            "date": session.date.isoformat(),
+            "start_time": session.starts_at.strftime("%H:%M"),
+            "end_time": session.ends_at.strftime("%H:%M"),
+            "location": session.place,
+            "notes": session.notes,
+        },
+        "children_notified": notice.children,
+        "teachers_notified": notice.teachers,
+        **_class_dict(_class(cls.id)),
+    }
+
+
+@tool_errors
 def restore_sessions(class_id: int, dates: list[str]) -> dict:
     """Undo cancel_sessions: the lessons on these dates (YYYY-MM-DD) are on again."""
     cls = _class(class_id)
@@ -966,6 +1026,7 @@ TOOLS = [
     regenerate_sessions,
     cancel_sessions,
     restore_sessions,
+    add_extra_lesson,
     delete_term,
     archive_class,
     cancel_class,

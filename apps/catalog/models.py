@@ -622,6 +622,23 @@ class ClassSession(models.Model):
         help_text="Keep this session even though it falls in a school holiday. "
         "Set it on the one-off dates a class does meet over the break.",
     )
+    # An extra lesson is a date the office added on top of the weekly
+    # schedule: a make-up for a cancelled date, a rehearsal before a show.
+    # generate_sessions() never removes one, whatever its weekday or the
+    # holidays say, and it may meet at its own time and place.
+    is_extra = models.BooleanField(
+        default=False,
+        verbose_name="extra lesson",
+        help_text="Added on top of the weekly schedule. Regenerating the "
+        "sessions never removes it.",
+    )
+    start_time = models.TimeField(
+        null=True, blank=True, help_text="Leave blank for the class's usual time."
+    )
+    end_time = models.TimeField(null=True, blank=True)
+    location = models.CharField(
+        max_length=200, blank=True, help_text="Leave blank for the class's usual place."
+    )
     # When the date was called off, and when the day-before reminder went out
     # (apps.enrollments.services.send_lesson_reminders). Both are kept in step
     # with `cancelled` by save(): a date put back on loses them, so cancelling
@@ -633,10 +650,38 @@ class ClassSession(models.Model):
         ordering = ["date"]
         constraints = [
             models.UniqueConstraint(fields=["activity_class", "date"], name="uniq_session_date"),
+            # Its own time is both ends or neither, and ends after it starts.
+            models.CheckConstraint(
+                condition=Q(start_time__isnull=True, end_time__isnull=True)
+                | Q(end_time__gt=models.F("start_time")),
+                name="session_times_valid",
+            ),
         ]
 
     def __str__(self):
         return f"{self.activity_class.title} — {self.date}"
+
+    def clean(self):
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValidationError("Give both a start and an end time, or neither.")
+        if self.start_time and self.end_time and self.end_time <= self.start_time:
+            raise ValidationError({"end_time": "The lesson must end after it starts."})
+
+    @property
+    def starts_at(self):
+        return self.start_time or self.activity_class.start_time
+
+    @property
+    def ends_at(self):
+        return self.end_time or self.activity_class.end_time
+
+    @property
+    def place(self):
+        return self.location or self.activity_class.location
+
+    @property
+    def time_display(self):
+        return f"{self.starts_at:%H:%M}–{self.ends_at:%H:%M}"
 
     def save(self, *args, **kwargs):
         # Stamp the moment a date goes off, and forget it when it comes back
@@ -703,6 +748,7 @@ def generate_sessions(activity_class):
     change, or newly covered by a holiday — are removed, unless attendance was
     already taken for them (those are kept as history and left for the admin to
     judge).
+    Extra lessons (``is_extra``) are never removed.
     """
     from django.utils import timezone
 
@@ -729,7 +775,9 @@ def generate_sessions(activity_class):
 
     today = timezone.localdate()
     removed = 0
-    for session in activity_class.sessions.filter(date__gte=today):
+    # Extra lessons were put there on purpose, off the weekly pattern: they
+    # are never "stale", and the office chose their date knowing the holidays.
+    for session in activity_class.sessions.filter(date__gte=today, is_extra=False):
         stale_weekday = session.date.weekday() != activity_class.weekday
         in_holiday = not session.holiday_override and _in_holiday(session.date, periods)
         if (stale_weekday or in_holiday) and not session.attendance.exists():

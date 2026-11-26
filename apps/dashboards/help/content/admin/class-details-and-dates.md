@@ -76,11 +76,41 @@ It is safe to run as often as you like. It never touches:
 
 - lessons in the past,
 - lessons where attendance has already been taken,
-- lessons you have marked as cancelled.
+- lessons you have marked as cancelled,
+- extra lessons.
 
-It **does** delete future lessons that no longer fit — which is the point, but
-also means a one-off date you added by hand on a different weekday will
-disappear.
+It **does** delete future lessons that no longer fit the weekly pattern —
+which is the point. Extra lessons are the exception: they were added on
+purpose, so they stay.
+
+## Adding an extra lesson {#add-one}
+
+For a date on top of the usual weekly lessons — a make-up for a lesson that
+was cancelled, a rehearsal the week before a show — open the class and click
+**Add extra lesson** at the top right (it is on the roster too).
+
+Pick the date. The time and place start out as the class's own: change them
+if this lesson is different (a Saturday morning in the main hall, say). The
+date can be any day — a weekend, a school holiday, even after the term ends.
+
+**Whatever you write in the note is emailed to the families** with the date,
+time and place, so write it for them ("Make-up for the lesson lost on 12
+November"). Only children with a confirmed place are told, and the class's
+instructors get their own email saying how many families know (or the
+provider's contact email, if nobody is assigned). If you would rather tell
+people yourself, untick **Email the families and the teacher**.
+
+The lesson then appears in **Class sessions** marked *Extra lesson*, and on
+the teacher's dashboard with its time, ready for the register. Regenerating
+never removes it.
+
+A row you type straight into **Class sessions** counts as an extra lesson too,
+and is announced when you save, at the class's usual time and place. Use the
+**Add extra lesson** page when the time or place is different.
+
+To take an extra lesson back, tick **cancelled** on it like any other date:
+the families are told it is off. Changing the time or place of a lesson that
+is already announced does not email anybody — send an announcement.
 
 ## Cancelling one lesson {#cancel-one}
 

@@ -19,7 +19,7 @@
     <li class="session-row">
       <div class="session-info">
         <a class="session-title" href="{% url 'provider_class' session.activity_class.pk %}">{{ session.activity_class.title }}</a>
-        <div class="muted small">{{ session.activity_class.start_time|time:"H:i" }}–{{ session.activity_class.end_time|time:"H:i" }}</div>
+        <div class="muted small">{{ session.time_display }}{% if session.is_extra %} · Extra lesson{% if session.location %} · {{ session.location }}{% endif %}{% endif %}</div>
       </div>
       {% if session.taken_count %}
         <span class="badge badge-ok">Taken · {{ session.present_count }} of {{ session.taken_count }} present</span>

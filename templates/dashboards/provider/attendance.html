@@ -8,6 +8,7 @@
     {{ session.date|date:"l j F Y" }}
     {% if session.date == today %}<span class="badge badge-info">Today</span>{% endif %}
     {% if session.date > today %}<span class="badge">Upcoming</span>{% endif %}
+    {% if session.is_extra %}<span class="badge">Extra lesson</span>{% endif %}
     <span class="muted small">{{ cls.schedule_display }}</span>
   </p>
   <nav class="session-nav" aria-label="Other lessons">

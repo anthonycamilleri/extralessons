@@ -604,6 +604,132 @@ def notify_lessons_cancelled(activity_class, sessions):
     return LessonNotice(children, len(upcoming), teachers)
 
 
+def _added_dates_context(sessions):
+    """The template context describing extra lessons, nearest first.
+
+    Same shape as _cancelled_dates_context, except that every date carries
+    its time and place: an extra lesson is often at neither the usual time
+    nor the usual place, and a family should not have to guess.
+    """
+    notes = {session.notes.strip() for session in sessions}
+    shared = notes.pop() if len(notes) == 1 else ""
+    lines = []
+    for session in sessions:
+        line = f"{_lesson_date(session.date)}, {session.time_display}"
+        if session.place:
+            line += f", {session.place}"
+        if not shared and session.notes.strip():
+            line += f" — {session.notes.strip()}"
+        lines.append(line)
+    if len(sessions) == 1:
+        dates, summary = lines[0], _lesson_date(sessions[0].date)
+    else:
+        others = len(sessions) - 1
+        dates = "\n".join(f"· {line}" for line in lines)
+        summary = (
+            f"{_lesson_date(sessions[0].date)} and {others} more "
+            f"date{'s' if others > 1 else ''}"
+        )
+    return {
+        "dates": dates,
+        "dates_summary": summary,
+        "date_count": len(sessions),
+        "reason": shared,
+    }
+
+
+def notify_lessons_added(activity_class, sessions):
+    """Tell the families in a class, and its teacher, about extra lessons.
+
+    The counterpart of notify_lessons_cancelled, with the same rules: dates
+    already past are dropped (and so are dates that are themselves
+    cancelled), one email per child covers the whole batch, only confirmed
+    places hear, and the note against the date travels with it.
+
+    Returns a LessonNotice counting what went out.
+    """
+    today = timezone.localdate()
+    by_date = {}
+    for session in sessions:
+        if session.date >= today and not session.cancelled:
+            by_date.setdefault(session.date, session)
+    upcoming = [by_date[date] for date in sorted(by_date)]
+    if not upcoming:
+        return LessonNotice(0, 0)
+    children, teachers = _tell_class(
+        activity_class,
+        Event.LESSON_ADDED,
+        Event.INSTRUCTOR_LESSON_ADDED,
+        _added_dates_context(upcoming),
+    )
+    return LessonNotice(children, len(upcoming), teachers)
+
+
+def add_extra_lesson(
+    activity_class,
+    date,
+    *,
+    start_time=None,
+    end_time=None,
+    location="",
+    notes="",
+    notify=True,
+):
+    """Add one lesson on top of a class's weekly schedule, and announce it.
+
+    The date can be any day, a weekend or a holiday included, inside the term
+    or after it (a make-up for a date lost in the last week): the office
+    chose it on purpose, and regenerating the sessions never removes it. A
+    time or place equal to the class's own is stored as "the usual", so the
+    lesson follows the class if its schedule is edited later.
+
+    Raises ValidationError for a date the class already has (cancelled or
+    not), a past date, a class that is cancelled or archived, or a time that
+    does not add up. Returns (session, LessonNotice).
+    """
+    from django.core.exceptions import ValidationError
+
+    from apps.catalog.models import ClassSession
+
+    with transaction.atomic():
+        cls = _locked_class(activity_class.pk)
+        if cls.status in (ActivityClass.Status.CANCELLED, ActivityClass.Status.ARCHIVED):
+            raise ValidationError(
+                f"{cls.title} is {cls.get_status_display().lower()}; lessons cannot be "
+                "added to it."
+            )
+        if date < timezone.localdate():
+            raise ValidationError({"date": "An extra lesson cannot be in the past."})
+        existing = cls.sessions.filter(date=date).first()
+        if existing is not None:
+            if existing.cancelled:
+                raise ValidationError(
+                    {
+                        "date": f"{cls.title} already has a lesson on that date, marked "
+                        "cancelled. Untick “cancelled” on that date to put it back on."
+                    }
+                )
+            raise ValidationError({"date": f"{cls.title} already has a lesson on that date."})
+        if start_time == cls.start_time and end_time == cls.end_time:
+            start_time = end_time = None
+        location = (location or "").strip()
+        if location == cls.location:
+            location = ""
+        session = ClassSession(
+            activity_class=cls,
+            date=date,
+            is_extra=True,
+            start_time=start_time,
+            end_time=end_time,
+            location=location,
+            notes=(notes or "").strip()[:200],
+        )
+        session.full_clean()
+        session.save()
+        notice = notify_lessons_added(cls, [session]) if notify else LessonNotice(0, 0)
+    return session, notice
+
+
 def _reminder_is_due(session, today):
     """Whether a cancelled date still needs its day-before reminder.
 

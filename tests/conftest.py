@@ -68,4 +68,14 @@ def default_notification_templates(db):
                 "wa_param_order": lessons.WA_PARAMS.get(event, []),
             },
         )
+    extra = importlib.import_module("apps.notifications.migrations.0017_extra_lessons")
+    for event, (subject, body) in extra.TEMPLATES.items():
+        NotificationTemplate.objects.get_or_create(
+            event=event,
+            defaults={
+                "email_subject": subject,
+                "email_body": body,
+                "wa_param_order": extra.WA_PARAMS.get(event, []),
+            },
+        )
     return NotificationTemplate.objects.all()

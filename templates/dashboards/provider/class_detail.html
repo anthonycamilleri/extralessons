@@ -74,7 +74,7 @@
   <tr><th>Date</th><th>Register</th><th></th></tr>
   {% for session in sessions %}
   <tr {% if session.date < today and not session.taken_count %}class="muted"{% endif %}>
-    <td data-label="Date">{{ session.date|date:"l j F Y" }}</td>
+    <td data-label="Date">{{ session.date|date:"l j F Y" }}{% if session.is_extra %} <span class="badge">Extra lesson</span><div class="muted small">{{ session.time_display }}{% if session.place %} · {{ session.place }}{% endif %}</div>{% endif %}</td>
     <td data-label="Register">{% include "dashboards/provider/_session_state.html" %}</td>
     <td>
       {% if not session.cancelled %}

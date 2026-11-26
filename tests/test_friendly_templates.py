@@ -24,6 +24,7 @@ MOVED = importlib.import_module("apps.notifications.migrations.0015_transfer_eve
 REMINDERS = importlib.import_module(
     "apps.notifications.migrations.0016_lesson_reminders_and_teachers"
 )
+EXTRA = importlib.import_module("apps.notifications.migrations.0017_extra_lessons")
 LATER = {
     importlib.import_module(
         "apps.notifications.migrations.0006_contact_form_messages"
@@ -33,6 +34,7 @@ LATER = {
     INSTRUCTOR.EVENT,
     MOVED.EVENT,
     *REMINDERS.TEMPLATES,
+    *EXTRA.TEMPLATES,
 }
 
 
@@ -86,6 +88,20 @@ def test_lesson_reminders_speak_like_the_others():
         assert "Dear " not in body, event
         assert "{{ sender_name }}" in body, event
         assert "{{ reason }}" in body and "{{ dates_summary }}" in subject, event
+        greeting = (
+            "Hi {{ instructor_first_name }}"
+            if event.startswith("INSTRUCTOR_")
+            else "Hi {{ parent_first_name }}"
+        )
+        assert greeting in body, event
+
+
+def test_extra_lesson_emails_speak_like_the_others():
+    for event, (subject, body) in EXTRA.TEMPLATES.items():
+        assert "Dear " not in body, event
+        assert "{{ sender_name }}" in body, event
+        assert "{{ reason }}" in body and "{{ dates }}" in body, event
+        assert "{{ dates_summary }}" in subject, event
         greeting = (
             "Hi {{ instructor_first_name }}"
             if event.startswith("INSTRUCTOR_")

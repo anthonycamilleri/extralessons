@@ -24,6 +24,7 @@ class Event(models.TextChoices):
         "LESSON_CANCELLED_REMINDER",
         "Lesson cancelled: reminder the day before",
     )
+    LESSON_ADDED = "LESSON_ADDED", "Extra lesson added (one or more dates)"
     GUARDIAN_INVITE = "GUARDIAN_INVITE", "Co-parent invitation"
     BROADCAST = "BROADCAST", "Announcement"
     # Provider-facing (email only)
@@ -36,6 +37,7 @@ class Event(models.TextChoices):
         "INSTRUCTOR_LESSON_REMINDER",
         "Instructor: lesson cancelled, reminder the day before",
     )
+    INSTRUCTOR_LESSON_ADDED = "INSTRUCTOR_LESSON_ADDED", "Instructor: extra lesson added"
     # Admin-facing (email only)
     ADMIN_NEW_REQUEST = "ADMIN_NEW_REQUEST", "Admin: new enrolment request"
     ADMIN_SEAT_FREED = "ADMIN_SEAT_FREED", "Admin: seat freed"
@@ -56,8 +58,9 @@ class NotificationTemplate(models.Model):
     provider_name, schedule, term_name, location, subject, body, action_url,
     offer_expires_at, withdrawal_deadline, cancel_requested_at, and — for
     LESSON_CANCELLED and its reminder — dates, dates_summary, date_count,
-    reason, and `when` ("today"/"tomorrow", reminders only). The instructor
-    lesson emails get instructor_first_name, instructor_name and
+    reason, and `when` ("today"/"tomorrow", reminders only); LESSON_ADDED
+    gets the same dates fields, each date with its time and place. The
+    instructor lesson emails get instructor_first_name, instructor_name and
     children_count instead of the parent and child fields (where
     applicable).
 

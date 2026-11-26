@@ -4,11 +4,12 @@ import datetime
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.widgets import AutocompleteSelect
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import formats
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -539,7 +540,65 @@ class RegisterChildForm(forms.Form):
 class ClassSessionInline(admin.TabularInline):
     model = ClassSession
     extra = 0
-    fields = ["date", "cancelled", "holiday_override", "notes"]
+    fields = ["date", "extra_lesson", "cancelled", "holiday_override", "notes"]
+    readonly_fields = ["extra_lesson"]
+
+    @admin.display(description="extra")
+    def extra_lesson(self, obj):
+        """Marks a date added on top of the weekly schedule, with its own
+        time and place when it has them. A row added here becomes one on
+        save (ActivityClassAdmin.save_formset)."""
+        if not obj or not obj.pk or not obj.is_extra:
+            return ""
+        parts = ["Extra lesson"]
+        if obj.start_time:
+            parts.append(obj.time_display)
+        if obj.location:
+            parts.append(obj.location)
+        return " · ".join(parts)
+
+
+class AddLessonForm(forms.Form):
+    """One extra lesson for one class: the date, and its time and place
+    when they are not the usual ones (the fields start out as the class's)."""
+
+    date = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
+    start_time = forms.TimeField(widget=forms.TimeInput(attrs={"type": "time"}, format="%H:%M"))
+    end_time = forms.TimeField(widget=forms.TimeInput(attrs={"type": "time"}, format="%H:%M"))
+    location = forms.CharField(max_length=200, required=False)
+    notes = forms.CharField(
+        max_length=200,
+        required=False,
+        label="Note to families",
+        help_text="Emailed with the date, so write it for the families: "
+        "“Make-up for the lesson lost on 12 November”.",
+    )
+    notify = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Email the families and the teacher",
+        help_text="Every child with a confirmed place, and the class's instructors "
+        "(or the provider, if nobody is assigned).",
+    )
+
+    def __init__(self, activity_class, *args, **kwargs):
+        kwargs.setdefault(
+            "initial",
+            {
+                "start_time": activity_class.start_time,
+                "end_time": activity_class.end_time,
+                "location": activity_class.location,
+                "notify": True,
+            },
+        )
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        start, end = cleaned.get("start_time"), cleaned.get("end_time")
+        if start and end and end <= start:
+            self.add_error("end_time", "The lesson must end after it starts.")
+        return cleaned
 
 
 class ActivityClassForm(forms.ModelForm):
@@ -688,6 +747,8 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         """
         from apps.enrollments.services import notify_lessons_cancelled
 
+        from apps.enrollments.services import notify_lessons_added
+
         if formset.model is not ClassSession:
             super().save_formset(request, form, formset, change)
             return
@@ -696,10 +757,21 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
         )
         before = set(cancelled.values_list("pk", flat=True))
         super().save_formset(request, form, formset, change)
+        # A row typed in here by hand is, by definition, not one the weekly
+        # schedule produced: it is an extra lesson, kept by regeneration and
+        # announced like one. Only the new rows that are on get announced.
+        added = [session for session in formset.new_objects if not session.is_extra]
+        for session in added:
+            session.is_extra = True
+            session.save(update_fields=["is_extra"])
         notice = notify_lessons_cancelled(
             form.instance, list(cancelled.exclude(pk__in=before))
         )
         message = lesson_notice_message(notice, f"{notice.dates} cancelled date(s)")
+        if message:
+            self.message_user(request, message)
+        notice = notify_lessons_added(form.instance, added)
+        message = lesson_notice_message(notice, f"{notice.dates} extra lesson(s)")
         if message:
             self.message_user(request, message)
 
@@ -779,8 +851,66 @@ class ActivityClassAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.M
                 self.admin_site.admin_view(self.register_view),
                 name="catalog_activityclass_register",
             ),
+            path(
+                "<int:object_id>/add-lesson/",
+                self.admin_site.admin_view(self.add_lesson_view),
+                name="catalog_activityclass_add_lesson",
+            ),
         ]
         return extra + super().get_urls()
+
+    def add_lesson_view(self, request, object_id):
+        """Put one extra lesson in a class's calendar, and tell everyone.
+
+        The way to add a date that is not on the weekly pattern — a Saturday
+        make-up, a rehearsal the week before a show — with its own time and
+        place. Regenerating the sessions never removes it.
+        """
+        from apps.enrollments.services import add_extra_lesson
+
+        cls = get_object_or_404(self.get_queryset(request), pk=object_id)
+        if not self.has_change_permission(request, cls):
+            raise PermissionDenied
+        form = AddLessonForm(cls, request.POST or None)
+        if request.method == "POST" and form.is_valid():
+            data = form.cleaned_data
+            try:
+                session, notice = add_extra_lesson(
+                    cls,
+                    data["date"],
+                    start_time=data["start_time"],
+                    end_time=data["end_time"],
+                    location=data["location"],
+                    notes=data["notes"],
+                    notify=data["notify"],
+                )
+            except ValidationError as error:
+                if hasattr(error, "error_dict"):
+                    for field, errors in error.error_dict.items():
+                        form.add_error(field if field in form.fields else None, errors)
+                else:
+                    form.add_error(None, error)
+            else:
+                when = formats.date_format(session.date, "l j F")
+                told = lesson_notice_message(notice, "it")
+                if data["notify"] and not told:
+                    told = "Nobody is enrolled yet, so nobody was emailed."
+                elif not data["notify"]:
+                    told = "Nobody was emailed."
+                self.message_user(
+                    request,
+                    f"Extra lesson added on {when}, {session.time_display}. {told}",
+                )
+                return redirect(reverse("admin:catalog_activityclass_change", args=[cls.pk]))
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.opts,
+            "title": f"{cls.title} · add an extra lesson",
+            "cls": cls,
+            "form": form,
+            "enrolled_count": cls.confirmed_count,
+        }
+        return TemplateResponse(request, "admin/catalog/activityclass/add_lesson.html", context)
 
     def _children(self, request):
         """The children this administrator may register: the child list's
@@ -1165,13 +1295,32 @@ def lesson_notice_message(notice, what):
 class ClassSessionAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.ModelAdmin):
     class_lookup = "activity_class"
     school_admin_can = frozenset({"view", "change"})
-    list_display = ["activity_class", "date", "cancelled", "holiday_override"]
-    list_filter = ["activity_class__term", "cancelled", "holiday_override"]
+    list_display = ["activity_class", "date", "is_extra", "cancelled", "holiday_override"]
+    list_filter = ["activity_class__term", "is_extra", "cancelled", "holiday_override"]
     date_hierarchy = "date"
+    fields = [
+        "activity_class",
+        "date",
+        "start_time",
+        "end_time",
+        "location",
+        "notes",
+        "cancelled",
+        "holiday_override",
+        "is_extra",
+    ]
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        # Adding a date emails a class's families: only offer the classes
+        # this admin looks after.
+        if db_field.name == "activity_class":
+            kwargs["queryset"] = ActivityClass.objects.managed_by(request.user)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
-        """The one-row screen announces a date the same way the inline does."""
-        from apps.enrollments.services import notify_lessons_cancelled
+        """The one-row screen announces a date the same way the inline does:
+        a date added here is an extra lesson, and one turned off is cancelled."""
+        from apps.enrollments.services import notify_lessons_added, notify_lessons_cancelled
 
         was_off = (
             ClassSession.objects.filter(pk=obj.pk)
@@ -1180,7 +1329,14 @@ class ClassSessionAdmin(SchoolAdminPermissionMixin, ScopedByClassMixin, admin.Mo
             if change
             else False
         )
+        if not change:
+            obj.is_extra = True
         super().save_model(request, obj, form, change)
+        if not change:
+            notice = notify_lessons_added(obj.activity_class, [obj])
+            message = lesson_notice_message(notice, "this extra lesson")
+            if message:
+                self.message_user(request, message)
         if obj.cancelled and not was_off:
             notice = notify_lessons_cancelled(obj.activity_class, [obj])
             message = lesson_notice_message(notice, "this cancelled date")
